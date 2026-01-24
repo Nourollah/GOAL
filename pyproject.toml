@@ -1,3 +1,108 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src"
+version = "0.0.1"
+description = "Describe Your Cool Project"
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{ name = "Amir Masoud Nourollah", email = "nourollah.am@gmail.com" }]
+license = { text = "MIT" }
+keywords = []
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+  "lightning",
+  "hydra-core",
+]
+
+[project.urls]
+Repository = "https://github.com/user/project"
+
+[project.scripts]
+train_command = "src.train:main"
+eval_command = "src.eval:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["src*"]
+
+# --- Pixi workspace ---
+[tool.pixi.workspace]
+name = "myenv"
+version = "0.0.1"
+description = "Pixi-managed Python project"
+channels = ["pytorch", "conda-forge"]
+platforms = ["linux-64", "linux-aarch64"]
+
+# --- Pixi dependencies (shared across architectures) ---
+[tool.pixi.dependencies]
+python = "3.10.*"
+lightning = "2.*"
+torchmetrics = "0.*"
+hydra-core = "1.*"
+rich = "13.*"
+pre-commit = "3.*"
+pytest = "7.*"
+pip = ">=23"
+
+# --- Pixi PyPI deps (shared) ---
+[tool.pixi.pypi-dependencies]
+hydra-optuna-sweeper = "*"
+hydra-colorlog = "*"
+rootutils = "*"
+
+# --- Platform features ---
+[tool.pixi.feature.x86_cpu]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.x86_cpu.dependencies]
+pytorch = "2.*"
+torchvision = "0.*"
+
+[tool.pixi.feature.arm_cpu]
+platforms = ["linux-aarch64"]
+
+[tool.pixi.feature.arm_cpu.dependencies]
+pytorch = "2.*"
+
+# --- Named environments ---
+[tool.pixi.environments]
+x86 = ["x86_cpu"]
+arm = ["arm_cpu"]
+
+# --- Tasks ---
+[tool.pixi.tasks]
+clean = """
+rm -rf dist && \
+find . -type f -name "*.DS_Store" -ls -delete && \
+find . | grep -E "(__pycache__|\\.pyc|\\.pyo)" | xargs rm -rf && \
+find . | grep -E ".pytest_cache" | xargs rm -rf && \
+find . | grep -E ".ipynb_checkpoints" | xargs rm -rf && \
+rm -f .coverage
+"""
+clean-logs = "rm -rf logs/**"
+format = "pre-commit run -a"
+sync = "git pull && git pull origin main"
+test = "pytest -k \"not slow\""
+test-full = "pytest"
+dev-install = "python -m pip install -e ."
+train = "python -m src.train"
+eval = "python -m src.eval"
+
+# Run only training-related tests (by path or keyword)
+test_train = "pytest -q tests/test_train.py"
+test_train_k = "pytest -q -k train"
+
+# Smoke-test: just import/execute the train module (fast sanity check)
+train_smoke = "python -m src.train --help"
+
 [tool.pytest.ini_options]
 addopts = [
   "--color=yes",
@@ -18,8 +123,8 @@ testpaths = "tests/"
 
 [tool.coverage.report]
 exclude_lines = [
-    "pragma: nocover",
-    "raise NotImplementedError",
-    "raise NotImplementedError()",
-    "if __name__ == .__main__.:",
+  "pragma: nocover",
+  "raise NotImplementedError",
+  "raise NotImplementedError()",
+  "if __name__ == .__main__.:",
 ]
