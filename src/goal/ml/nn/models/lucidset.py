@@ -78,7 +78,7 @@ class LucidSet(nn.Module):
         hidden_channels: int = 128,
         num_radial_basis: int = 20,
         cutoff: float = 5.0,
-        distance_boundaries: typing.Optional[list[float]] = None,
+        distance_boundaries: list[float] | None = None,
     ) -> None:
         raise NotImplementedError(_NOT_IMPLEMENTED_REASON)
 

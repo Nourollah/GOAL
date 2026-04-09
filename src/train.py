@@ -15,7 +15,12 @@ import sys
 sys.path.insert(0, str(root / "src"))
 
 from goal.ml.data.datamodule import GOALDataModule
-from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY, MODEL_REGISTRY
+from goal.ml.registry import (
+    BACKBONE_REGISTRY,
+    HEAD_REGISTRY,
+    LOSS_REGISTRY,
+    MODEL_REGISTRY,
+)
 from goal.ml.training.loss import CompositeLoss, WeightedLoss
 from goal.ml.training.module import GOALModule
 from src.utils import (
@@ -68,7 +73,6 @@ def _build_goal_module(cfg: DictConfig) -> GOALModule:
     loss = CompositeLoss(losses)
 
     return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
-
 
 
 @task_wrapper

@@ -13,4 +13,6 @@ MODEL_REGISTRY.register_lazy("hyperset", "goal.ml.nn.models.hyperset:HyperSet")
 MODEL_REGISTRY.register_lazy("lucidset", "goal.ml.nn.models.lucidset:LucidSet")
 
 # Monolithic example — bypasses backbone→head split (head: null)
-MODEL_REGISTRY.register_lazy("monolithic_example", "goal.ml.nn.models.monolithic_example:MonolithicExample")
+MODEL_REGISTRY.register_lazy(
+    "monolithic_example", "goal.ml.nn.models.monolithic_example:MonolithicExample"
+)

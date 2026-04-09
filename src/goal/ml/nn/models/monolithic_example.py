@@ -99,11 +99,14 @@ class MonolithicExample(nn.Module):
 
         # Sum per-atom energies to get per-graph total energy
         energy: torch.Tensor = scatter(
-            atom_energies, graph.batch, dim=0, reduce="sum",
+            atom_energies,
+            graph.batch,
+            dim=0,
+            reduce="sum",
         )  # (B,)
 
         # Forces via autograd: F = −∂E/∂R  (energy conserving)
-        grad: typing.Optional[tuple[torch.Tensor, ...]] = torch.autograd.grad(
+        grad: tuple[torch.Tensor, ...] | None = torch.autograd.grad(
             outputs=energy.sum(),
             inputs=positions,
             create_graph=self.training,

@@ -201,7 +201,8 @@ class DeepSet(nn.Module):
         tgt_proj: torch.Tensor = self.target_atom_transform(h[col])  # (E, num_filters)
 
         edge_feats: torch.Tensor = torch.cat(
-            [d_proj, src_proj, tgt_proj], dim=-1,
+            [d_proj, src_proj, tgt_proj],
+            dim=-1,
         )  # (E, num_filters * 3)
 
         # Edge interaction MLP
@@ -209,7 +210,11 @@ class DeepSet(nn.Module):
 
         # Aggregate edge features to nodes
         node_feats: torch.Tensor = scatter(
-            edge_feats, row, dim=0, reduce="sum", dim_size=graph.num_atoms,
+            edge_feats,
+            row,
+            dim=0,
+            reduce="sum",
+            dim_size=graph.num_atoms,
         )  # (N, hidden_channels)
 
         return NodeFeatures(
