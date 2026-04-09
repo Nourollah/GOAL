@@ -4,8 +4,8 @@
 # Use when the model does not fit in a single GPU's memory.
 #
 # Usage:
-#   gmd-train strategy=fsdp
-#   gmd-train strategy=fsdp strategy.cpu_offload=true
+#   goal-train strategy=fsdp
+#   goal-train strategy=fsdp strategy.cpu_offload=true
 
 name: fsdp
 

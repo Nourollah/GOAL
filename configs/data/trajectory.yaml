@@ -1,4 +1,4 @@
-# GMD Data Configuration — ASE Trajectory dataset
+# GOAL Data Configuration — ASE Trajectory dataset
 # Reads .traj files produced by ASE MD simulations
 
 data:

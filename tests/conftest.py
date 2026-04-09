@@ -1,4 +1,4 @@
-"""This file prepares config fixtures and path setup for GMD tests."""
+"""This file prepares config fixtures and path setup for GOAL tests."""
 
 import sys
 from pathlib import Path
@@ -9,7 +9,7 @@ from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
-# Ensure src/ is on the path so 'gmd' is importable
+# Ensure src/ is on the path so 'goal' is importable
 _root = rootutils.find_root(indicator=".project-root")
 sys.path.insert(0, str(_root / "src"))
 

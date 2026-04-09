@@ -4,7 +4,7 @@
 # sharding, native torch.compile support, and FP8 compatibility.
 #
 # Usage:
-#   gmd-train strategy=fsdp2
+#   goal-train strategy=fsdp2
 
 name: fsdp2
 

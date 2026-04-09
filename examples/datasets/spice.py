@@ -25,21 +25,29 @@ HARTREE_TO_EV: float = 27.211396
 BOHR_TO_ANGSTROM: float = 0.529177
 
 # SPICE Zenodo download URLs
-_SPICE_URLS: typing.Dict[str, str] = {
+_SPICE_URLS: dict[str, str] = {
     "1": "https://zenodo.org/records/8222043/files/SPICE-1.1.4.hdf5",
     "2": "https://zenodo.org/records/10835749/files/SPICE-2.0.1.hdf5",
 }
 
-_SPICE_SUBSETS: typing.Dict[str, typing.List[str]] = {
+_SPICE_SUBSETS: dict[str, list[str]] = {
     "small_molecules": ["Solvated Amino Acids", "Dipeptides", "PubChem"],
     "amino_acids": ["Solvated Amino Acids"],
     "dipeptides": ["Dipeptides"],
 }
 
 # Element symbol → atomic number (for SPICE parsing)
-_ELEMENT_TO_Z: typing.Dict[str, int] = {
-    "H": 1, "C": 6, "N": 7, "O": 8, "F": 9, "P": 15,
-    "S": 16, "Cl": 17, "Br": 35, "I": 53,
+_ELEMENT_TO_Z: dict[str, int] = {
+    "H": 1,
+    "C": 6,
+    "N": 7,
+    "O": 8,
+    "F": 9,
+    "P": 15,
+    "S": 16,
+    "Cl": 17,
+    "Br": 35,
+    "I": 53,
 }
 
 
@@ -86,10 +94,10 @@ class SPICEDataset(BenchmarkDataset):
         split: str = "train",
         train_fraction: float = 0.8,
         val_fraction: float = 0.1,
-        max_structures: typing.Optional[int] = None,
+        max_structures: int | None = None,
         seed: int = 42,
         dtype: torch.dtype = torch.float64,
-        transform: typing.Optional[typing.Callable[..., typing.Any]] = None,
+        transform: typing.Callable[..., typing.Any] | None = None,
     ) -> None:
         if version not in _SPICE_URLS:
             raise ValueError(f"version must be '1' or '2', got '{version}'")
@@ -102,7 +110,7 @@ class SPICEDataset(BenchmarkDataset):
         self.subset: str = subset
         self.train_fraction: float = train_fraction
         self.val_fraction: float = val_fraction
-        self.max_structures: typing.Optional[int] = max_structures
+        self.max_structures: int | None = max_structures
         self.seed: int = seed
         super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype, transform=transform)
 
@@ -133,23 +141,22 @@ class SPICEDataset(BenchmarkDataset):
                 f.write(chunk)
         return filepath
 
-    def _download_and_process(self) -> typing.List[typing.Any]:
+    def _download_and_process(self) -> list[typing.Any]:
         """Download HDF5 and convert to AtomicGraph list."""
         import h5py
         import numpy as np
-
         from torch_geometric.nn import radius_graph
 
-        from gmd.data.graph import AtomicGraph
+        from goal.ml.data.graph import AtomicGraph
 
         hdf5_path: Path = self._download_hdf5()
-        graphs: typing.List[AtomicGraph] = []
+        graphs: list[AtomicGraph] = []
 
         with h5py.File(hdf5_path, "r") as f:
             for group_name in f:
                 # Subset filter
                 if self.subset != "all":
-                    allowed_groups: typing.List[str] = _SPICE_SUBSETS[self.subset]
+                    allowed_groups: list[str] = _SPICE_SUBSETS[self.subset]
                     if not any(ag in group_name for ag in allowed_groups):
                         continue
 
@@ -160,23 +167,17 @@ class SPICEDataset(BenchmarkDataset):
                     positions_np = group["conformations"][i]
                     atomic_nums_np = group["atomic_numbers"][:]
 
-                    positions: torch.Tensor = torch.tensor(
-                        positions_np, dtype=self.dtype
-                    )
-                    atomic_numbers: torch.Tensor = torch.tensor(
-                        atomic_nums_np, dtype=torch.long
-                    )
+                    positions: torch.Tensor = torch.tensor(positions_np, dtype=self.dtype)
+                    atomic_numbers: torch.Tensor = torch.tensor(atomic_nums_np, dtype=torch.long)
 
                     # Energy: Hartree → eV
-                    energy_ev: typing.Optional[torch.Tensor] = None
+                    energy_ev: torch.Tensor | None = None
                     if "dft_total_energy" in group:
                         e_hartree: float = float(group["dft_total_energy"][i])
-                        energy_ev = torch.tensor(
-                            [e_hartree * HARTREE_TO_EV], dtype=self.dtype
-                        )
+                        energy_ev = torch.tensor([e_hartree * HARTREE_TO_EV], dtype=self.dtype)
 
                     # Forces: Hartree/Bohr → eV/Å
-                    forces_ev: typing.Optional[torch.Tensor] = None
+                    forces_ev: torch.Tensor | None = None
                     if "dft_total_gradient" in group:
                         grad = group["dft_total_gradient"][i]
                         forces_ev = torch.tensor(
@@ -184,9 +185,7 @@ class SPICEDataset(BenchmarkDataset):
                             dtype=self.dtype,
                         )
 
-                    edge_index: torch.Tensor = radius_graph(
-                        positions, r=self.cutoff, loop=False
-                    )
+                    edge_index: torch.Tensor = radius_graph(positions, r=self.cutoff, loop=False)
                     row, col = edge_index
                     edge_vecs: torch.Tensor = positions[col] - positions[row]
                     edge_lens: torch.Tensor = edge_vecs.norm(dim=-1)
@@ -204,15 +203,12 @@ class SPICEDataset(BenchmarkDataset):
                     )
                     graphs.append(graph)
 
-                    if (
-                        self.max_structures is not None
-                        and len(graphs) >= self.max_structures
-                    ):
+                    if self.max_structures is not None and len(graphs) >= self.max_structures:
                         return graphs
 
         return graphs
 
-    def split_indices(self) -> typing.Dict[str, typing.List[int]]:
+    def split_indices(self) -> dict[str, list[int]]:
         """Reproducible fraction-based split."""
         total: int = len(self._data)
         train_size: int = int(total * self.train_fraction)

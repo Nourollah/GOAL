@@ -40,7 +40,7 @@ class BenchmarkDataset(Dataset, ABC):
         cutoff: float,
         split: str = "train",
         dtype: torch.dtype = torch.float64,
-        transform: typing.Optional[typing.Callable[..., typing.Any]] = None,
+        transform: typing.Callable[..., typing.Any] | None = None,
     ) -> None:
         super().__init__()
         if split not in ("train", "val", "test"):
@@ -49,26 +49,26 @@ class BenchmarkDataset(Dataset, ABC):
         self.cutoff: float = cutoff
         self.split: str = split
         self.dtype: torch.dtype = dtype
-        self.transform: typing.Optional[typing.Callable[..., typing.Any]] = transform
+        self.transform: typing.Callable[..., typing.Any] | None = transform
 
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "processed").mkdir(exist_ok=True)
 
-        self._data: typing.List[typing.Any] = self._load_or_process()
-        indices: typing.Dict[str, typing.List[int]] = self.split_indices()
-        self._indices: typing.List[int] = indices[split]
+        self._data: list[typing.Any] = self._load_or_process()
+        indices: dict[str, list[int]] = self.split_indices()
+        self._indices: list[int] = indices[split]
 
     # ------------------------------------------------------------------
     # Abstract interface
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _download_and_process(self) -> typing.List[typing.Any]:
+    def _download_and_process(self) -> list[typing.Any]:
         """Download raw data and convert to a list of graph-like objects."""
         ...
 
     @abstractmethod
-    def split_indices(self) -> typing.Dict[str, typing.List[int]]:
+    def split_indices(self) -> dict[str, list[int]]:
         """Return ``{'train': [...], 'val': [...], 'test': [...]}``."""
         ...
 
@@ -91,12 +91,12 @@ class BenchmarkDataset(Dataset, ABC):
         """Subclass-specific cache filename prefix. Override as needed."""
         return self.__class__.__name__.lower()
 
-    def _load_or_process(self) -> typing.List[typing.Any]:
+    def _load_or_process(self) -> list[typing.Any]:
         """Load from cache if exists, otherwise download and process."""
         cache: Path = self._cache_path()
         if cache.exists():
             return torch.load(cache, weights_only=False)
-        data: typing.List[typing.Any] = self._download_and_process()
+        data: list[typing.Any] = self._download_and_process()
         torch.save(data, cache)
         return data
 
@@ -117,7 +117,7 @@ class BenchmarkDataset(Dataset, ABC):
     # Statistics
     # ------------------------------------------------------------------
 
-    def statistics(self) -> typing.Dict[str, float]:
+    def statistics(self) -> dict[str, float]:
         """Compute dataset statistics for the current split.
 
         Returns
@@ -130,8 +130,8 @@ class BenchmarkDataset(Dataset, ABC):
         if n == 0:
             return {"num_structures": 0}
 
-        num_atoms_list: typing.List[int] = []
-        energies: typing.List[float] = []
+        num_atoms_list: list[int] = []
+        energies: list[float] = []
         forces_sq_sum: float = 0.0
         forces_count: int = 0
 
@@ -144,10 +144,10 @@ class BenchmarkDataset(Dataset, ABC):
                 energies.append(e.item() if hasattr(e, "item") else float(e))
             if hasattr(item, "forces") and item.forces is not None:
                 f = item.forces
-                forces_sq_sum += (f ** 2).sum().item()
+                forces_sq_sum += (f**2).sum().item()
                 forces_count += f.numel()
 
-        stats: typing.Dict[str, float] = {"num_structures": float(n)}
+        stats: dict[str, float] = {"num_structures": float(n)}
         if num_atoms_list:
             stats["avg_num_atoms"] = sum(num_atoms_list) / n
         if energies:
@@ -168,7 +168,7 @@ class BenchmarkDataset(Dataset, ABC):
         train_size: int,
         val_size: int,
         seed: int = 42,
-    ) -> typing.Dict[str, typing.List[int]]:
+    ) -> dict[str, list[int]]:
         """Deterministic random split into train / val / test.
 
         Parameters
@@ -189,7 +189,7 @@ class BenchmarkDataset(Dataset, ABC):
         """
         gen: torch.Generator = torch.Generator().manual_seed(seed)
         perm: torch.Tensor = torch.randperm(total, generator=gen)
-        indices: typing.List[int] = perm.tolist()
+        indices: list[int] = perm.tolist()
         return {
             "train": indices[:train_size],
             "val": indices[train_size : train_size + val_size],

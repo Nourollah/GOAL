@@ -1,5 +1,5 @@
 # MD17 — ethanol (revised)
-# Usage: gmd-train data=md17_ethanol
+# Usage: goal-train data=md17_ethanol
 
 defaults:
   - md17_aspirin

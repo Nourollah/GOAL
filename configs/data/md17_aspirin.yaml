@@ -1,5 +1,5 @@
 # MD17 — aspirin (revised)
-# Usage: gmd-train data=md17_aspirin
+# Usage: goal-train data=md17_aspirin
 
 data:
   _target_: examples.datasets.md17.MD17Dataset

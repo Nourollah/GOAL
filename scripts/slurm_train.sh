@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gmd-train
+#SBATCH --job-name=goal-train
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
@@ -13,13 +13,14 @@
 #SBATCH --open-mode=append
 
 # ---------------------------------------------------------------------------
-# GMD SLURM training script
+# GOAL SLURM training script
 #
 # Supports automatic resumption via last.ckpt and TRAINING_COMPLETE sentinel.
 # SLURM --requeue + --open-mode=append allow transparent preemption handling.
 # ---------------------------------------------------------------------------
 
-export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_ADDR
 export MASTER_PORT=29500
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export NCCL_SOCKET_IFNAME=hsn0
@@ -34,10 +35,10 @@ echo "====================================="
 # Create log directory for SLURM output
 mkdir -p logs/slurm
 
-srun pixi run -e cuda python -m gmd.cli.train \
+srun pixi run -e cuda python -m goal.ml.cli.train \
     model=hyperspec \
     data=xyz \
-    training.num_nodes=$SLURM_NNODES \
+    training.num_nodes="$SLURM_NNODES" \
     training.devices=4 \
     training.slurm_mode=true
 

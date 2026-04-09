@@ -1,5 +1,5 @@
 # ANI-1x dataset (extended, higher quality)
-# Usage: gmd-train data=ani1x
+# Usage: goal-train data=ani1x
 
 data:
   _target_: examples.datasets.ani1.ANI1Dataset
@@ -8,8 +8,8 @@ data:
   cutoff: 5.0
   train_fraction: 0.8
   val_fraction: 0.1
-  max_structures: null    # null = use full dataset (~5M structures)
-  elements: null          # null = all elements
+  max_structures: null # null = use full dataset (~5M structures)
+  elements: null # null = all elements
   seed: 42
 
   batch_size: 64

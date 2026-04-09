@@ -16,14 +16,28 @@ import torch
 
 from examples.datasets.base import BenchmarkDataset
 
-MD17_MOLECULES: typing.List[str] = [
-    "aspirin", "benzene", "ethanol", "malonaldehyde",
-    "naphthalene", "salicylic_acid", "toluene", "uracil",
+MD17_MOLECULES: list[str] = [
+    "aspirin",
+    "benzene",
+    "ethanol",
+    "malonaldehyde",
+    "naphthalene",
+    "salicylic_acid",
+    "toluene",
+    "uracil",
 ]
 
-REVISED_MD17_MOLECULES: typing.List[str] = [
-    "aspirin", "azobenzene", "benzene", "ethanol", "malonaldehyde",
-    "naphthalene", "paracetamol", "salicylic_acid", "toluene", "uracil",
+REVISED_MD17_MOLECULES: list[str] = [
+    "aspirin",
+    "azobenzene",
+    "benzene",
+    "ethanol",
+    "malonaldehyde",
+    "naphthalene",
+    "paracetamol",
+    "salicylic_acid",
+    "toluene",
+    "uracil",
 ]
 
 # kcal/mol → eV
@@ -79,14 +93,11 @@ class MD17Dataset(BenchmarkDataset):
         val_size: int = 50,
         seed: int = 42,
         dtype: torch.dtype = torch.float64,
-        transform: typing.Optional[typing.Callable[..., typing.Any]] = None,
+        transform: typing.Callable[..., typing.Any] | None = None,
     ) -> None:
-        allowed: typing.List[str] = REVISED_MD17_MOLECULES if revised else MD17_MOLECULES
+        allowed: list[str] = REVISED_MD17_MOLECULES if revised else MD17_MOLECULES
         if molecule not in allowed:
-            raise ValueError(
-                f"Unknown molecule '{molecule}'. "
-                f"Available: {allowed}"
-            )
+            raise ValueError(f"Unknown molecule '{molecule}'. " f"Available: {allowed}")
         self.molecule: str = molecule
         self.revised: bool = revised
         self.train_size: int = train_size
@@ -98,16 +109,16 @@ class MD17Dataset(BenchmarkDataset):
         prefix: str = "rmd17" if self.revised else "md17"
         return f"{prefix}_{self.molecule}"
 
-    def _download_and_process(self) -> typing.List[typing.Any]:
+    def _download_and_process(self) -> list[typing.Any]:
         """Download via PyG and convert to AtomicGraph list."""
         from torch_geometric.datasets import MD17 as PyGMD17
 
-        from gmd.data.graph import AtomicGraph
+        from goal.ml.data.graph import AtomicGraph
 
         name: str = f"revised {self.molecule}" if self.revised else self.molecule
         pyg_dataset = PyGMD17(root=str(self.root / "raw"), name=name)
 
-        graphs: typing.List[AtomicGraph] = []
+        graphs: list[AtomicGraph] = []
         for data in pyg_dataset:
             positions: torch.Tensor = data.pos.to(self.dtype)
             atomic_numbers: torch.Tensor = data.z.long()
@@ -115,16 +126,12 @@ class MD17Dataset(BenchmarkDataset):
             energy_kcal: float = data.energy.item()
             forces_kcal: torch.Tensor = data.force.to(self.dtype)
 
-            energy_ev: torch.Tensor = torch.tensor(
-                [energy_kcal * KCAL_TO_EV], dtype=self.dtype
-            )
+            energy_ev: torch.Tensor = torch.tensor([energy_kcal * KCAL_TO_EV], dtype=self.dtype)
             forces_ev: torch.Tensor = forces_kcal * KCAL_TO_EV
 
             from torch_geometric.nn import radius_graph
 
-            edge_index: torch.Tensor = radius_graph(
-                positions, r=self.cutoff, loop=False
-            )
+            edge_index: torch.Tensor = radius_graph(positions, r=self.cutoff, loop=False)
             row, col = edge_index
             edge_vecs: torch.Tensor = positions[col] - positions[row]
             edge_lens: torch.Tensor = edge_vecs.norm(dim=-1)
@@ -143,7 +150,7 @@ class MD17Dataset(BenchmarkDataset):
             graphs.append(graph)
         return graphs
 
-    def split_indices(self) -> typing.Dict[str, typing.List[int]]:
+    def split_indices(self) -> dict[str, list[int]]:
         """Reproducible random split following MD17 benchmark protocol."""
         return self._random_split_indices(
             total=len(self._data),

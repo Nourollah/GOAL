@@ -4,8 +4,8 @@
 # Use when the model fits in a single GPU's memory.
 #
 # Usage:
-#   gmd-train strategy=ddp
-#   gmd-train strategy=ddp strategy.bucket_cap_mb=10
+#   goal-train strategy=ddp
+#   goal-train strategy=ddp strategy.bucket_cap_mb=10
 
 name: ddp
 

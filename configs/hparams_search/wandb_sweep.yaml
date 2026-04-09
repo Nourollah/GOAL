@@ -1,5 +1,5 @@
 # W&B Sweeps — cloud-managed hyperparameter optimisation
-# Usage: gmd-tune hparams_search=wandb_sweep
+# Usage: goal-tune hparams_search=wandb_sweep
 #
 # Requires: wandb (already a core dependency)
 #
@@ -8,31 +8,31 @@
 # search with early termination.
 #
 # Create & run in one command:
-#   gmd-tune hparams_search=wandb_sweep
+#   goal-tune hparams_search=wandb_sweep
 #
 # Or resume an existing sweep:
-#   gmd-tune hparams_search=wandb_sweep hparams_search.sweep_id=<SWEEP_ID>
+#   goal-tune hparams_search=wandb_sweep hparams_search.sweep_id=<SWEEP_ID>
 
 hparams_search:
   method: wandb
 
   # --- W&B project settings ---
-  project: gmd
-  entity: null                 # null → default W&B entity
-  sweep_id: null               # null → create new sweep; set to resume
+  project: goal
+  entity: null # null → default W&B entity
+  sweep_id: null # null → create new sweep; set to resume
 
   # --- Sweep controller ---
-  sweep_method: bayes          # 'bayes', 'grid', 'random'
+  sweep_method: bayes # 'bayes', 'grid', 'random'
   metric: val/total
-  mode: min                    # 'min' or 'max'
-  count: 20                    # max number of runs (null → unlimited)
+  mode: min # 'min' or 'max'
+  count: 20 # max number of runs (null → unlimited)
 
   # --- Early termination (optional) ---
   # Hyperband-style: stops underperforming runs early
   early_terminate:
     type: hyperband
-    min_iter: 10               # min epochs before pruning
-    eta: 3                     # top 1/η survive each bracket
+    min_iter: 10 # min epochs before pruning
+    eta: 3 # top 1/η survive each bracket
 
   # --- Search space ---
   # W&B sweep parameter spec: distribution + values

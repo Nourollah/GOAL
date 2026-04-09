@@ -12,8 +12,8 @@
 #   - Simpler per-parameter sharding: no auto_wrap_policy needed
 #
 # Usage:
-#   gmd-train trainer=fsdp2
-#   gmd-train trainer=fsdp2 trainer.devices=8
+#   goal-train trainer=fsdp2
+#   goal-train trainer=fsdp2 trainer.devices=8
 #
 # Requires implementing configure_model() in GMDModule for
 # per-parameter sharding (already set up in the codebase).

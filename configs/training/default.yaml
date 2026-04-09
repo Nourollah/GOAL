@@ -1,11 +1,11 @@
-# GMD Training Configuration — Defaults
+# GOAL Training Configuration — Defaults
 
 training:
   max_epochs: 500
   devices: auto
   num_nodes: 1
-  precision: "32"            # '64-true', '32', 'bf16-mixed', '16-mixed'
-  strategy: auto             # 'auto', 'ddp', 'fsdp', or _target_ dict
+  precision: "32" # '64-true', '32', 'bf16-mixed', '16-mixed'
+  strategy: auto # 'auto', 'ddp', 'fsdp', or _target_ dict
   gradient_clip: 10.0
   log_every_n_steps: 50
   checkpoint_dir: ${paths.output_dir}/checkpoints
@@ -13,9 +13,9 @@ training:
   # torch.compile support (Lightning 2.5+)
   compile_model: false
   compile:
-    mode: default            # 'default', 'reduce-overhead', 'max-autotune'
-    fullgraph: false         # True = compile entire graph (faster, stricter)
-    dynamic: null            # null, true, false — dynamic shape support
+    mode: default # 'default', 'reduce-overhead', 'max-autotune'
+    fullgraph: false # True = compile entire graph (faster, stricter)
+    dynamic: null # null, true, false — dynamic shape support
 
   # SLURM settings
   slurm_mode: false
@@ -38,7 +38,7 @@ training:
     min_lr: 1.0e-7
     # Scheduler type: 'reduce_on_plateau', 'cosine', 'cosine_warmup'
     scheduler_type: reduce_on_plateau
-    warmup_epochs: 10        # only used with cosine_warmup
+    warmup_epochs: 10 # only used with cosine_warmup
     scheduler:
       patience: 50
       factor: 0.5

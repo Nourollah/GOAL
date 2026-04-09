@@ -1,88 +1,96 @@
 <div align="center">
 
-# 🧬 GMD — General Molecular Dynamics
+<!-- GOAL: General Open Atomistic Laboratory -->
 
-[![python](https://img.shields.io/badge/-Python_3.14+-blue?logo=python&logoColor=white)](https://python.org)
-[![pytorch](https://img.shields.io/badge/PyTorch_2.4+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
-[![lightning](https://img.shields.io/badge/-Lightning_2.6+-792ee5?logo=pytorchlightning&logoColor=white)](https://lightning.ai/)
-[![hydra](https://img.shields.io/badge/Config-Hydra_1.3-89b8cd)](https://hydra.cc/)
-[![cuda](https://img.shields.io/badge/CUDA-12.6+-76B900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/GOAL-General_Open_Atomistic_Laboratory-00c853?style=for-the-badge&labelColor=1a1a2e">
+  <img alt="GOAL" src="https://img.shields.io/badge/GOAL-General_Open_Atomistic_Laboratory-00c853?style=for-the-badge&labelColor=263238">
+</picture>
+
+<br/>
+
+# ⚛️ GOAL
+
+### *Your atoms. Your rules. Your laboratory.*
+
+A modular, open-source framework for building, training, and deploying machine-learning interatomic potentials — from quick experiments to production-scale distributed workflows.
+
+<br/>
+
+[![python](https://img.shields.io/badge/Python_3.14+-3776AB?logo=python&logoColor=white)](https://python.org)
+[![pytorch](https://img.shields.io/badge/PyTorch_2.10+-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
+[![lightning](https://img.shields.io/badge/Lightning_2.6+-792EE5?logo=pytorchlightning&logoColor=white)](https://lightning.ai/)
+[![hydra](https://img.shields.io/badge/Hydra_1.3-89B8CD?logo=dropbox&logoColor=white)](https://hydra.cc/)
+[![cuda](https://img.shields.io/badge/CUDA_12+-76B900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
 [![license](https://img.shields.io/badge/License-MIT-green.svg?labelColor=gray)](LICENSE)
+[![repo](https://img.shields.io/badge/GitHub-MC--GLOW-181717?logo=github)](https://github.com/Nourollah/MC-GLOW)
 
-**Train equivariant graph neural networks on atomistic systems.**
-
-Energy, forces, stress, and dipole prediction — from single-GPU prototyping to multi-node distributed training.
-
-> **Python 3.14** — GIL-free interpreter with real multithreading support for data loading and preprocessing.
+> **Python 3.14** · GIL-free interpreter with true multithreading for data loading and preprocessing.
 
 </div>
 
 ---
 
-## Table of Contents
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🗺️ Navigation
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
-- [Overview](#overview)
-- [Installation](#installation)
-- [Project Structure](#project-structure)
-- [Quick Start](#quick-start)
-- [Training](#training)
-  - [Single GPU](#single-gpu)
-  - [Multi-GPU: DDP](#multi-gpu-ddp)
-  - [Multi-GPU: FSDP](#multi-gpu-fsdp)
-  - [Multi-GPU: FSDP2 / ModelParallel](#multi-gpu-fsdp2--modelparallel)
-  - [Multi-GPU: DeepSpeed](#multi-gpu-deepspeed)
-  - [Strategy Factory](#strategy-factory)
-  - [Apple Silicon (MPS)](#apple-silicon-mps)
-  - [CPU](#cpu)
-- [Evaluation](#evaluation)
-- [ASE Calculator](#ase-calculator)
-- [Fine-Tuning](#fine-tuning)
-- [Data Loading](#data-loading)
-  - [Supported Formats](#supported-formats)
-  - [Loading Modes](#loading-modes)
-  - [Merge Strategies](#merge-strategies)
-  - [Auto-Splitting](#auto-splitting)
-- [Models](#models)
-- [Heads](#heads)
-- [Loss Functions](#loss-functions)
-- [Benchmark Datasets](#benchmark-datasets)
-- [Foundation Model Adapters](#foundation-model-adapters)
-- [Feature Extraction](#feature-extraction)
-- [Performance Engineering](#performance-engineering)
-- [Hyperparameter Tuning](#hyperparameter-tuning)
-- [Callbacks](#callbacks)
-- [Logging](#logging)
-- [Configuration System](#configuration-system)
-- [CLI Reference](#cli-reference)
-- [Pixi Tasks](#pixi-tasks)
+> 🔵 **Getting started** · 🟢 **Core workflow** · 🟡 **Advanced features** · 🟣 **Infrastructure**
+
+| 🔵 Start Here | 🟢 Train & Evaluate | 🟡 Go Deeper | 🟣 Under the Hood |
+|:---|:---|:---|:---|
+| [Overview](#-overview) | [Training](#-training) | [Models & Heads](#-models) | [Configuration System](#-configuration-system) |
+| [Installation](#-installation) | [Evaluation](#-evaluation) | [Loss Functions](#-loss-functions) | [Logging](#-logging) |
+| [Project Structure](#-project-structure) | [ASE Calculator](#-ase-calculator) | [Foundation Model Adapters](#-foundation-model-adapters) | [Callbacks](#-callbacks) |
+| [Quick Start](#-quick-start) | [Fine-Tuning](#-fine-tuning) | [Feature Extraction](#-feature-extraction) | [CLI Reference](#-cli-reference) |
+| | [Data Loading](#-data-loading) | [Performance Engineering](#-performance-engineering) | [Pixi Tasks](#-pixi-tasks) |
+| | [Benchmark Datasets](#-benchmark-datasets) | [Hyperparameter Tuning](#-hyperparameter-tuning) | |
+| | | [Mini Trainer](#-mini-trainer) | |
+| | | [Customising the Training Loop](#-customising-the-training-loop) | |
 
 ---
 
-## Overview
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🔵 Overview
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
-GMD is a framework for training machine-learning interatomic potentials (MLIPs) using equivariant and invariant graph neural networks. Built on PyTorch Lightning 2.6+ and Hydra, it provides:
+**GOAL** (**G**eneral **O**pen **A**tomistic **L**aboratory) is a modular framework for training machine-learning interatomic potentials (MLIPs). Built on **PyTorch Lightning 2.6+** and **Hydra**, it provides:
 
-- 🔬 **Equivariant & invariant backbones** — HyperSpec (E(3)-equivariant) and SchNet-like invariant GNN
-- 🎯 **Multiple task heads** — energy, forces, stress, dipole, direct forces
-- 🧠 **Foundation model adapters** — MACE and FairChem (UMA) pre-trained models
-- 📂 **Flexible data loading** — XYZ, HDF5, LMDB, ASE trajectory; multi-file merge, directory-based loading, and auto-splitting
-- ⚡ **Distributed training** — DDP, FSDP, FSDP2 (ModelParallel), and DeepSpeed ZeRO (Stages 1/2/3 + CPU offload)
-- 🧮 **Configurable loss functions** — per-property loss type selection (MSE, MAE, Huber, Smooth L1) + arbitrary weights
-- 🔧 **Strategy factory** — unified `build_strategy(cfg)` entry point for all distributed strategies
-- 🚀 **Performance engineering** — TF32, cuDNN benchmark, `torch.compile`, gradient accumulation, EMA/SWA
-- 📊 **Experiment management** — Hydra config composition, W&B / TensorBoard / CSV / MLflow / Neptune / Aim / Comet loggers
-- 🖥️ **SLURM-aware** — automatic checkpoint resumption and completion sentinels
-- 🐍 **Python 3.14** — GIL-free interpreter with true multithreading for data loading
+| | Feature | Details |
+|---|---|---|
+| 🔬 | **Equivariant & invariant backbones** | HyperSpec (E(3)-equivariant) and SchNet-like invariant GNN |
+| 🎯 | **Multiple task heads** | Energy, forces, stress, dipole, direct forces |
+| 🧠 | **Foundation model adapters** | MACE and FairChem (UMA) pre-trained models |
+| 📂 | **Flexible data loading** | XYZ, HDF5, LMDB, ASE trajectory; multi-file merge, directory-based loading, auto-splitting |
+| ⚡ | **Distributed training** | DDP, FSDP, FSDP2 (ModelParallel), DeepSpeed ZeRO (Stages 1/2/3 + CPU offload) |
+| 🧮 | **Configurable loss** | Per-property loss type (MSE, MAE, Huber, Smooth L1) + composite sub-losses |
+| 🔧 | **Strategy factory** | Unified `build_strategy(cfg)` for all distributed strategies |
+| 🚀 | **Performance engineering** | TF32, cuDNN benchmark, `torch.compile`, gradient accumulation, EMA/SWA |
+| 📊 | **Experiment management** | Hydra config composition · W&B · TensorBoard · CSV · MLflow · Neptune · Aim · Comet |
+| 🖥️ | **SLURM-aware** | Auto checkpoint resumption and completion sentinels |
+| 🧪 | **ASE integration** | Use any trained model as an ASE Calculator for MD, geometry optimisation, phonons |
+| 🐍 | **Python 3.14** | GIL-free interpreter with real multithreading for data loading |
+| 🔬 | **Mini Trainer** | Standalone notebook-friendly training loop for rapid prototyping on extracted features |
+| 🧰 | **Custom training loops** | Three levels of loop customisation: GOALModule hooks, Fabric-based multi-GPU, or pure PyTorch |
+
+> **Package layout** · The top-level namespace is `goal`. The ML training module lives at `goal.ml`:
+> ```python
+> from goal.ml.training.module import GOALModule
+> from goal.ml.data.datamodule import GOALDataModule
+> from goal.ml.utils.calculator import GOALCalculator
+> ```
 
 ---
 
-## Installation
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🔵 Installation
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 ### With pip
 
 ```bash
-git clone https://github.com/user/gmd.git
-cd gmd
+git clone https://github.com/Nourollah/MC-GLOW.git
+cd MC-GLOW
 pip install -e .
 ```
 
@@ -96,90 +104,128 @@ pip install -e ".[all]"        # All optional dependencies
 pip install -e ".[dev]"        # pytest, ruff, mypy
 ```
 
-### With pixi
+### With pixi (recommended)
 
-GMD ships a pixi workspace configuration in `pyproject.toml`. Pixi manages conda + pip dependencies and named environments:
+<details>
+<summary><b>💡 What is pixi?</b></summary>
+
+<br/>
+
+[**Pixi**](https://pixi.sh/) is a fast, cross-platform package manager built on top of conda-forge. It manages **both** conda and pip dependencies in a single lockfile, giving you:
+
+- **Reproducible environments** — a `pixi.lock` pins every package version (conda *and* pip)
+- **Named environments** — switch between CPU, CUDA, dev, and adapter-specific setups instantly
+- **No `conda activate`** — just `pixi run <task>` or `pixi shell`
+- **Fast solves** — written in Rust; resolves environments in seconds
+
+**Install pixi** (one-liner):
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | bash
+```
+
+Or see the [official installation guide](https://pixi.sh/latest/#installation) for Homebrew, Windows, and other methods.
+
+</details>
+
+<br/>
+
+GOAL ships a pixi workspace configuration in `pyproject.toml`. After installing pixi:
 
 ```bash
 pixi install                    # default (CPU)
-pixi install -e cuda            # CUDA 12.6
-pixi install -e dev             # CPU + dev tools
-pixi install -e dev-cuda        # CUDA 12.6 + dev tools
-pixi install -e mace            # CUDA + MACE adapter
+pixi install -e cuda            # CUDA 12+
+pixi install -e dev             # CPU + dev tools (pytest, ruff, mypy)
+pixi install -e dev-cuda        # CUDA + dev tools
 pixi install -e fairchem        # CUDA + FairChem adapter
 pixi install -e cuda-deepspeed  # CUDA + DeepSpeed
 ```
 
-> **Note:** Minimum CUDA version is **12.6**. Older CUDA versions are not supported.
+> **Note:** Some optional dependencies have compatibility constraints:
+> - **MACE adapter** — pins `e3nn==0.4.4` which conflicts with the core `e3nn>=0.5` requirement. Install via `pip install -e ".[mace]"` instead.
+> - **Ray Tune / Optuna** — no Python 3.14 wheels yet. Install via `pip install -e ".[tune]"` on Python ≤3.13.
 
 ---
 
-## Project Structure
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🔵 Project Structure
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 <details>
-<summary>📁 Click to expand full project tree</summary>
+<summary>📁 <b>Click to expand full project tree</b></summary>
 
 ```
-├── configs/                    # Hydra configuration groups
-│   ├── train.yaml              # Training defaults composition
-│   ├── eval.yaml               # Evaluation defaults composition
-│   ├── callbacks/              # Callback configs (checkpoint, EMA, SWA, ...)
-│   ├── data/                   # Dataset configs (xyz, hdf5, lmdb, trajectory)
-│   ├── logger/                 # Logger configs (wandb, tensorboard, csv, ...)
-│   ├── model/                  # Model configs (hyperspec, invariant_gnn)
-│   ├── strategy/               # 🆕 Strategy configs (ddp, fsdp, fsdp2, deepspeed_*)
-│   ├── trainer/                # Trainer configs (gpu, ddp, fsdp, model_parallel, ...)
-│   ├── training/               # Training hyperparameters (optimizer, EMA, losses, ...)
-│   ├── paths/                  # Path definitions
-│   └── hydra/                  # Hydra runtime settings
+├── configs/                        # Hydra configuration groups
+│   ├── train.yaml                  #   Training defaults composition
+│   ├── eval.yaml                   #   Evaluation defaults composition
+│   ├── callbacks/                  #   Callback configs (checkpoint, EMA, SWA, …)
+│   ├── data/                       #   Dataset configs (xyz, hdf5, lmdb, trajectory, benchmarks)
+│   ├── hparams_search/             #   Hyperparameter search (basic, ray_tune, wandb_sweep)
+│   ├── logger/                     #   Logger configs (wandb, tensorboard, csv, …)
+│   ├── model/                      #   Model configs (hyperspec, invariant_gnn)
+│   ├── strategy/                   #   Strategy configs (ddp, fsdp, fsdp2, deepspeed_*)
+│   ├── trainer/                    #   Trainer configs (gpu, ddp, fsdp, model_parallel, …)
+│   ├── training/                   #   Training hyperparameters (optimizer, EMA, losses, …)
+│   ├── paths/                      #   Path definitions
+│   └── hydra/                      #   Hydra runtime settings
 ├── src/
-│   ├── gmd/                    # Main package
-│   │   ├── cli/                # Entry points: train, evaluate, finetune
-│   │   ├── data/               # DataModule, datasets (base, xyz, hdf5, lmdb, trajectory, concat)
-│   │   ├── nn/                 # Neural network components
-│   │   │   ├── models/         # Backbones: HyperSpec, invariant GNN
-│   │   │   ├── heads/          # Task heads: energy, forces, stress, dipole
-│   │   │   ├── blocks/         # Building blocks: embedding, interaction, readout
-│   │   │   └── primitives/     # Low-level ops: tensor products, radial basis, norms
-│   │   ├── adapters/           # Foundation model wrappers: MACE, FairChem
-│   │   ├── training/           # LightningModule, loss, EMA, callbacks
-│   │   │   └── strategies/     # 🆕 Strategy factory: DDP, FSDP, FSDP2, DeepSpeed
-│   │   ├── utils/              # Feature extraction, utilities
-│   │   └── registry.py         # Lazy component registry
-├── data/                       # Dataset storage
-├── logs/                       # Training outputs (checkpoints, metrics)
-├── tests/                      # Test suite
-└── pyproject.toml              # Package metadata + pixi workspace config
+│   └── goal/                       # Top-level namespace package
+│       └── ml/                     #   ML training module
+│           ├── cli/                #     Entry points: train, evaluate, finetune, tune
+│           ├── data/               #     DataModule, datasets (xyz, hdf5, lmdb, trajectory, concat)
+│           ├── nn/                 #     Neural network components
+│           │   ├── models/         #       Backbones: HyperSpec, invariant GNN
+│           │   ├── heads/          #       Task heads: energy, forces, stress, dipole
+│           │   ├── blocks/         #       Building blocks: embedding, interaction, readout
+│           │   └── primitives/     #       Low-level ops: tensor products, radial basis, norms
+│           ├── adapters/           #     Foundation model wrappers: MACE, FairChem
+│           ├── training/           #     LightningModule, loss, EMA, tuning
+│           │   ├── callbacks/      #       Checkpoint, logging callbacks
+│           │   └── strategies/     #       Strategy factory: DDP, FSDP, FSDP2, DeepSpeed
+│           ├── utils/              #     ASE calculator, feature extraction, mini trainer
+│           └── registry.py         #     Lazy component registry
+├── examples/
+│   └── datasets/                   # Benchmark dataset loaders (MD17, ANI-1, QM9, SPICE)
+├── notebooks/                      # Demo notebooks (feature extraction, mini trainer)
+├── scripts/                        # SLURM job scripts
+├── tests/                          # Test suite
+├── data/                           # Dataset storage
+├── logs/                           # Training outputs (checkpoints, metrics)
+└── pyproject.toml                  # Package metadata + pixi workspace config
 ```
 
 </details>
 
 ---
 
-## Quick Start
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🔵 Quick Start
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 Train the default model (HyperSpec) on XYZ data:
 
 ```bash
-gmd-train data.root=/path/to/dataset
+goal-train data.root=/path/to/dataset
 ```
 
 Or equivalently via module:
 
 ```bash
-python -m gmd.cli.train data.root=/path/to/dataset
+python -m goal.ml.cli.train data.root=/path/to/dataset
 ```
 
 This loads `configs/train.yaml` which composes: `data=xyz`, `model=hyperspec`, `training=default`, `trainer=default`.
 
 ---
 
-## Training
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟢 Training
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 ### Single GPU
 
 ```bash
-gmd-train trainer=gpu data.root=/path/to/dataset
+goal-train trainer=gpu data.root=/path/to/dataset
 ```
 
 The `gpu` trainer config sets `accelerator: gpu` and `devices: 1`.
@@ -189,19 +235,19 @@ The `gpu` trainer config sets `accelerator: gpu` and `devices: 1`.
 Distributed Data Parallel — replicates the full model on each GPU and synchronizes gradients. Use when the model fits in a single GPU's memory.
 
 ```bash
-gmd-train trainer=ddp data.root=/path/to/dataset
+goal-train trainer=ddp data.root=/path/to/dataset
 ```
 
 Override the number of GPUs:
 
 ```bash
-gmd-train trainer=ddp trainer.devices=8
+goal-train trainer=ddp trainer.devices=8
 ```
 
 Multi-node:
 
 ```bash
-gmd-train trainer=ddp trainer.devices=4 trainer.num_nodes=2
+goal-train trainer=ddp trainer.devices=4 trainer.num_nodes=2
 ```
 
 DDP key settings (in `configs/trainer/ddp.yaml`):
@@ -215,7 +261,7 @@ DDP key settings (in `configs/trainer/ddp.yaml`):
 Fully Sharded Data Parallel — shards model parameters, gradients, and optimizer states across GPUs. Use when the model doesn't fit in a single GPU's memory.
 
 ```bash
-gmd-train trainer=fsdp data.root=/path/to/dataset
+goal-train trainer=fsdp data.root=/path/to/dataset
 ```
 
 FSDP settings (in `configs/trainer/fsdp.yaml`):
@@ -229,13 +275,13 @@ FSDP settings (in `configs/trainer/fsdp.yaml`):
 ModelParallelStrategy (Lightning 2.4+) — supports FSDP2, tensor parallelism, `torch.compile`, and FP8. Recommended for very large models (500M+ parameters).
 
 ```bash
-gmd-train trainer=model_parallel data.root=/path/to/dataset
+goal-train trainer=model_parallel data.root=/path/to/dataset
 ```
 
 Or via the strategy factory:
 
 ```bash
-gmd-train +strategy=fsdp2 data.root=/path/to/dataset
+goal-train +strategy=fsdp2 data.root=/path/to/dataset
 ```
 
 ### Multi-GPU: DeepSpeed
@@ -244,22 +290,22 @@ gmd-train +strategy=fsdp2 data.root=/path/to/dataset
 
 **ZeRO Stage 1** — optimizer state partitioning only (lowest communication overhead):
 ```bash
-gmd-train +strategy=deepspeed_zero1 data.root=/path/to/dataset
+goal-train +strategy=deepspeed_zero1 data.root=/path/to/dataset
 ```
 
 **ZeRO Stage 2** — optimizer state + gradient partitioning:
 ```bash
-gmd-train +strategy=deepspeed_zero2 data.root=/path/to/dataset
+goal-train +strategy=deepspeed_zero2 data.root=/path/to/dataset
 ```
 
 **ZeRO Stage 3** — full parameter partitioning (maximum memory savings):
 ```bash
-gmd-train +strategy=deepspeed_zero3 data.root=/path/to/dataset
+goal-train +strategy=deepspeed_zero3 data.root=/path/to/dataset
 ```
 
 **ZeRO Stage 3 + CPU offload** — offload parameters to CPU (for extremely large models):
 ```bash
-gmd-train +strategy=deepspeed_zero3_offload data.root=/path/to/dataset
+goal-train +strategy=deepspeed_zero3_offload data.root=/path/to/dataset
 ```
 
 <details>
@@ -278,16 +324,16 @@ logging_level: WARNING
 
 ### Strategy Factory
 
-GMD provides a unified **strategy factory** (`build_strategy()`) that maps config to Lightning strategies. When `cfg.strategy` is present, it takes priority over the trainer's built-in strategy.
+GOAL provides a unified **strategy factory** (`build_strategy()`) that maps config to Lightning strategies. When `cfg.strategy` is present, it takes priority over the trainer's built-in strategy.
 
 ```yaml
 # Two ways to select a strategy:
 # 1. Via trainer config group (backward compatible):
-gmd-train trainer=ddp
+goal-train trainer=ddp
 
 # 2. Via strategy config group (new, more options):
-gmd-train +strategy=fsdp2
-gmd-train +strategy=deepspeed_zero3_offload
+goal-train +strategy=fsdp2
+goal-train +strategy=deepspeed_zero3_offload
 ```
 
 | Strategy Config | Lightning Strategy | Use Case |
@@ -303,51 +349,55 @@ gmd-train +strategy=deepspeed_zero3_offload
 ### Apple Silicon (MPS)
 
 ```bash
-gmd-train trainer=mps data.root=/path/to/dataset
+goal-train trainer=mps data.root=/path/to/dataset
 ```
 
 ### CPU
 
 ```bash
-gmd-train trainer=cpu data.root=/path/to/dataset
+goal-train trainer=cpu data.root=/path/to/dataset
 ```
 
 ---
 
-## Evaluation
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟢 Evaluation
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 Evaluate a trained checkpoint on the test split:
 
 ```bash
-gmd-eval ckpt_path=/path/to/checkpoint.ckpt data.root=/path/to/dataset
+goal-eval ckpt_path=/path/to/checkpoint.ckpt data.root=/path/to/dataset
 ```
 
 The evaluation entry point supports the same trainer configs for distributed evaluation:
 
 ```bash
-gmd-eval trainer=ddp ckpt_path=/path/to/checkpoint.ckpt data.root=/path/to/dataset
+goal-eval trainer=ddp ckpt_path=/path/to/checkpoint.ckpt data.root=/path/to/dataset
 ```
 
 ---
 
-## ASE Calculator
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟢 ASE Calculator
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
-Any trained GMD model can be used as an [ASE Calculator](https://wiki.fysik.dtu.dk/ase/ase/calculators/calculators.html) for molecular dynamics, geometry optimisation, phonons, and more.
+Any trained GOAL model can be used as an [ASE Calculator](https://wiki.fysik.dtu.dk/ase/ase/calculators/calculators.html) for molecular dynamics, geometry optimisation, phonons, and more.
 
 ### From a Checkpoint
 
 ```python
-from gmd.utils.calculator import GMDCalculator
+from goal.ml.utils.calculator import GOALCalculator
 
-calc = GMDCalculator(checkpoint_path="logs/train/runs/.../last.ckpt")
+calc = GOALCalculator(checkpoint_path="logs/train/runs/.../last.ckpt")
 ```
 
 ### From a Pre-loaded Module
 
 ```python
-from gmd.utils.calculator import GMDCalculator
+from goal.ml.utils.calculator import GOALCalculator
 
-calc = GMDCalculator(module=my_module, cutoff=5.0, device="cuda")
+calc = GOALCalculator(module=my_module, cutoff=5.0, device="cuda")
 ```
 
 ### Single-Point Calculation
@@ -387,7 +437,7 @@ dyn.run(1000)
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `checkpoint_path` | — | Path to `.ckpt` file (mutually exclusive with `module`) |
-| `module` | — | Pre-loaded `GMDModule` instance |
+| `module` | — | Pre-loaded `GOALModule` instance |
 | `cutoff` | from config | Neighbour-list cutoff (Å). Auto-detected from checkpoint |
 | `device` | `"cpu"` | `"cpu"`, `"cuda"`, `"cuda:0"`, etc. |
 | `dtype` | `float64` | Precision for positions and cell |
@@ -395,12 +445,14 @@ dyn.run(1000)
 
 ---
 
-## Fine-Tuning
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟢 Fine-Tuning
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 Fine-tune a pre-trained foundation model on a downstream dataset:
 
 ```bash
-gmd-finetune model.backbone.name=mace-large model.backbone.pretrained=true data.root=/path/to/dataset
+goal-finetune model.backbone.name=mace-large model.backbone.pretrained=true data.root=/path/to/dataset
 ```
 
 ### Backbone Loading Modes
@@ -408,25 +460,25 @@ gmd-finetune model.backbone.name=mace-large model.backbone.pretrained=true data.
 **1. Pre-trained hub model:**
 
 ```bash
-gmd-finetune model.backbone.name=mace-large model.backbone.pretrained=true model.backbone.variant=large
+goal-finetune model.backbone.name=mace-large model.backbone.pretrained=true model.backbone.variant=large
 ```
 
 **2. Local checkpoint:**
 
 ```bash
-gmd-finetune model.backbone.name=mace-large model.backbone.local_checkpoint=/path/to/model.pt
+goal-finetune model.backbone.name=mace-large model.backbone.local_checkpoint=/path/to/model.pt
 ```
 
 **3. Fresh backbone (train from scratch):**
 
 ```bash
-gmd-finetune model.backbone.name=mace-large
+goal-finetune model.backbone.name=mace-large
 ```
 
 ### Freeze Backbone (Linear Probing)
 
 ```bash
-gmd-finetune training.freeze_backbone=true model.backbone.name=mace-large model.backbone.pretrained=true
+goal-finetune training.freeze_backbone=true model.backbone.name=mace-large model.backbone.pretrained=true
 ```
 
 ### Gradual Unfreezing
@@ -434,7 +486,7 @@ gmd-finetune training.freeze_backbone=true model.backbone.name=mace-large model.
 Use the backbone finetuning callback:
 
 ```bash
-gmd-finetune callbacks=backbone_finetuning model.backbone.name=mace-large model.backbone.pretrained=true
+goal-finetune callbacks=backbone_finetuning model.backbone.name=mace-large model.backbone.pretrained=true
 ```
 
 This freezes the backbone initially, then unfreezes at epoch 10 with a reduced learning rate (10% of head LR).
@@ -448,7 +500,9 @@ This freezes the backbone initially, then unfreezes at epoch 10 with a reduced l
 
 ---
 
-## Data Loading
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟢 Data Loading
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 ### Supported Formats
 
@@ -461,14 +515,14 @@ This freezes the backbone initially, then unfreezes at epoch 10 with a reduced l
 
 ### Loading Modes
 
-GMD supports four data loading modes, automatically detected from the config:
+GOAL supports four data loading modes, automatically detected from the config:
 
 #### Mode 1 — Single source, auto-split (default)
 
-Point to a single directory. GMD first looks for named split files (`train.xyz`, `val.xyz`, `test.xyz`). If those don't exist, it loads everything and splits by ratio.
+Point to a single directory. GOAL first looks for named split files (`train.xyz`, `val.xyz`, `test.xyz`). If those don't exist, it loads everything and splits by ratio.
 
 ```bash
-gmd-train data.root=/path/to/dataset
+goal-train data.root=/path/to/dataset
 ```
 
 ```yaml
@@ -485,7 +539,7 @@ data:
 Specify separate file lists for train, validation, and test. Each split can load from multiple files.
 
 ```bash
-gmd-train data.train_paths='[/data/A/train.xyz,/data/B/train.xyz]' \
+goal-train data.train_paths='[/data/A/train.xyz,/data/B/train.xyz]' \
           data.val_paths='[/data/A/val.xyz]' \
           data.test_paths='[/data/A/test.xyz]'
 ```
@@ -520,12 +574,12 @@ data:
   split_seed: 42
 ```
 
-#### Mode 4 — Directory-based per-split 🆕
+#### Mode 4 — Directory-based per-split
 
 Point to directories containing data files. All matching files (`.xyz`, `.extxyz`, `.h5`, `.hdf5`, `.lmdb`, `.traj`, `.db`) inside each directory are automatically discovered and loaded.
 
 ```bash
-gmd-train data.train_dir=/data/train/ \
+goal-train data.train_dir=/data/train/ \
           data.val_dir=/data/val/ \
           data.test_dir=/data/test/
 ```
@@ -550,12 +604,12 @@ When loading multiple files (Mode 2 or Mode 3), datasets are merged using one of
 | `random` | Shuffle all indices after concatenation (seed-controlled) |
 
 ```bash
-gmd-train data.merge_strategy=random data.split_seed=123
+goal-train data.merge_strategy=random data.split_seed=123
 ```
 
 ### Auto-Splitting
 
-When splits aren't provided explicitly, GMD splits the dataset numerically:
+When splits aren't provided explicitly, GOAL splits the dataset numerically:
 
 ```yaml
 data:
@@ -585,14 +639,55 @@ data:
 
 ---
 
-## Models
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟢 Benchmark Datasets
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+
+Ready-to-use benchmark datasets for training and evaluating MLIPs. **Completely optional** — the core framework works without them.
+
+| Dataset | Structures | Elements | Properties | Size | Config |
+|---------|-----------|----------|------------|------|--------|
+| **MD17** | ~10k/mol | H, C, N, O | energy, forces | ~100 MB | `data=md17_aspirin` |
+| **rMD17** | ~10k/mol | H, C, N, O | energy, forces | ~100 MB | `data=rmd17_aspirin` |
+| **ANI-1** | ~20M | H, C, N, O | energy, forces | ~30 GB | `data=ani1` |
+| **ANI-1x** | ~5M | H, C, N, O | energy, forces | ~7 GB | `data=ani1x` |
+| **QM9** | 134k | H, C, N, O, F | 19 properties | ~1 GB | `data=qm9` |
+| **SPICE** | ~1.1M | 10 elements | energy, forces | ~15 GB | — |
+
+```bash
+# Train on MD17 aspirin
+goal-train data=md17_aspirin
+
+# Train on ANI-1x, subsample 50k for quick experiment
+goal-train data=ani1x data.max_structures=50000
+
+# Train on QM9 predicting HOMO-LUMO gap
+goal-train data=qm9 data.target=gap
+
+# Override cutoff
+goal-train data=md17_aspirin data.cutoff=6.0
+```
+
+Install optional dependencies for SPICE (HDF5):
+
+```bash
+pip install -e ".[examples]"
+```
+
+See [examples/datasets/README.md](examples/datasets/README.md) for full documentation, citations, and unit conversion details.
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Models
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 ### HyperSpec (equivariant)
 
 E(3)-equivariant graph neural network using spherical harmonics and tensor products.
 
 ```bash
-gmd-train model=hyperspec
+goal-train model=hyperspec
 ```
 
 Key parameters:
@@ -609,7 +704,7 @@ Output irreps: `128x0e+128x1o+128x2e` (scalars + vectors + rank-2 tensors)
 SchNet-like invariant backbone using only scalar features. Faster than equivariant models; use for baselines or when equivariance isn't needed.
 
 ```bash
-gmd-train model=invariant_gnn
+goal-train model=invariant_gnn
 ```
 
 Output irreps: `128x0e` (scalars only)
@@ -631,12 +726,14 @@ Task-specific output heads registered via the head registry:
 Override the head:
 
 ```bash
-gmd-train model.head.name=stress model.head.compute_stress=true
+goal-train model.head.name=stress model.head.compute_stress=true
 ```
 
 ---
 
-## Loss Functions
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Loss Functions
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 Each property loss supports a configurable loss function via the `fn` parameter:
 
@@ -712,60 +809,25 @@ Override from the CLI:
 
 ```bash
 # Switch forces loss to MAE
-gmd-train 'training.losses=[{name: energy, weight: 4.0, fn: mse}, {name: forces, weight: 1.0, fn: mae}]'
+goal-train 'training.losses=[{name: energy, weight: 4.0, fn: mse}, {name: forces, weight: 1.0, fn: mae}]'
 ```
 
 > **Tip:** Use `huber` or `mae` for forces when your dataset has noisy DFT reference forces — they're more robust to outliers than MSE.
 
 ---
 
-## Benchmark Datasets
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Foundation Model Adapters
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
-Ready-to-use benchmark datasets for training and evaluating MLIPs. **Completely optional** — the core framework works without them.
-
-| Dataset | Structures | Elements | Properties | Size | Config |
-|---------|-----------|----------|------------|------|--------|
-| **MD17** | ~10k/mol | H, C, N, O | energy, forces | ~100 MB | `data=md17_aspirin` |
-| **rMD17** | ~10k/mol | H, C, N, O | energy, forces | ~100 MB | `data=rmd17_aspirin` |
-| **ANI-1** | ~20M | H, C, N, O | energy, forces | ~30 GB | `data=ani1` |
-| **ANI-1x** | ~5M | H, C, N, O | energy, forces | ~7 GB | `data=ani1x` |
-| **QM9** | 134k | H, C, N, O, F | 19 properties | ~1 GB | `data=qm9` |
-| **SPICE** | ~1.1M | 10 elements | energy, forces | ~15 GB | — |
-
-```bash
-# Train on MD17 aspirin
-gmd-train data=md17_aspirin
-
-# Train on ANI-1x, subsample 50k for quick experiment
-gmd-train data=ani1x data.max_structures=50000
-
-# Train on QM9 predicting HOMO-LUMO gap
-gmd-train data=qm9 data.target=gap
-
-# Override cutoff
-gmd-train data=md17_aspirin data.cutoff=6.0
-```
-
-Install optional dependencies for SPICE (HDF5):
-
-```bash
-pip install -e ".[examples]"
-```
-
-See [examples/datasets/README.md](examples/datasets/README.md) for full documentation, citations, and unit conversion details.
-
----
-
-## Foundation Model Adapters
-
-Adapters wrap pre-trained foundation models (MACE, FairChem/UMA) as GMD backbones. They translate between the foundation model's interface and GMD's backbone protocol.
+Adapters wrap pre-trained foundation models (MACE, FairChem/UMA) as GOAL backbones. They translate between the foundation model's interface and GOAL's backbone protocol.
 
 ```bash
 # Fine-tune MACE-large
-gmd-finetune model.backbone.name=mace-large model.backbone.pretrained=true
+goal-finetune model.backbone.name=mace-large model.backbone.pretrained=true
 
 # Fine-tune UMA-small
-gmd-finetune model.backbone.name=uma-small model.backbone.pretrained=true
+goal-finetune model.backbone.name=uma-small model.backbone.pretrained=true
 ```
 
 Install adapter dependencies:
@@ -777,7 +839,9 @@ pip install -e ".[fairchem]"   # for FairChem/UMA adapters
 
 ---
 
-## Feature Extraction
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Feature Extraction
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 Extract intermediate node features from any backbone for downstream analysis, transfer learning, or custom heads.
 
@@ -786,7 +850,7 @@ Extract intermediate node features from any backbone for downstream analysis, tr
 Attach forward hooks to interaction blocks — works with any model whose layers are a `nn.ModuleList`:
 
 ```python
-from gmd.utils.extraction import HookBasedExtractor
+from goal.ml.utils.extraction import HookBasedExtractor
 
 with HookBasedExtractor(model, blocks_attr="interactions", output_index=0) as ext:
     output = model(batch)
@@ -804,7 +868,7 @@ with HookBasedExtractor(model, blocks_attr="interactions", output_index=0) as ex
 ### Irrep Helpers
 
 ```python
-from gmd.utils.extraction import extract_scalars, extract_irrep_channels, pool_nodes
+from goal.ml.utils.extraction import extract_scalars, extract_irrep_channels, pool_nodes
 
 scalars = extract_scalars(node_feats, irreps)           # l=0 channels only
 channels = extract_irrep_channels(node_feats, irreps)   # dict by irrep type
@@ -817,14 +881,221 @@ Registered as Hydra targets for zero-code feature extraction:
 
 ```yaml
 backbone:
-  _target_: gmd.utils.extraction._build_mace_large_final       # last layer
-  # or: gmd.utils.extraction._build_mace_large_multiscale      # all layers
-  # or: gmd.utils.extraction._build_mace_large_frozen           # frozen weights
+  _target_: goal.ml.utils.extraction._build_mace_large_final       # last layer
+  # or: goal.ml.utils.extraction._build_mace_large_multiscale      # all layers
+  # or: goal.ml.utils.extraction._build_mace_large_frozen           # frozen weights
 ```
 
 ---
 
-## Performance Engineering
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Mini Trainer
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+
+A standalone, lightweight training loop for rapid prototyping in Jupyter notebooks. Completely decoupled from the Lightning / Hydra pipeline — operates on raw PyTorch primitives.
+
+**Typical workflow:**
+1. Freeze a foundation model (MACE, FairChem, etc.) and extract representations
+2. Cache extracted features as a `TensorDataset`
+3. Train a downstream head with `MiniTrainer` — iterate fast without re-running the backbone
+
+### Basic Usage
+
+```python
+from goal.ml.utils.mini_trainer import MiniTrainer
+
+trainer = MiniTrainer(
+    model=my_head,
+    loss_fn=torch.nn.MSELoss(),
+    optimizer=torch.optim.Adam(my_head.parameters(), lr=1e-3),
+    device="auto",
+)
+history = trainer.fit(train_loader, val_loader=val_loader, epochs=50)
+history.plot()  # loss curves in the notebook
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Early stopping** | Stop when validation loss plateaus (`early_stopping_patience`) |
+| **Best checkpoint** | In-memory best model state, restore with `trainer.load_best()` |
+| **LR scheduling** | Any PyTorch scheduler (ReduceLROnPlateau, cosine, etc.) |
+| **Gradient clipping** | Max-norm clipping via `grad_clip` parameter |
+| **Progress bars** | `tqdm.auto` progress bars per epoch |
+| **History** | `TrainingHistory` with `.plot()`, `.best_val_loss`, `.best_epoch` |
+| **Prediction** | `trainer.predict(loader)` returns `(preds, targets)` tensors |
+| **Custom step** | Plug in `step_fn` for `AtomicGraph` batches or arbitrary logic |
+
+### With AtomicGraph Batches
+
+For training on graph data with `CompositeLoss`, use the built-in `graph_step`:
+
+```python
+from goal.ml.utils.mini_trainer import MiniTrainer, graph_step
+
+trainer = MiniTrainer(
+    model=my_backbone_plus_head,
+    loss_fn=composite_loss,
+    optimizer=optimizer,
+    step_fn=graph_step,  # handles AtomicGraph batches
+)
+history = trainer.fit(graph_train_loader, graph_val_loader, epochs=50)
+```
+
+### Notebook Demo
+
+See [`notebooks/mini_trainer_demo.ipynb`](notebooks/mini_trainer_demo.ipynb) for a complete walkthrough — from feature extraction to model evaluation with parity plots.
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Customising the Training Loop
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+
+GOAL provides **three levels** of training loop customisation, from least to most control:
+
+| Level | Tool | Multi-GPU | Loop Control | Best For |
+|:---:|---|:---:|---|---|
+| 1 | **GOALModule** hooks + callbacks | ✅ | Partial — override hooks | Standard workflows with minor tweaks |
+| 2 | **FabricTrainer** | ✅ | Full — write your own `for` loop | Custom optimisation, multi-optimiser, GAN-style |
+| 3 | **MiniTrainer** | ❌ | Full — pure PyTorch | Quick notebook prototyping on extracted features |
+
+### Level 1: Override GOALModule Hooks
+
+The standard Lightning path. Subclass `GOALModule` and override any hook:
+
+```python
+from goal.ml.training.module import GOALModule
+
+class MyModule(GOALModule):
+    """Custom training step with auxiliary loss."""
+
+    def training_step(self, batch, batch_idx):
+        predictions = self(batch)
+        losses = self.loss(predictions, batch)
+
+        # --- Your custom logic here ---
+        aux_loss = self.compute_auxiliary_loss(predictions, batch)
+        losses["total"] = losses["total"] + 0.1 * aux_loss
+        # --------------------------------
+
+        self.log_dict(
+            {f"train/{k}": v for k, v in losses.items()},
+            batch_size=batch.num_graphs, sync_dist=True,
+        )
+        return losses["total"]
+```
+
+Register it in Hydra and use the standard `goal-train` CLI as usual.
+
+**What you can override:**
+
+| Hook | When it runs |
+|------|-------------|
+| `training_step(batch, batch_idx)` | Each training batch |
+| `validation_step(batch, batch_idx)` | Each validation batch |
+| `configure_optimizers()` | Optimizer + scheduler setup |
+| `configure_model()` | Pre-training model transforms (compile, FSDP wrap) |
+| `on_before_optimizer_step(optimizer)` | Before each optimizer step (gradient clipping) |
+| `on_train_batch_end(outputs, batch, batch_idx)` | After each training step (EMA update) |
+
+You can also inject logic via **Lightning callbacks** without subclassing:
+
+```python
+from lightning import Callback
+
+class GradientMonitorCallback(Callback):
+    def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+        grad_norm = torch.nn.utils.clip_grad_norm_(pl_module.parameters(), float("inf"))
+        pl_module.log("grad_norm", grad_norm)
+```
+
+### Level 2: FabricTrainer (Full Loop Control + Multi-GPU)
+
+When Lightning hooks are not enough — you need full control over the `for` loop **and** distributed training. Built on [Lightning Fabric](https://lightning.ai/docs/fabric/).
+
+```python
+from goal.ml.utils.fabric_trainer import FabricTrainer, graph_fabric_step
+
+ft = FabricTrainer(
+    model=my_model,
+    loss_fn=composite_loss,
+    optimizer=optimizer,
+    train_loader=train_loader,
+    val_loader=val_loader,
+    # --- Distributed config (same options as Lightning Trainer) ---
+    accelerator="gpu",
+    strategy="ddp",       # or "fsdp", "deepspeed", etc.
+    devices=4,
+    precision="bf16-mixed",
+    # --- Loop options ---
+    step_fn=graph_fabric_step,
+    grad_clip=10.0,
+    grad_accumulation_steps=4,
+)
+history = ft.fit(epochs=100, early_stopping_patience=20)
+```
+
+**Or write the loop from scratch** using the `setup_fabric()` helper:
+
+```python
+from goal.ml.utils.fabric_trainer import setup_fabric
+
+fabric = setup_fabric(strategy="ddp", devices=4, precision="bf16-mixed")
+
+model, optimizer = fabric.setup(model, optimizer)
+train_loader = fabric.setup_dataloaders(train_loader)
+
+for epoch in range(100):
+    model.train()
+    for batch in train_loader:
+        optimizer.zero_grad()
+        predictions = model(batch)
+        losses = loss_fn(predictions, batch)
+        fabric.backward(losses["total"])
+
+        # Your custom logic — anything goes:
+        if epoch > 50:
+            fabric.clip_gradients(model, optimizer, max_norm=1.0)
+
+        optimizer.step()
+
+    # Validation, logging, checkpointing — all under your control
+    fabric.save("checkpoint.pt", {"model": model, "optimizer": optimizer})
+```
+
+**FabricTrainer features:**
+
+| Feature | Description |
+|---------|-------------|
+| Multi-GPU / multi-node | DDP, FSDP, DeepSpeed — same strategies as Lightning |
+| Mixed precision | bf16, fp16, fp64 |
+| Gradient accumulation | Efficient sync-skipping via `fabric.no_backward_sync()` |
+| Gradient clipping | `fabric.clip_gradients()` |
+| Checkpointing | `save_checkpoint()` / `load_checkpoint()` — handles sharded saves |
+| Early stopping | Built-in patience counter |
+| History | Reuses `TrainingHistory` from MiniTrainer (`.plot()`, `.best_val_loss`) |
+
+### Level 3: MiniTrainer (Pure PyTorch)
+
+Single-device, no Lightning dependency at all. Ideal for notebook prototyping on pre-extracted features. See the [Mini Trainer](#-mini-trainer) section above.
+
+### Choosing the Right Level
+
+```
+Need multi-GPU?
+  ├── No  → MiniTrainer (Level 3)
+  └── Yes
+        ├── Standard loop is fine, just need custom loss/hook? → GOALModule (Level 1)
+        └── Need full loop control? → FabricTrainer (Level 2)
+```
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Performance Engineering
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 ### TF32 Matmul Precision
 
@@ -853,7 +1124,7 @@ training:
 Compile the backbone with `torch.compile` for faster training (PyTorch 2.0+):
 
 ```bash
-gmd-train training.compile_model=true
+goal-train training.compile_model=true
 ```
 
 Configure compilation mode:
@@ -870,9 +1141,9 @@ training:
 ### Mixed Precision
 
 ```bash
-gmd-train trainer.precision=bf16-mixed    # bfloat16 (Ampere+, recommended)
-gmd-train trainer.precision=16-mixed       # float16
-gmd-train trainer.precision=64-true        # double precision
+goal-train trainer.precision=bf16-mixed    # bfloat16 (Ampere+, recommended)
+goal-train trainer.precision=16-mixed       # float16
+goal-train trainer.precision=64-true        # double precision
 ```
 
 ### Gradient Accumulation
@@ -880,13 +1151,13 @@ gmd-train trainer.precision=64-true        # double precision
 Simulate larger batch sizes without increasing GPU memory:
 
 ```bash
-gmd-train trainer.accumulate_grad_batches=4   # effective batch = batch_size × 4
+goal-train trainer.accumulate_grad_batches=4   # effective batch = batch_size × 4
 ```
 
 Or use the dynamic scheduler callback:
 
 ```bash
-gmd-train callbacks=grad_accumulation
+goal-train callbacks=grad_accumulation
 ```
 
 ### Exponential Moving Average (EMA)
@@ -905,7 +1176,7 @@ training:
 Alternative to EMA — averages weights during the last portion of training:
 
 ```bash
-gmd-train callbacks=swa
+goal-train callbacks=swa
 ```
 
 ### Sanity Validation Check
@@ -922,24 +1193,26 @@ Override from the command line:
 
 ```bash
 # Skip sanity check (faster startup)
-gmd-train trainer.num_sanity_val_steps=0
+goal-train trainer.num_sanity_val_steps=0
 
 # Full validation run before training (thorough check)
-gmd-train trainer.num_sanity_val_steps=-1
+goal-train trainer.num_sanity_val_steps=-1
 ```
 
 ---
 
-## Hyperparameter Tuning
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟡 Hyperparameter Tuning
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
-GMD provides two levels of hyperparameter optimisation, both fully config-driven.
+GOAL provides three levels of hyperparameter optimisation, all fully config-driven.
 
 ### Basic: Lightning Tuner
 
 Built-in learning rate and batch size auto-discovery. **Zero extra dependencies.**
 
 ```bash
-gmd-tune hparams_search=basic
+goal-tune hparams_search=basic
 ```
 
 ```yaml
@@ -958,7 +1231,7 @@ Full hyperparameter search with ASHA early stopping, Optuna Bayesian optimisatio
 ```bash
 pip install -e ".[tune]"   # installs ray[tune] + optuna
 
-gmd-tune hparams_search=ray_tune
+goal-tune hparams_search=ray_tune
 ```
 
 <details>
@@ -1008,7 +1281,7 @@ hparams_search:
 Cloud-managed hyperparameter search via [Weights & Biases](https://wandb.ai/). Supports Bayesian, grid, and random search with Hyperband early termination. **Requires W&B (already a core dependency).**
 
 ```bash
-gmd-tune hparams_search=wandb_sweep
+goal-tune hparams_search=wandb_sweep
 ```
 
 <details>
@@ -1018,7 +1291,7 @@ gmd-tune hparams_search=wandb_sweep
 # configs/hparams_search/wandb_sweep.yaml
 hparams_search:
   method: wandb
-  project: gmd
+  project: goal
   sweep_method: bayes          # 'bayes', 'grid', 'random'
   metric: val/total
   mode: min
@@ -1045,7 +1318,7 @@ hparams_search:
 Resume an existing sweep:
 
 ```bash
-gmd-tune hparams_search=wandb_sweep hparams_search.sweep_id=<SWEEP_ID>
+goal-tune hparams_search=wandb_sweep hparams_search.sweep_id=<SWEEP_ID>
 ```
 
 | Sweep method | Description |
@@ -1056,7 +1329,9 @@ gmd-tune hparams_search=wandb_sweep hparams_search.sweep_id=<SWEEP_ID>
 
 ---
 
-## Callbacks
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟣 Callbacks
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 ### Default Callbacks
 
@@ -1077,25 +1352,27 @@ The default callback group (`callbacks=default`) includes:
 Override callback parameters:
 
 ```bash
-gmd-train callbacks.model_checkpoint.save_top_k=5
-gmd-train callbacks.early_stopping.patience=200
+goal-train callbacks.model_checkpoint.save_top_k=5
+goal-train callbacks.early_stopping.patience=200
 ```
 
 ---
 
-## Logging
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟣 Logging
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
-GMD supports all Lightning loggers. Enable via the `logger` config group:
+GOAL supports all Lightning loggers. Enable via the `logger` config group:
 
 ```bash
-gmd-train logger=wandb
-gmd-train logger=tensorboard
-gmd-train logger=csv
+goal-train logger=wandb
+goal-train logger=tensorboard
+goal-train logger=csv
 ```
 
 | Logger | Config | Notes |
 |--------|--------|-------|
-| Weights & Biases | `logger=wandb` | Project: `gmd`, requires `wandb` login |
+| Weights & Biases | `logger=wandb` | Project: `goal`, requires `wandb` login |
 | TensorBoard | `logger=tensorboard` | Saves to `output_dir/tensorboard/` |
 | CSV | `logger=csv` | Simple CSV file logging |
 | MLflow | `logger=mlflow` | MLflow tracking server |
@@ -1106,14 +1383,37 @@ gmd-train logger=csv
 Use multiple loggers:
 
 ```bash
-gmd-train logger=wandb,csv
+goal-train logger=wandb,csv
+```
+
+### Run Naming Convention
+
+Every run is automatically named with a **timestamp + dataset + model** pattern:
+
+```
+{date}_{time}_{dataset_type}_{model_backbone}
+```
+
+For example: `2026-04-09_14-30-45_xyz_hyperspec`
+
+This naming is applied consistently to:
+- Output directories (`logs/train/runs/...`)
+- Logger run names (W&B, TensorBoard, MLflow, etc.)
+- Hydra sweep directories
+
+Override the name from the CLI:
+
+```bash
+goal-train run_name=my_custom_experiment
 ```
 
 ---
 
-## Configuration System
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟣 Configuration System
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
-GMD uses [Hydra](https://hydra.cc/) for composable configuration. Every aspect of training is controlled by YAML config files that can be overridden from the command line.
+GOAL uses [Hydra](https://hydra.cc/) for composable configuration. Every aspect of training is controlled by YAML config files that can be overridden from the command line.
 
 ### Config Groups
 
@@ -1132,19 +1432,19 @@ GMD uses [Hydra](https://hydra.cc/) for composable configuration. Every aspect o
 
 ```bash
 # Change model and data format
-gmd-train model=invariant_gnn data=hdf5
+goal-train model=invariant_gnn data=hdf5
 
 # Override nested parameters
-gmd-train training.optimizer.lr=0.0005 training.ema.decay=0.9999
+goal-train training.optimizer.lr=0.0005 training.ema.decay=0.9999
 
 # Change loss weights
-gmd-train training.losses.0.weight=1.0 training.losses.1.weight=50.0
+goal-train training.losses.0.weight=1.0 training.losses.1.weight=50.0
 
 # Multi-run sweep
-gmd-train -m training.optimizer.lr=0.001,0.0005,0.0001
+goal-train -m training.optimizer.lr=0.001,0.0005,0.0001
 
 # Disable callbacks
-gmd-train callbacks=none
+goal-train callbacks=none
 ```
 
 ### Output Directory
@@ -1152,7 +1452,7 @@ gmd-train callbacks=none
 Each run creates a timestamped output directory:
 
 ```
-logs/train/runs/2026-01-24_04-45-12/
+logs/train/runs/2026-04-09_14-30-45_xyz_hyperspec/
 ├── checkpoints/
 │   ├── epoch_001.ckpt
 │   └── last.ckpt
@@ -1165,47 +1465,50 @@ logs/train/runs/2026-01-24_04-45-12/
 
 ---
 
-## CLI Reference
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟣 CLI Reference
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 | Command | Description |
 |---------|-------------|
-| `gmd-train` | Train a model |
-| `gmd-eval` | Evaluate a checkpoint on test data |
-| `gmd-finetune` | Fine-tune a pre-trained model |
-| `gmd-tune` | Hyperparameter search (LR finder, Ray Tune) |
+| `goal-train` | Train a model |
+| `goal-eval` | Evaluate a checkpoint on test data |
+| `goal-finetune` | Fine-tune a pre-trained model |
+| `goal-tune` | Hyperparameter search (LR finder, Ray Tune, W&B Sweeps) |
 
 All commands accept Hydra overrides:
 
 ```bash
-gmd-train trainer=ddp data=hdf5 model=invariant_gnn logger=wandb seed=42
+goal-train trainer=ddp data=hdf5 model=invariant_gnn logger=wandb seed=42
 ```
 
 Module-based invocation (equivalent):
 
 ```bash
-python -m gmd.cli.train trainer=ddp data=hdf5
-python -m gmd.cli.evaluate ckpt_path=/path/to/ckpt
-python -m gmd.cli.finetune model.backbone.pretrained=true
-python -m gmd.cli.tune hparams_search=basic
+python -m goal.ml.cli.train trainer=ddp data=hdf5
+python -m goal.ml.cli.evaluate ckpt_path=/path/to/ckpt
+python -m goal.ml.cli.finetune model.backbone.pretrained=true
+python -m goal.ml.cli.tune hparams_search=basic
 ```
 
 ---
 
-## Pixi Tasks
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 🟣 Pixi Tasks
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 If using pixi as your environment manager, these tasks are available:
 
 | Task | Command | Description |
 |------|---------|-------------|
-| `pixi run train` | `python -m gmd.cli.train` | Train a model |
-| `pixi run eval` | `python -m gmd.cli.evaluate` | Evaluate a checkpoint |
-| `pixi run finetune` | `python -m gmd.cli.finetune` | Fine-tune a model |
-| `pixi run tune` | `python -m gmd.cli.tune` | Hyperparameter search |
+| `pixi run train` | `python -m goal.ml.cli.train` | Train a model |
+| `pixi run eval` | `python -m goal.ml.cli.evaluate` | Evaluate a checkpoint |
+| `pixi run finetune` | `python -m goal.ml.cli.finetune` | Fine-tune a model |
 | `pixi run test` | `pytest -k 'not slow'` | Run fast tests |
 | `pixi run test-full` | `pytest` | Run all tests |
 | `pixi run lint` | `ruff check src/ tests/` | Lint code |
 | `pixi run format` | `ruff format src/ tests/` | Format code |
-| `pixi run typecheck` | `mypy src/gmd/` | Type check |
+| `pixi run typecheck` | `mypy src/goal/ml/` | Type check |
 | `pixi run clean` | — | Remove build artifacts |
 | `pixi run clean-logs` | `rm -rf logs/**` | Remove training logs |
 
@@ -1221,11 +1524,23 @@ Use the `cuda-deepspeed` environment for DeepSpeed training:
 pixi run -e cuda-deepspeed train strategy=deepspeed_zero2
 ```
 
-Use the `tune` environment for hyperparameter search:
+---
 
-```bash
-pixi run -e tune tune hparams_search=ray_tune
-```
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+## 📦 Tested Versions
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+
+| Package | Version |
+|---------|---------|
+| Python | 3.14.4 |
+| PyTorch | 2.10.0 |
+| Lightning | 2.6.1 |
+| e3nn | 0.6.0 |
+| PyG (torch-geometric) | 2.7.0 |
+| Hydra | 1.3.2 |
+| ASE | 3.28.0 |
+| W&B | 0.25.1 |
+| Rich | 13.9.4 |
 
 ---
 

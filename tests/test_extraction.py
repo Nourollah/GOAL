@@ -1,4 +1,4 @@
-"""Tests for gmd.utils.extraction — feature extraction utilities."""
+"""Tests for goal.ml.utils.extraction — feature extraction utilities."""
 
 from __future__ import annotations
 
@@ -8,15 +8,14 @@ import pytest
 import torch
 import torch.nn as nn
 
-from gmd.data.graph import NodeFeatures
-from gmd.utils.extraction import (
+from goal.ml.data.graph import NodeFeatures
+from goal.ml.utils.extraction import (
     HookBasedExtractor,
+    describe_irreps,
     extract_irrep_channels,
     extract_scalars,
     pool_nodes,
-    describe_irreps,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,7 +75,7 @@ class TestHookBasedExtractor:
 
         with HookBasedExtractor(model, blocks_attr="blocks") as ext:
             _ = model(x)
-            captured: typing.Dict[str, torch.Tensor] = ext.captured
+            captured: dict[str, torch.Tensor] = ext.captured
 
         assert len(captured) == 3
         for i in range(3):
@@ -123,7 +122,7 @@ class TestHookBasedExtractor:
         x: torch.Tensor = torch.randn(5, 4)
 
         ext: HookBasedExtractor = HookBasedExtractor(model, blocks_attr="blocks")
-        result: typing.Dict[str, torch.Tensor] = ext.extract(x)
+        result: dict[str, torch.Tensor] = ext.extract(x)
         assert len(result) == 3
         ext.remove()
 
@@ -137,7 +136,9 @@ class TestHookBasedExtractor:
         # verify the extractor doesn't crash with output_index=None (plain
         # tensor) and captures the right shapes.
         with HookBasedExtractor(
-            model, blocks_attr="interactions", output_index=None,
+            model,
+            blocks_attr="interactions",
+            output_index=None,
         ) as ext:
             _ = model(x)
             assert ext.captured["layer_0"].shape == (4, 8)

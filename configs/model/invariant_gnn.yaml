@@ -1,4 +1,4 @@
-# GMD Model Configuration — Invariant GNN
+# GOAL Model Configuration — Invariant GNN
 # SchNet-like invariant backbone (scalar features only)
 # Use when equivariance is not needed or for fast baseline experiments
 

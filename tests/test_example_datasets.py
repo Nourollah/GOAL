@@ -10,15 +10,14 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: fake PyG datasets
 # ---------------------------------------------------------------------------
 
 
-def _make_fake_md17_data(n: int = 100) -> typing.List[Data]:
+def _make_fake_md17_data(n: int = 100) -> list[Data]:
     """Create fake MD17-like Data objects."""
-    items: typing.List[Data] = []
+    items: list[Data] = []
     for _ in range(n):
         num_atoms = 21  # aspirin
         data = Data(
@@ -31,9 +30,9 @@ def _make_fake_md17_data(n: int = 100) -> typing.List[Data]:
     return items
 
 
-def _make_fake_ani1_data(n: int = 50) -> typing.List[Data]:
+def _make_fake_ani1_data(n: int = 50) -> list[Data]:
     """Create fake ANI-1-like Data objects."""
-    items: typing.List[Data] = []
+    items: list[Data] = []
     for _ in range(n):
         num_atoms = torch.randint(3, 15, (1,)).item()
         data = Data(
@@ -46,9 +45,9 @@ def _make_fake_ani1_data(n: int = 50) -> typing.List[Data]:
     return items
 
 
-def _make_fake_qm9_data(n: int = 200) -> typing.List[Data]:
+def _make_fake_qm9_data(n: int = 200) -> list[Data]:
     """Create fake QM9-like Data objects with 19 properties."""
-    items: typing.List[Data] = []
+    items: list[Data] = []
     for _ in range(n):
         num_atoms = torch.randint(3, 9, (1,)).item()
         data = Data(
@@ -165,18 +164,24 @@ class TestMD17Dataset:
 
         # With 100 items, train_size=950 exceeds total, so test would be empty
         ds = MD17Dataset(
-            root=str(tmp_path), molecule="aspirin", split="train",
-            train_size=80, val_size=10,
+            root=str(tmp_path),
+            molecule="aspirin",
+            split="train",
+            train_size=80,
+            val_size=10,
         )
         assert len(ds) == 80
 
     def test_unit_conversion(self, tmp_path: Path, mock_pyg_md17):
         """Energies should be converted from kcal/mol to eV."""
-        from examples.datasets.md17 import MD17Dataset, KCAL_TO_EV
+        from examples.datasets.md17 import KCAL_TO_EV, MD17Dataset
 
         ds = MD17Dataset(
-            root=str(tmp_path), molecule="aspirin", split="train",
-            train_size=80, val_size=10,
+            root=str(tmp_path),
+            molecule="aspirin",
+            split="train",
+            train_size=80,
+            val_size=10,
         )
         graph = ds[0]
         # Energy should be in eV (original is ~-300 kcal/mol × 0.043364)
@@ -188,8 +193,11 @@ class TestMD17Dataset:
         from examples.datasets.md17 import MD17Dataset
 
         ds = MD17Dataset(
-            root=str(tmp_path), molecule="aspirin", split="train",
-            train_size=80, val_size=10,
+            root=str(tmp_path),
+            molecule="aspirin",
+            split="train",
+            train_size=80,
+            val_size=10,
         )
         graph = ds[0]
         assert hasattr(graph, "pos")
@@ -210,8 +218,11 @@ class TestMD17Dataset:
         from examples.datasets.md17 import MD17Dataset
 
         ds = MD17Dataset(
-            root=str(tmp_path), molecule="aspirin", split="train",
-            train_size=80, val_size=10,
+            root=str(tmp_path),
+            molecule="aspirin",
+            split="train",
+            train_size=80,
+            val_size=10,
         )
         cit = ds.citation()
         assert "@article" in cit
@@ -230,8 +241,9 @@ class TestANI1Dataset:
     def mock_pyg_ani1(self):
         """Patch PyG ANI1 and ANI1x."""
         fake_data = _make_fake_ani1_data(50)
-        with patch("examples.datasets.ani1.ANI1x") as mock_1x, \
-             patch("examples.datasets.ani1.ANI1") as mock_1:
+        with patch("examples.datasets.ani1.ANI1x") as mock_1x, patch(
+            "examples.datasets.ani1.ANI1"
+        ) as mock_1:
             mock_1x.return_value = fake_data
             mock_1.return_value = fake_data
             yield mock_1x, mock_1
@@ -248,7 +260,9 @@ class TestANI1Dataset:
         from examples.datasets.ani1 import ANI1Dataset
 
         ds = ANI1Dataset(
-            root=str(tmp_path), version="1x", split="train",
+            root=str(tmp_path),
+            version="1x",
+            split="train",
             max_structures=10,
         )
         # Total is capped at 10, train fraction 0.8 → 8
@@ -326,21 +340,21 @@ class TestRegistryIntegration:
     def test_md17_registered(self):
         """'md17' should be in DATASET_REGISTRY after import."""
         import examples.datasets  # noqa: F401
-        from gmd.registry import DATASET_REGISTRY
+        from goal.ml.registry import DATASET_REGISTRY
 
         assert "md17" in DATASET_REGISTRY
 
     def test_rmd17_registered(self):
         """'rmd17' should be in DATASET_REGISTRY."""
         import examples.datasets  # noqa: F401
-        from gmd.registry import DATASET_REGISTRY
+        from goal.ml.registry import DATASET_REGISTRY
 
         assert "rmd17" in DATASET_REGISTRY
 
     def test_ani1_registered(self):
         """'ani1' and 'ani1x' should be in DATASET_REGISTRY."""
         import examples.datasets  # noqa: F401
-        from gmd.registry import DATASET_REGISTRY
+        from goal.ml.registry import DATASET_REGISTRY
 
         assert "ani1" in DATASET_REGISTRY
         assert "ani1x" in DATASET_REGISTRY
@@ -348,21 +362,21 @@ class TestRegistryIntegration:
     def test_qm9_registered(self):
         """'qm9' should be in DATASET_REGISTRY."""
         import examples.datasets  # noqa: F401
-        from gmd.registry import DATASET_REGISTRY
+        from goal.ml.registry import DATASET_REGISTRY
 
         assert "qm9" in DATASET_REGISTRY
 
     def test_spice_registered(self):
         """'spice' should be in DATASET_REGISTRY."""
         import examples.datasets  # noqa: F401
-        from gmd.registry import DATASET_REGISTRY
+        from goal.ml.registry import DATASET_REGISTRY
 
         assert "spice" in DATASET_REGISTRY
 
     def test_registry_resolves_md17_class(self):
         """DATASET_REGISTRY.get('md17') should resolve to MD17Dataset."""
         import examples.datasets  # noqa: F401
-        from gmd.registry import DATASET_REGISTRY
+        from goal.ml.registry import DATASET_REGISTRY
 
         cls = DATASET_REGISTRY.get("md17")
         assert cls.__name__ == "MD17Dataset"
@@ -378,7 +392,7 @@ class TestCompositeLossFunctions:
 
     def test_rmse_loss_function(self):
         """RMSE loss should equal sqrt(MSE)."""
-        from gmd.training.loss import _rmse_loss
+        from goal.ml.training.loss import _rmse_loss
 
         pred = torch.tensor([1.0, 2.0, 3.0])
         target = torch.tensor([1.5, 2.5, 3.5])
@@ -388,53 +402,59 @@ class TestCompositeLossFunctions:
 
     def test_resolve_loss_fn_rmse(self):
         """resolve_loss_fn('rmse') should work."""
-        from gmd.training.loss import resolve_loss_fn, _rmse_loss
+        from goal.ml.training.loss import _rmse_loss, resolve_loss_fn
 
         assert resolve_loss_fn("rmse") is _rmse_loss
 
     def test_resolve_loss_fn_dotted_path(self):
         """Dotted import path should resolve to callable."""
-        from gmd.training.loss import resolve_loss_fn
+        from goal.ml.training.loss import resolve_loss_fn
 
         fn = resolve_loss_fn("torch.nn.functional.mse_loss")
         assert fn is torch.nn.functional.mse_loss
 
     def test_resolve_loss_fn_invalid_dotted_path(self):
         """Invalid dotted path should raise ValueError."""
-        from gmd.training.loss import resolve_loss_fn
+        from goal.ml.training.loss import resolve_loss_fn
 
         with pytest.raises(ValueError, match="Cannot resolve"):
             resolve_loss_fn("nonexistent.module.function")
 
     def test_weighted_loss_with_label(self):
         """WeightedLoss should store custom label."""
-        from gmd.training.loss import WeightedLoss, EnergyLoss
+        from goal.ml.training.loss import EnergyLoss, WeightedLoss
 
         wl = WeightedLoss(EnergyLoss(), weight=4.0, label="energy_mse")
         assert wl.label == "energy_mse"
 
     def test_weighted_loss_with_group(self):
         """WeightedLoss should store group."""
-        from gmd.training.loss import WeightedLoss, ForcesLoss
+        from goal.ml.training.loss import ForcesLoss, WeightedLoss
 
         wl = WeightedLoss(ForcesLoss(), weight=4.0, label="forces_mse", group="forces")
         assert wl.group == "forces"
 
     def test_weighted_loss_default_label(self):
         """Default label should be class name."""
-        from gmd.training.loss import WeightedLoss, EnergyLoss
+        from goal.ml.training.loss import EnergyLoss, WeightedLoss
 
         wl = WeightedLoss(EnergyLoss(), weight=1.0)
         assert wl.label == "EnergyLoss"
 
     def test_composite_loss_group_totals(self):
         """CompositeLoss should emit group totals for multi-fn properties."""
-        from gmd.training.loss import CompositeLoss, WeightedLoss, ForcesLoss
+        from goal.ml.training.loss import CompositeLoss, ForcesLoss, WeightedLoss
 
-        composite = CompositeLoss([
-            WeightedLoss(ForcesLoss(loss_fn="mse"), weight=4.0, label="forces_mse", group="forces"),
-            WeightedLoss(ForcesLoss(loss_fn="mae"), weight=8.0, label="forces_mae", group="forces"),
-        ])
+        composite = CompositeLoss(
+            [
+                WeightedLoss(
+                    ForcesLoss(loss_fn="mse"), weight=4.0, label="forces_mse", group="forces"
+                ),
+                WeightedLoss(
+                    ForcesLoss(loss_fn="mae"), weight=8.0, label="forces_mae", group="forces"
+                ),
+            ]
+        )
 
         pred = {"forces": torch.randn(5, 3)}
         target = {"forces": torch.randn(5, 3)}
@@ -451,11 +471,13 @@ class TestCompositeLossFunctions:
 
     def test_composite_loss_single_fn_no_group_total(self):
         """Single-fn property should NOT get a separate group total."""
-        from gmd.training.loss import CompositeLoss, WeightedLoss, EnergyLoss
+        from goal.ml.training.loss import CompositeLoss, EnergyLoss, WeightedLoss
 
-        composite = CompositeLoss([
-            WeightedLoss(EnergyLoss(), weight=4.0, label="energy"),
-        ])
+        composite = CompositeLoss(
+            [
+                WeightedLoss(EnergyLoss(), weight=4.0, label="energy"),
+            ]
+        )
 
         pred = {"energy": torch.tensor([1.0]), "num_atoms": torch.tensor([1.0])}
         target = {"energy": torch.tensor([2.0]), "num_atoms": torch.tensor([1.0])}
@@ -466,15 +488,24 @@ class TestCompositeLossFunctions:
 
     def test_composite_loss_mixed(self):
         """Mix of single-fn and multi-fn properties."""
-        from gmd.training.loss import (
-            CompositeLoss, WeightedLoss, EnergyLoss, ForcesLoss,
+        from goal.ml.training.loss import (
+            CompositeLoss,
+            EnergyLoss,
+            ForcesLoss,
+            WeightedLoss,
         )
 
-        composite = CompositeLoss([
-            WeightedLoss(EnergyLoss(), weight=4.0, label="energy"),
-            WeightedLoss(ForcesLoss(loss_fn="mse"), weight=4.0, label="forces_mse", group="forces"),
-            WeightedLoss(ForcesLoss(loss_fn="rmse"), weight=8.0, label="forces_rmse", group="forces"),
-        ])
+        composite = CompositeLoss(
+            [
+                WeightedLoss(EnergyLoss(), weight=4.0, label="energy"),
+                WeightedLoss(
+                    ForcesLoss(loss_fn="mse"), weight=4.0, label="forces_mse", group="forces"
+                ),
+                WeightedLoss(
+                    ForcesLoss(loss_fn="rmse"), weight=8.0, label="forces_rmse", group="forces"
+                ),
+            ]
+        )
 
         pred = {
             "energy": torch.tensor([1.0]),
@@ -496,15 +527,24 @@ class TestCompositeLossFunctions:
 
     def test_composite_loss_logging_keys_for_wandb(self):
         """Logged keys should be clean for W&B panels."""
-        from gmd.training.loss import (
-            CompositeLoss, WeightedLoss, EnergyLoss, ForcesLoss,
+        from goal.ml.training.loss import (
+            CompositeLoss,
+            EnergyLoss,
+            ForcesLoss,
+            WeightedLoss,
         )
 
-        composite = CompositeLoss([
-            WeightedLoss(EnergyLoss(), weight=4.0, label="energy"),
-            WeightedLoss(ForcesLoss(loss_fn="mse"), weight=4.0, label="forces_mse", group="forces"),
-            WeightedLoss(ForcesLoss(loss_fn="rmse"), weight=8.0, label="forces_rmse", group="forces"),
-        ])
+        composite = CompositeLoss(
+            [
+                WeightedLoss(EnergyLoss(), weight=4.0, label="energy"),
+                WeightedLoss(
+                    ForcesLoss(loss_fn="mse"), weight=4.0, label="forces_mse", group="forces"
+                ),
+                WeightedLoss(
+                    ForcesLoss(loss_fn="rmse"), weight=8.0, label="forces_rmse", group="forces"
+                ),
+            ]
+        )
 
         pred = {
             "energy": torch.tensor([1.0]),

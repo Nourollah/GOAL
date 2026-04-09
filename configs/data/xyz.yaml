@@ -1,4 +1,4 @@
-# GMD Data Configuration — ExtXYZ dataset
+# GOAL Data Configuration — ExtXYZ dataset
 #
 # Loading modes:
 #   Mode 1 (default): single root, auto-split from train.xyz/val.xyz/test.xyz
@@ -12,8 +12,8 @@ data:
   batch_size: 32
   num_workers: 4
   pin_memory: true
-  persistent_workers: true   # keep worker processes alive between epochs
-  prefetch_factor: 2         # batches prefetched per worker
+  persistent_workers: true # keep worker processes alive between epochs
+  prefetch_factor: 2 # batches prefetched per worker
   energy_key: energy
   forces_key: forces
   stress_key: stress

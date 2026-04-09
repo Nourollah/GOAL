@@ -68,19 +68,19 @@ class ANI1Dataset(BenchmarkDataset):
         split: str = "train",
         train_fraction: float = 0.8,
         val_fraction: float = 0.1,
-        max_structures: typing.Optional[int] = None,
-        elements: typing.Optional[typing.List[int]] = None,
+        max_structures: int | None = None,
+        elements: list[int] | None = None,
         seed: int = 42,
         dtype: torch.dtype = torch.float64,
-        transform: typing.Optional[typing.Callable[..., typing.Any]] = None,
+        transform: typing.Callable[..., typing.Any] | None = None,
     ) -> None:
         if version not in ("1", "1x"):
             raise ValueError(f"version must be '1' or '1x', got '{version}'")
         self.version: str = version
         self.train_fraction: float = train_fraction
         self.val_fraction: float = val_fraction
-        self.max_structures: typing.Optional[int] = max_structures
-        self.elements: typing.Optional[typing.List[int]] = elements
+        self.max_structures: int | None = max_structures
+        self.elements: list[int] | None = elements
         self.seed: int = seed
         super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype, transform=transform)
 
@@ -93,20 +93,22 @@ class ANI1Dataset(BenchmarkDataset):
             name += f"_elems{elems}"
         return name
 
-    def _download_and_process(self) -> typing.List[typing.Any]:
+    def _download_and_process(self) -> list[typing.Any]:
         """Download via PyG and convert to AtomicGraph list."""
-        from gmd.data.graph import AtomicGraph
+        from goal.ml.data.graph import AtomicGraph
 
         if self.version == "1x":
             from torch_geometric.datasets import ANI1x as PyGDataset
+
             pyg_dataset = PyGDataset(root=str(self.root / "raw"))
         else:
             from torch_geometric.datasets import ANI1 as PyGDataset
+
             pyg_dataset = PyGDataset(root=str(self.root / "raw"))
 
         from torch_geometric.nn import radius_graph
 
-        graphs: typing.List[AtomicGraph] = []
+        graphs: list[AtomicGraph] = []
         for data in pyg_dataset:
             atomic_numbers: torch.Tensor = data.z.long()
 
@@ -119,20 +121,16 @@ class ANI1Dataset(BenchmarkDataset):
             positions: torch.Tensor = data.pos.to(self.dtype)
 
             # Energy: Hartree → eV
-            energy_ev: typing.Optional[torch.Tensor] = None
+            energy_ev: torch.Tensor | None = None
             if hasattr(data, "energy") and data.energy is not None:
-                energy_ev = torch.tensor(
-                    [data.energy.item() * HARTREE_TO_EV], dtype=self.dtype
-                )
+                energy_ev = torch.tensor([data.energy.item() * HARTREE_TO_EV], dtype=self.dtype)
 
             # Forces: Hartree/Bohr → eV/Å
-            forces_ev: typing.Optional[torch.Tensor] = None
+            forces_ev: torch.Tensor | None = None
             if hasattr(data, "force") and data.force is not None:
                 forces_ev = data.force.to(self.dtype) * (HARTREE_TO_EV / BOHR_TO_ANGSTROM)
 
-            edge_index: torch.Tensor = radius_graph(
-                positions, r=self.cutoff, loop=False
-            )
+            edge_index: torch.Tensor = radius_graph(positions, r=self.cutoff, loop=False)
             row, col = edge_index
             edge_vecs: torch.Tensor = positions[col] - positions[row]
             edge_lens: torch.Tensor = edge_vecs.norm(dim=-1)
@@ -156,7 +154,7 @@ class ANI1Dataset(BenchmarkDataset):
 
         return graphs
 
-    def split_indices(self) -> typing.Dict[str, typing.List[int]]:
+    def split_indices(self) -> dict[str, list[int]]:
         """Reproducible fraction-based split."""
         total: int = len(self._data)
         train_size: int = int(total * self.train_fraction)

@@ -1,6 +1,6 @@
 # EMA Weight Averaging callback (Lightning 2.6+)
 # Built-in exponential moving average of model parameters.
-# Use this instead of GMD's manual EMA when you want Lightning's
+# Use this instead of GOAL's manual EMA when you want Lightning's
 # native integration with checkpointing and logging.
 #
 # Note: When using this callback, set training.ema.enabled=false

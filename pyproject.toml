@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gmd"
+name = "goal"
 version = "0.1.0"
-description = "General Molecular Dynamics — training equivariant graph neural networks on atomistic systems"
+description = "General Open Atomistic Laboratory — a modular framework for machine-learning interatomic potentials"
 readme = "README.md"
 requires-python = ">=3.14"
 authors = [{ name = "Amir Masoud Nourollah", email = "nourollah.am@gmail.com" }]
 license = { text = "MIT" }
-keywords = ["molecular-dynamics", "machine-learning", "force-fields", "equivariant", "gnn"]
+keywords = ["atomistic-simulation", "machine-learning", "interatomic-potentials", "equivariant", "gnn", "molecular-dynamics"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
@@ -39,22 +39,22 @@ tune = ["ray[tune]>=2.9", "optuna>=3.0"]
 torchmetrics = ["torchmetrics>=1.0"]
 examples = ["h5py>=3.10", "requests>=2.31"]
 dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
-all = ["gmd[mace,fairchem,deepspeed,tune,torchmetrics,examples]"]
+all = ["goal[mace,fairchem,deepspeed,tune,torchmetrics,examples]"]
 
 [project.urls]
-Repository = "https://github.com/user/gmd"
+Repository = "https://github.com/Nourollah/MC-GLOW"
 
 [project.scripts]
-gmd-train = "gmd.cli.train:train"
-gmd-eval = "gmd.cli.evaluate:evaluate"
-gmd-finetune = "gmd.cli.finetune:finetune"
-gmd-tune = "gmd.cli.tune:tune"
+goal-train = "goal.ml.cli.train:train"
+goal-eval = "goal.ml.cli.evaluate:evaluate"
+goal-finetune = "goal.ml.cli.finetune:finetune"
+goal-tune = "goal.ml.cli.tune:tune"
 
 # src/ is the source root: packages under src/ are importable directly
-# e.g. src/gmd/ → import gmd; src/utils/ → import src.utils (via rootutils)
+# e.g. src/goal/ → import goal; src/goal/ml/ → from goal.ml import ...
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["gmd*"]
+include = ["goal*"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -94,7 +94,7 @@ platforms = ["linux-64", "linux-aarch64"]
 python = "3.14.*"
 
 [tool.pixi.pypi-dependencies]
-gmd = { path = ".", editable = true }
+goal = { path = ".", editable = true }
 
 # --- Platform features ---
 
@@ -179,7 +179,7 @@ test = "pytest -k 'not slow'"
 test-full = "pytest"
 lint = "ruff check src/ tests/"
 format = "ruff format src/ tests/"
-typecheck = "mypy src/gmd/"
-train = "python -m gmd.cli.train"
-eval = "python -m gmd.cli.evaluate"
-finetune = "python -m gmd.cli.finetune"
+typecheck = "mypy src/goal/ml/"
+train = "python -m goal.ml.cli.train"
+eval = "python -m goal.ml.cli.evaluate"
+finetune = "python -m goal.ml.cli.finetune"

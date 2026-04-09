@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from gmd.registry import Registry
+from goal.ml.registry import Registry
 
 
 class TestRegistry:

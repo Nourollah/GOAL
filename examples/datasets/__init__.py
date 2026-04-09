@@ -1,21 +1,21 @@
-"""GMD benchmark dataset examples.
+"""GOAL benchmark dataset examples.
 
-These are **not** part of the core ``gmd`` package.  Import this module
+These are **not** part of the core ``goal.ml`` package.  Import this module
 to register benchmark datasets into the :data:`DATASET_REGISTRY`::
 
     import examples.datasets  # triggers lazy registration
 
-    from gmd.registry import DATASET_REGISTRY
+    from goal.ml.registry import DATASET_REGISTRY
     dataset = DATASET_REGISTRY.build('md17', root='data/md17', molecule='aspirin')
 
 Or use via Hydra config::
 
-    gmd-train data=md17_aspirin
+    goal-train data=md17_aspirin
 """
 
 from __future__ import annotations
 
-from gmd.registry import DATASET_REGISTRY
+from goal.ml.registry import DATASET_REGISTRY
 
 # Lazy registration — no imports until actually requested
 DATASET_REGISTRY.register_lazy("md17", "examples.datasets.md17:MD17Dataset")

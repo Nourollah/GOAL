@@ -4,7 +4,7 @@
 # Good default when DDP runs out of memory.
 #
 # Usage:
-#   gmd-train strategy=deepspeed_zero2
+#   goal-train strategy=deepspeed_zero2
 
 name: deepspeed_zero2
 

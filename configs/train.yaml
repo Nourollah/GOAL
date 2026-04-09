@@ -1,6 +1,6 @@
 # @package _global_
 
-# GMD Training Configuration
+# GOAL Training Configuration
 # Order of defaults determines the order in which configs override each other
 defaults:
   - _self_

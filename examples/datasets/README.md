@@ -1,21 +1,21 @@
-# GMD Benchmark Datasets
+# GOAL Benchmark Datasets
 
-Ready-to-use benchmark datasets for training and evaluating MLIPs. **Completely decoupled from the core `gmd` package** — the framework works perfectly without them.
+Ready-to-use benchmark datasets for training and evaluating MLIPs. **Completely decoupled from the core `goal.ml` package** — the framework works perfectly without them.
 
 ## Quick Start
 
 ```bash
 # Train on MD17 aspirin (revised)
-gmd-train data=md17_aspirin
+goal-train data=md17_aspirin
 
 # Train on ANI-1x, subsample 50k structures
-gmd-train data=ani1x data.max_structures=50000
+goal-train data=ani1x data.max_structures=50000
 
 # Train on QM9 predicting HOMO-LUMO gap
-gmd-train data=qm9 data.target=gap
+goal-train data=qm9 data.target=gap
 
 # Override cutoff
-gmd-train data=md17_aspirin data.cutoff=6.0
+goal-train data=md17_aspirin data.cutoff=6.0
 ```
 
 ## Programmatic Usage
@@ -23,7 +23,7 @@ gmd-train data=md17_aspirin data.cutoff=6.0
 ```python
 import examples.datasets  # triggers lazy registration
 
-from gmd.registry import DATASET_REGISTRY
+from goal.ml.registry import DATASET_REGISTRY
 
 train_data = DATASET_REGISTRY.build(
     "md17",

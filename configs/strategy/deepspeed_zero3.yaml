@@ -4,7 +4,7 @@
 # does not fit on a single GPU even with Stage 2.
 #
 # Usage:
-#   gmd-train strategy=deepspeed_zero3
+#   goal-train strategy=deepspeed_zero3
 
 name: deepspeed_zero3
 

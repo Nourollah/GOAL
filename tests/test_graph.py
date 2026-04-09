@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import torch
 import pytest
+import torch
 
 
 class TestAtomicGraph:
     """Verify AtomicGraph construction, properties, and batching."""
 
-    def _make_graph(self, num_atoms: int = 5) -> "AtomicGraph":
+    def _make_graph(self, num_atoms: int = 5) -> AtomicGraph:
         """Create a minimal valid AtomicGraph for testing."""
-        from gmd.data.graph import AtomicGraph
+        from goal.ml.data.graph import AtomicGraph
 
         positions = torch.randn(num_atoms, 3, dtype=torch.float64)
         atomic_numbers = torch.randint(1, 30, (num_atoms,))
@@ -21,10 +21,12 @@ class TestAtomicGraph:
         # Simple linear chain edges
         row = torch.arange(num_atoms - 1)
         col = torch.arange(1, num_atoms)
-        edge_index = torch.stack([
-            torch.cat([row, col]),
-            torch.cat([col, row]),
-        ])
+        edge_index = torch.stack(
+            [
+                torch.cat([row, col]),
+                torch.cat([col, row]),
+            ]
+        )
         num_edges = edge_index.shape[1]
         edge_vectors = torch.randn(num_edges, 3, dtype=torch.float64)
         edge_lengths = edge_vectors.norm(dim=-1)
@@ -72,7 +74,7 @@ class TestAtomicGraph:
 
     def test_energy_optional(self):
         """Energy should be optional (None for inference)."""
-        from gmd.data.graph import AtomicGraph
+        from goal.ml.data.graph import AtomicGraph
 
         positions = torch.randn(3, 3, dtype=torch.float64)
         atomic_numbers = torch.tensor([1, 6, 8])
@@ -100,7 +102,7 @@ class TestNodeFeatures:
 
     def test_construction(self):
         """NodeFeatures should hold typed fields."""
-        from gmd.data.graph import NodeFeatures
+        from goal.ml.data.graph import NodeFeatures
 
         nf = NodeFeatures(
             node_feats=torch.randn(10, 64),
@@ -116,7 +118,7 @@ class TestMinimumImageConvention:
 
     def test_mic_wraps_vectors(self):
         """Vectors exceeding half the cell should be wrapped."""
-        from gmd.data.graph import _apply_mic
+        from goal.ml.data.graph import _apply_mic
 
         cell = torch.eye(3, dtype=torch.float64) * 10.0
         pbc = torch.tensor([True, True, True])
@@ -128,7 +130,7 @@ class TestMinimumImageConvention:
 
     def test_mic_no_pbc(self):
         """With no PBC, vectors should not be wrapped."""
-        from gmd.data.graph import _apply_mic
+        from goal.ml.data.graph import _apply_mic
 
         cell = torch.eye(3, dtype=torch.float64) * 10.0
         pbc = torch.tensor([False, False, False])

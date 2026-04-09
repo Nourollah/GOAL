@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import torch
 import pytest
+import torch
 
 
 class TestLossSystem:
@@ -11,7 +11,7 @@ class TestLossSystem:
 
     def test_weighted_loss(self):
         """WeightedLoss should scale the inner loss by its weight."""
-        from gmd.training.loss import WeightedLoss, EnergyLoss
+        from goal.ml.training.loss import EnergyLoss, WeightedLoss
 
         inner = EnergyLoss()
         weighted = WeightedLoss(inner, weight=4.0)
@@ -25,7 +25,12 @@ class TestLossSystem:
 
     def test_composite_loss_via_addition(self):
         """WeightedLoss + WeightedLoss should create a CompositeLoss."""
-        from gmd.training.loss import WeightedLoss, EnergyLoss, ForcesLoss, CompositeLoss
+        from goal.ml.training.loss import (
+            CompositeLoss,
+            EnergyLoss,
+            ForcesLoss,
+            WeightedLoss,
+        )
 
         a = WeightedLoss(EnergyLoss(), weight=1.0)
         b = WeightedLoss(ForcesLoss(), weight=1.0)
@@ -36,12 +41,19 @@ class TestLossSystem:
 
     def test_composite_loss_forward(self):
         """CompositeLoss forward should return a dict with 'total' and individual keys."""
-        from gmd.training.loss import WeightedLoss, EnergyLoss, ForcesLoss, CompositeLoss
+        from goal.ml.training.loss import (
+            CompositeLoss,
+            EnergyLoss,
+            ForcesLoss,
+            WeightedLoss,
+        )
 
-        composite = CompositeLoss([
-            WeightedLoss(EnergyLoss(), weight=4.0),
-            WeightedLoss(ForcesLoss(), weight=100.0),
-        ])
+        composite = CompositeLoss(
+            [
+                WeightedLoss(EnergyLoss(), weight=4.0),
+                WeightedLoss(ForcesLoss(), weight=100.0),
+            ]
+        )
 
         pred = {
             "energy": torch.tensor([1.0]),
@@ -62,10 +74,9 @@ class TestLossSystem:
 
     def test_loss_registry(self):
         """Built-in losses should be in the registry."""
-        from gmd.registry import LOSS_REGISTRY
-
         # Force import to trigger @register decorators
-        import gmd.training.loss  # noqa: F401
+        import goal.ml.training.loss  # noqa: F401
+        from goal.ml.registry import LOSS_REGISTRY
 
         assert "energy" in LOSS_REGISTRY
         assert "forces" in LOSS_REGISTRY
@@ -77,7 +88,7 @@ class TestConfigurableLossFn:
 
     def test_energy_loss_mse_default(self):
         """EnergyLoss default should be MSE."""
-        from gmd.training.loss import EnergyLoss
+        from goal.ml.training.loss import EnergyLoss
 
         loss = EnergyLoss()
         pred = {"energy": torch.tensor([1.0]), "num_atoms": torch.tensor([1.0])}
@@ -88,7 +99,7 @@ class TestConfigurableLossFn:
 
     def test_energy_loss_mae(self):
         """EnergyLoss with loss_fn='mae' should compute L1 loss."""
-        from gmd.training.loss import EnergyLoss
+        from goal.ml.training.loss import EnergyLoss
 
         loss = EnergyLoss(loss_fn="mae")
         pred = {"energy": torch.tensor([1.0]), "num_atoms": torch.tensor([1.0])}
@@ -99,7 +110,7 @@ class TestConfigurableLossFn:
 
     def test_energy_loss_huber(self):
         """EnergyLoss with loss_fn='huber' should compute Huber loss."""
-        from gmd.training.loss import EnergyLoss
+        from goal.ml.training.loss import EnergyLoss
 
         loss = EnergyLoss(loss_fn="huber")
         pred = {"energy": torch.tensor([1.0]), "num_atoms": torch.tensor([1.0])}
@@ -110,7 +121,7 @@ class TestConfigurableLossFn:
 
     def test_forces_loss_smooth_l1(self):
         """ForcesLoss with loss_fn='smooth_l1' should compute SmoothL1."""
-        from gmd.training.loss import ForcesLoss
+        from goal.ml.training.loss import ForcesLoss
 
         loss = ForcesLoss(loss_fn="smooth_l1")
         pred_f = torch.randn(5, 3)
@@ -121,7 +132,7 @@ class TestConfigurableLossFn:
 
     def test_stress_loss_l1(self):
         """StressLoss with loss_fn='l1' should work (alias for mae)."""
-        from gmd.training.loss import StressLoss
+        from goal.ml.training.loss import StressLoss
 
         loss = StressLoss(loss_fn="l1")
         pred_s = torch.randn(3, 3)
@@ -132,7 +143,7 @@ class TestConfigurableLossFn:
 
     def test_dipole_loss_configurable(self):
         """DipoleLoss should accept and use a custom loss_fn."""
-        from gmd.training.loss import DipoleLoss
+        from goal.ml.training.loss import DipoleLoss
 
         loss = DipoleLoss(loss_fn="mae")
         pred_d = torch.tensor([[1.0, 2.0, 3.0]])
@@ -143,7 +154,7 @@ class TestConfigurableLossFn:
 
     def test_charge_loss_configurable(self):
         """ChargeLoss should accept a custom loss_fn."""
-        from gmd.training.loss import ChargeLoss
+        from goal.ml.training.loss import ChargeLoss
 
         loss = ChargeLoss(loss_fn="mse")
         pred = {"total_charge": torch.tensor([0.5])}
@@ -154,15 +165,16 @@ class TestConfigurableLossFn:
 
     def test_unknown_loss_fn_raises(self):
         """Unknown loss function name should raise ValueError."""
-        from gmd.training.loss import EnergyLoss
+        from goal.ml.training.loss import EnergyLoss
 
         with pytest.raises(ValueError, match="Unknown loss function"):
             EnergyLoss(loss_fn="nonexistent")
 
     def test_resolve_loss_fn(self):
         """resolve_loss_fn should map names to callables."""
-        from gmd.training.loss import resolve_loss_fn
         import torch.nn.functional as F
+
+        from goal.ml.training.loss import resolve_loss_fn
 
         assert resolve_loss_fn("mse") is F.mse_loss
         assert resolve_loss_fn("mae") is F.l1_loss
@@ -172,7 +184,7 @@ class TestConfigurableLossFn:
 
     def test_different_fns_give_different_results(self):
         """MSE and MAE should give different values for the same inputs."""
-        from gmd.training.loss import EnergyLoss
+        from goal.ml.training.loss import EnergyLoss
 
         pred = {"energy": torch.tensor([1.0]), "num_atoms": torch.tensor([1.0])}
         target = {"energy": torch.tensor([3.0]), "num_atoms": torch.tensor([1.0])}
@@ -187,8 +199,9 @@ class TestEMA:
 
     def test_ema_update(self):
         """EMA shadow should move towards current parameters."""
-        from gmd.training.ema import EMAWrapper
         import torch.nn as nn
+
+        from goal.ml.training.ema import EMAWrapper
 
         model = nn.Linear(10, 1)
         ema = EMAWrapper(model.parameters(), decay=0.9)
@@ -209,8 +222,9 @@ class TestEMA:
 
     def test_ema_context_manager(self):
         """average_parameters() context should swap and restore weights."""
-        from gmd.training.ema import EMAWrapper
         import torch.nn as nn
+
+        from goal.ml.training.ema import EMAWrapper
 
         model = nn.Linear(10, 1)
         ema = EMAWrapper(model.parameters(), decay=0.9)

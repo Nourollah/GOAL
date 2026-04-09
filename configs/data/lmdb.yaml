@@ -1,4 +1,4 @@
-# GMD Data Configuration — LMDB dataset
+# GOAL Data Configuration — LMDB dataset
 # FairChem/OCP-compatible format with fast random access
 
 data:

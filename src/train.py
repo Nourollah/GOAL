@@ -9,10 +9,15 @@ from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
 root = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-# Also add src/ to PYTHONPATH so that 'gmd' is importable directly
+# Also add src/ to PYTHONPATH so that 'goal' is importable directly
 import sys
+
 sys.path.insert(0, str(root / "src"))
 
+from goal.ml.data.datamodule import GOALDataModule
+from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
+from goal.ml.training.loss import CompositeLoss, WeightedLoss
+from goal.ml.training.module import GOALModule
 from src.utils import (
     RankedLogger,
     extras,
@@ -23,16 +28,11 @@ from src.utils import (
     task_wrapper,
 )
 
-from gmd.data.datamodule import GMDDataModule
-from gmd.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
-from gmd.training.loss import CompositeLoss, WeightedLoss
-from gmd.training.module import GMDModule
-
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-def _build_gmd_module(cfg: DictConfig) -> GMDModule:
-    """Build a GMDModule from the Hydra config using the registry system."""
+def _build_goal_module(cfg: DictConfig) -> GOALModule:
+    """Build a GOALModule from the Hydra config using the registry system."""
     # Backbone
     backbone_cls = BACKBONE_REGISTRY.get(cfg.model.backbone.name)
     backbone_kwargs = {k: v for k, v in cfg.model.backbone.items() if k != "name"}
@@ -50,7 +50,7 @@ def _build_gmd_module(cfg: DictConfig) -> GMDModule:
         losses.append(WeightedLoss(loss_cls(), weight=loss_cfg.weight))
     loss = CompositeLoss(losses)
 
-    return GMDModule(backbone=backbone, head=head, loss=loss, config=cfg)
+    return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
 
 
 @task_wrapper
@@ -68,11 +68,11 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("seed"):
         L.seed_everything(cfg.seed, workers=True)
 
-    log.info("Building GMD DataModule...")
-    datamodule = GMDDataModule(cfg)
+    log.info("Building GOAL DataModule...")
+    datamodule = GOALDataModule(cfg)
 
-    log.info("Building GMD Module via registry...")
-    model = _build_gmd_module(cfg)
+    log.info("Building GOAL Module via registry...")
+    model = _build_goal_module(cfg)
 
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))

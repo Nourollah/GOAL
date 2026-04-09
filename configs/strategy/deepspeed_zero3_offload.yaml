@@ -4,7 +4,7 @@
 # models larger than total GPU VRAM.  Very slow due to PCIe transfers.
 #
 # Usage:
-#   gmd-train strategy=deepspeed_zero3_offload
+#   goal-train strategy=deepspeed_zero3_offload
 
 name: deepspeed_zero3_offload
 
