@@ -1,0 +1,20 @@
+# GOAL Model Configuration — HyperSet
+# NOT IMPLEMENTED — pairwise-expert variant of DeepSet
+# Instantiation will raise NotImplementedError; use deepset instead
+
+model:
+  backbone:
+    name: hyperset
+    num_elements: 120
+    embedding_dim: 128
+    hidden_channels: 128
+    num_filters: 128
+    num_radial_basis: 20
+    transform_depth: 2
+    cutoff: 5.0
+
+  head:
+    name: energy_forces
+    irreps_in: "128x0e"
+    hidden_dim: 64
+    compute_stress: false

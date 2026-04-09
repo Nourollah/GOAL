@@ -30,12 +30,24 @@ class GOALModule(L.LightningModule):
     Handles: training, validation, testing, EMA, gradient clipping, logging.
     Compatible with Lightning >=2.6 APIs.
 
+    Supports two wiring modes:
+
+    **Modular** (backbone + head)
+        A backbone satisfying ``EquivariantBackbone`` or ``InvariantBackbone``
+        produces ``NodeFeatures``, then a ``TaskHead`` maps those features to
+        a property dictionary.
+
+    **Monolithic** (backbone only, head=None)
+        A model satisfying ``MonolithicModel`` directly returns a property
+        dictionary from ``forward(graph)``.  Set ``head=None`` and the
+        training loop will call the backbone directly.
+
     Parameters
     ----------
-    backbone : EquivariantBackbone
-        Any model satisfying the backbone protocol.
-    head : TaskHead
-        Any output head satisfying the head protocol.
+    backbone : EquivariantBackbone | MonolithicModel
+        Any model satisfying a backbone or monolithic protocol.
+    head : TaskHead | None
+        Output head for modular models.  ``None`` for monolithic models.
     loss : CompositeLoss
         Composable loss function built from weighted components.
     config : DictConfig
@@ -95,7 +107,10 @@ class GOALModule(L.LightningModule):
                 )
 
     def forward(self, graph: AtomicGraph) -> dict[str, torch.Tensor]:
-        """Run backbone -> head pipeline."""
+        """Run backbone -> head pipeline, or backbone alone for monolithic models."""
+        if self.head is None:
+            # Monolithic mode — backbone returns property dict directly
+            return self.backbone(graph)
         features: typing.Any = self.backbone(graph)
         return self.head(features, graph)
 

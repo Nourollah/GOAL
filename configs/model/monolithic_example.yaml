@@ -1,0 +1,13 @@
+# GOAL Model Configuration — Monolithic Example
+# Minimal self-contained model for demonstration
+# Bypasses the backbone→head split — returns energy + forces directly
+
+model:
+  backbone:
+    name: monolithic_example
+    num_elements: 120
+    embedding_dim: 64
+    hidden_dim: 64
+
+  # No head — monolithic model returns property dict directly
+  head: null

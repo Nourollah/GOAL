@@ -1,0 +1,18 @@
+# GOAL Model Configuration — LucidSet
+# NOT IMPLEMENTED — pairwise distance-binned mixture-of-experts
+# Instantiation will raise NotImplementedError; use deepset instead
+
+model:
+  backbone:
+    name: lucidset
+    num_elements: 120
+    hidden_channels: 128
+    num_radial_basis: 20
+    cutoff: 5.0
+    distance_boundaries: [4.0]
+
+  head:
+    name: energy_forces
+    irreps_in: "128x0e"
+    hidden_dim: 64
+    compute_stress: false

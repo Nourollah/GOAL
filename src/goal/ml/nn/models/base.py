@@ -162,6 +162,32 @@ class TaskHead(typing.Protocol):
 
 
 @typing.runtime_checkable
+class MonolithicModel(typing.Protocol):
+    """Protocol for monolithic models that bypass the backbone→head split.
+
+    A monolithic model takes an ``AtomicGraph`` and directly returns a
+    dictionary of predicted properties (energy, forces, etc.) — the same
+    format that ``TaskHead.forward`` produces.  This allows self-contained
+    architectures that handle everything internally whilst still
+    integrating with the GOAL training loop.
+
+    Monolithic models **can** use any available module from the project
+    (blocks, primitives, heads) — they simply skip the separate head
+    wiring.  The ``output_keys`` property declares which dictionary
+    keys consumers can expect.
+    """
+
+    def forward(self, graph: AtomicGraph) -> dict[str, torch.Tensor]:
+        """Map an atomic graph directly to predicted properties."""
+        ...
+
+    @property
+    def output_keys(self) -> list[str]:
+        """Keys this model produces, e.g. ``['energy', 'forces']``."""
+        ...
+
+
+@typing.runtime_checkable
 class LossFunction(typing.Protocol):
     """Protocol for composable loss functions."""
 

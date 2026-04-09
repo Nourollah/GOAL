@@ -43,7 +43,7 @@ A modular, open-source framework for building, training, and deploying machine-l
 | [Installation](#-installation) | [Evaluation](#-evaluation) | [Loss Functions](#-loss-functions) | [Logging](#-logging) |
 | [Project Structure](#-project-structure) | [ASE Calculator](#-ase-calculator) | [Foundation Model Adapters](#-foundation-model-adapters) | [Callbacks](#-callbacks) |
 | [Quick Start](#-quick-start) | [Fine-Tuning](#-fine-tuning) | [Feature Extraction](#-feature-extraction) | [CLI Reference](#-cli-reference) |
-| | [Data Loading](#-data-loading) | [Performance Engineering](#-performance-engineering) | [Pixi Tasks](#-pixi-tasks) |
+| [**Tutorial Notebook**](notebooks/getting_started.ipynb) | [Data Loading](#-data-loading) | [Performance Engineering](#-performance-engineering) | [Pixi Tasks](#-pixi-tasks) |
 | | [Benchmark Datasets](#-benchmark-datasets) | [Hyperparameter Tuning](#-hyperparameter-tuning) | |
 | | | [Mini Trainer](#-mini-trainer) | |
 | | | [Customising the Training Loop](#-customising-the-training-loop) | |
@@ -59,6 +59,7 @@ A modular, open-source framework for building, training, and deploying machine-l
 | | Feature | Details |
 |---|---|---|
 | 🔬 | **Equivariant & invariant backbones** | HyperSpec (E(3)-equivariant) and SchNet-like invariant GNN |
+| 🧱 | **Modular & monolithic models** | Backbone→head pipeline (HyperSpec, InvariantGNN, DeepSet, HyperSet, LucidSet) or self-contained monolithic models for external architectures |
 | 🎯 | **Multiple task heads** | Energy, forces, stress, dipole, direct forces |
 | 🧠 | **Foundation model adapters** | MACE and FairChem (UMA) pre-trained models |
 | 📂 | **Flexible data loading** | XYZ, HDF5, LMDB, ASE trajectory; multi-file merge, directory-based loading, auto-splitting |
@@ -174,7 +175,7 @@ pixi install -e cuda-deepspeed  # CUDA + DeepSpeed
 │           ├── cli/                #     Entry points: train, evaluate, finetune, tune
 │           ├── data/               #     DataModule, datasets (xyz, hdf5, lmdb, trajectory, concat)
 │           ├── nn/                 #     Neural network components
-│           │   ├── models/         #       Backbones: HyperSpec, invariant GNN
+│           │   ├── models/         #       Backbones: HyperSpec, InvariantGNN, DeepSet, HyperSet, LucidSet; MonolithicExample
 │           │   ├── heads/          #       Task heads: energy, forces, stress, dipole
 │           │   ├── blocks/         #       Building blocks: embedding, interaction, readout
 │           │   └── primitives/     #       Low-level ops: tensor products, radial basis, norms
@@ -186,7 +187,7 @@ pixi install -e cuda-deepspeed  # CUDA + DeepSpeed
 │           └── registry.py         #     Lazy component registry
 ├── examples/
 │   └── datasets/                   # Benchmark dataset loaders (MD17, ANI-1, QM9, SPICE)
-├── notebooks/                      # Demo notebooks (feature extraction, mini trainer)
+├── notebooks/                      # Tutorials & demos (getting started, feature extraction, mini trainer)
 ├── scripts/                        # SLURM job scripts
 ├── tests/                          # Test suite
 ├── data/                           # Dataset storage
@@ -215,6 +216,8 @@ python -m goal.ml.cli.train data.root=/path/to/dataset
 ```
 
 This loads `configs/train.yaml` which composes: `data=xyz`, `model=hyperspec`, `training=default`, `trainer=default`.
+
+> **📓 New to GOAL?** Work through [`notebooks/getting_started.ipynb`](notebooks/getting_started.ipynb) — a step-by-step tutorial covering model building (modular & monolithic), dataset loading, training, and using trained models as ASE calculators.
 
 ---
 
@@ -682,7 +685,24 @@ See [examples/datasets/README.md](examples/datasets/README.md) for full document
 ## 🟡 Models
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 
-### HyperSpec (equivariant)
+GOAL supports two model paradigms:
+
+| Paradigm | How it works | Config | Best for |
+|----------|-------------|--------|----------|
+| **Modular** | Backbone → NodeFeatures → Head → property dict | `model.backbone` + `model.head` | Mixing backbones and heads freely |
+| **Monolithic** | Model → property dict directly | `model.backbone` + `model.head: null` | External self-contained architectures |
+
+**Modular** models separate the backbone (feature extraction) from the head (property prediction). Any backbone can be paired with any compatible head. All built-in backbones (HyperSpec, InvariantGNN, DeepSet, HyperSet, LucidSet) are modular.
+
+**Monolithic** models handle everything internally — embedding, interaction, readout, and property prediction — in a single `forward()` call. They return a dictionary of predicted properties directly (the same format heads produce). Set `head: null` in the config to use a monolithic model. This capability exists for users who want to bring their own self-contained architecture and use GOAL's training infrastructure without adopting the backbone→head split.
+
+The `MonolithicModel` protocol in `goal.ml.nn.models.base` defines the contract: `forward(graph) → dict[str, Tensor]` and an `output_keys` property declaring which keys consumers can expect.
+
+---
+
+### Modular Backbones
+
+#### HyperSpec (equivariant)
 
 E(3)-equivariant graph neural network using spherical harmonics and tensor products.
 
@@ -699,7 +719,7 @@ Key parameters:
 
 Output irreps: `128x0e+128x1o+128x2e` (scalars + vectors + rank-2 tensors)
 
-### Invariant GNN
+#### Invariant GNN
 
 SchNet-like invariant backbone using only scalar features. Faster than equivariant models; use for baselines or when equivariance isn't needed.
 
@@ -709,11 +729,101 @@ goal-train model=invariant_gnn
 
 Output irreps: `128x0e` (scalars only)
 
+#### DeepSet
+
+Edge-based invariant backbone inspired by the SCAI project. Embeds atoms, expands edge distances with Bessel radial basis, projects source/target atoms and distances into a shared feature space, applies an edge interaction MLP, and scatter-aggregates to per-node invariant features.
+
+```bash
+goal-train model=deepset
+```
+
+Key parameters:
+- `embedding_dim: 128` — atomic embedding dimension
+- `hidden_channels: 128` — feature dimension
+- `num_filters: 128` — projected feature space size
+- `num_radial_basis: 20` — Bessel radial basis functions
+- `transform_depth: 2` — layers in projection MLPs
+- `cutoff: 5.0` — interaction radius (Å)
+
+Output irreps: `128x0e` (scalars only)
+
+#### HyperSet ⚠️
+
+> **Not implemented.** The original SCAI HyperSet was intended to route edge features through atom-type–specific expert MLPs, but the implementation never diverged from DeepSet. Instantiation raises `NotImplementedError`. Use `deepset` instead.
+
+```bash
+# Will raise NotImplementedError at instantiation
+goal-train model=hyperset
+```
+
+#### LucidSet ⚠️
+
+> **Not implemented.** The pairwise distance-binned mixture-of-experts approach requires an external atom-references dictionary and creates O(Z² × bins) expert modules, which does not scale within GOAL's paradigm. Instantiation raises `NotImplementedError`. Use `deepset` instead.
+
+```bash
+# Will raise NotImplementedError at instantiation
+goal-train model=lucidset
+```
+
+---
+
+### Monolithic Models
+
+Monolithic models bypass the backbone→head split. They take an `AtomicGraph` and return a property dictionary directly. This capability is provided for external users who want to bring their own self-contained architecture and use GOAL's training loop.
+
+#### Monolithic Example
+
+A minimal demonstration model that embeds atoms, applies a small MLP readout to obtain per-atom energy contributions, sums to total energy, and derives forces via autograd.
+
+```bash
+goal-train model=monolithic_example
+```
+
+> **Note:** This is intentionally simplistic. For real tasks, use a modular backbone + head combination.
+
+---
+
+### Implementing a New Monolithic Model
+
+Create a model that satisfies the `MonolithicModel` protocol:
+
+```python
+import torch
+import torch.nn as nn
+from goal.ml.data.graph import AtomicGraph
+from goal.ml.registry import MODEL_REGISTRY
+
+@MODEL_REGISTRY.register("my_monolithic")
+class MyModel(nn.Module):
+    def __init__(self, cutoff: float = 5.0) -> None:
+        super().__init__()
+        # Use any GOAL modules: AtomicNumberEmbedding, BesselBasis, etc.
+        ...
+
+    @property
+    def output_keys(self) -> list[str]:
+        return ["energy", "forces"]
+
+    def forward(self, graph: AtomicGraph) -> dict[str, torch.Tensor]:
+        # Compute everything internally, return property dict
+        return {"energy": energy, "forces": forces}
+```
+
+Then in the config, set `head: null`:
+
+```yaml
+model:
+  backbone:
+    name: my_monolithic
+    cutoff: 5.0
+  head: null
+```
+
 ---
 
 ## Heads
 
-Task-specific output heads registered via the head registry:
+Task-specific output heads registered via the head registry. Used with **modular** backbones — monolithic models set `head: null` and skip the head entirely.
 
 | Head | Description | Config key |
 |------|-------------|-----------|
@@ -1420,7 +1530,7 @@ GOAL uses [Hydra](https://hydra.cc/) for composable configuration. Every aspect 
 | Group | Path | Options |
 |-------|------|---------|
 | Data | `configs/data/` | `xyz`, `hdf5`, `lmdb`, `trajectory`, `md17_aspirin`, `md17_ethanol`, `rmd17_aspirin`, `ani1`, `ani1x`, `qm9` |
-| Model | `configs/model/` | `hyperspec`, `invariant_gnn` |
+| Model | `configs/model/` | `hyperspec`, `invariant_gnn`, `deepset`, `hyperset`⚠️, `lucidset`⚠️, `monolithic_example` |
 | Trainer | `configs/trainer/` | `default`, `gpu`, `ddp`, `fsdp`, `model_parallel`, `cpu`, `mps`, `ddp_sim` |
 | Training | `configs/training/` | `default` |
 | Strategy | `configs/strategy/` | `ddp`, `fsdp`, `fsdp2`, `deepspeed_zero1`, `deepspeed_zero2`, `deepspeed_zero3` |

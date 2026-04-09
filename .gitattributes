@@ -1,0 +1,4 @@
+# Jupyter notebooks — count as Python in GitHub language stats
+# and suppress noisy diffs from cell output changes
+*.ipynb linguist-language=Python
+*.ipynb linguist-generated=true

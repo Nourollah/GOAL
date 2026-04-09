@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, str(root / "src"))
 
 from goal.ml.data.datamodule import GOALDataModule
-from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
+from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY, MODEL_REGISTRY
 from goal.ml.training.loss import CompositeLoss, WeightedLoss
 from goal.ml.training.module import GOALModule
 from src.utils import (
@@ -32,16 +32,33 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def _build_goal_module(cfg: DictConfig) -> GOALModule:
-    """Build a GOALModule from the Hydra config using the registry system."""
-    # Backbone
-    backbone_cls = BACKBONE_REGISTRY.get(cfg.model.backbone.name)
+    """Build a GOALModule from the Hydra config using the registry system.
+
+    Supports two modes:
+
+    **Modular** — ``model.backbone`` + ``model.head`` both present.
+        Backbone from ``MODEL_REGISTRY`` (falling back to ``BACKBONE_REGISTRY``),
+        head from ``HEAD_REGISTRY``.
+
+    **Monolithic** — ``model.head`` is ``null`` or absent.
+        The backbone is expected to satisfy the ``MonolithicModel`` protocol
+        and return a property dictionary directly.
+    """
+    # Backbone — try MODEL_REGISTRY first, fall back to BACKBONE_REGISTRY
+    backbone_name: str = cfg.model.backbone.name
+    if backbone_name in MODEL_REGISTRY:
+        backbone_cls = MODEL_REGISTRY.get(backbone_name)
+    else:
+        backbone_cls = BACKBONE_REGISTRY.get(backbone_name)
     backbone_kwargs = {k: v for k, v in cfg.model.backbone.items() if k != "name"}
     backbone = backbone_cls(**backbone_kwargs)
 
-    # Head
-    head_cls = HEAD_REGISTRY.get(cfg.model.head.name)
-    head_kwargs = {k: v for k, v in cfg.model.head.items() if k != "name"}
-    head = head_cls(**head_kwargs)
+    # Head — None for monolithic models
+    head = None
+    if cfg.model.get("head") is not None:
+        head_cls = HEAD_REGISTRY.get(cfg.model.head.name)
+        head_kwargs = {k: v for k, v in cfg.model.head.items() if k != "name"}
+        head = head_cls(**head_kwargs)
 
     # Loss
     losses = []
@@ -51,6 +68,7 @@ def _build_goal_module(cfg: DictConfig) -> GOALModule:
     loss = CompositeLoss(losses)
 
     return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
+
 
 
 @task_wrapper
