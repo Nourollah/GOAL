@@ -23,7 +23,7 @@ A modular, open-source framework for building, training, and deploying machine-l
 [![hydra](https://img.shields.io/badge/Hydra_1.3-89B8CD?logo=dropbox&logoColor=white)](https://hydra.cc/)
 [![cuda](https://img.shields.io/badge/CUDA_12+-76B900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
 [![license](https://img.shields.io/badge/License-MIT-green.svg?labelColor=gray)](LICENSE)
-[![repo](https://img.shields.io/badge/GitHub-MC--GLOW-181717?logo=github)](https://github.com/Nourollah/GOAL)
+[![repo](https://img.shields.io/badge/GitHub-GOAL-181717?logo=github)](https://github.com/Nourollah/GOAL)
 
 > **Python 3.14** · GIL-free interpreter with true multithreading for data loading and preprocessing.
 
