@@ -361,6 +361,29 @@ goal-train trainer=mps data.root=/path/to/dataset
 goal-train trainer=cpu data.root=/path/to/dataset
 ```
 
+### Resuming Training
+
+If training is interrupted (crash, preemption, timeout), GOAL **automatically resumes** from the latest checkpoint.  `auto_resume` is enabled by default — on every launch the framework scans previous run directories for the most recent `last.ckpt` that matches the current dataset + model combination:
+
+```
+logs/train/runs/
+  2026-04-08_10-30-00_xyz_deepset/checkpoints/last.ckpt  ← found & resumed
+  2026-04-07_09-00-00_xyz_deepset/checkpoints/last.ckpt  ← older, skipped
+  2026-04-08_11-00-00_xyz_hyperspec/checkpoints/last.ckpt ← different model, ignored
+```
+
+Lightning restores the full training state (model weights, optimiser, scheduler, epoch counter, dataloader position) so training continues exactly where it left off.
+
+**Override behaviour:**
+
+```bash
+# Disable auto-resume (always start fresh)
+goal-train auto_resume=false
+
+# Resume from a specific checkpoint (takes priority over auto-resume)
+goal-train ckpt_path=/path/to/specific/checkpoint.ckpt
+```
+
 ---
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->

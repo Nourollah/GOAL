@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
 
 import hydra
 import lightning as L
@@ -75,6 +76,48 @@ def _build_goal_module(cfg: DictConfig) -> GOALModule:
     return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
 
 
+def _find_latest_checkpoint(cfg: DictConfig) -> str | None:
+    """Scan previous run directories for the most recent ``last.ckpt``.
+
+    Searches ``{log_dir}/{task_name}/runs/`` for directories whose name ends
+    with ``_{dataset_type}_{backbone_name}`` and contains a
+    ``checkpoints/last.ckpt`` file.  Returns the path to the most recently
+    modified checkpoint, or ``None`` if nothing is found.
+
+    This deliberately skips the *current* run directory (which Hydra just
+    created and is still empty) so we only resume from genuinely earlier runs.
+    """
+    log_dir: Path = Path(cfg.paths.log_dir)
+    task_name: str = cfg.task_name
+    dataset_type: str = cfg.data.dataset_type
+    backbone_name: str = cfg.model.backbone.name
+    current_output_dir: Path = Path(cfg.paths.output_dir)
+
+    runs_dir: Path = log_dir / task_name / "runs"
+    if not runs_dir.exists():
+        return None
+
+    suffix: str = f"_{dataset_type}_{backbone_name}"
+    candidates: list[tuple[float, Path]] = []
+
+    for run_dir in runs_dir.iterdir():
+        if not run_dir.is_dir() or not run_dir.name.endswith(suffix):
+            continue
+        # Skip the directory that Hydra just created for *this* invocation.
+        if run_dir.resolve() == current_output_dir.resolve():
+            continue
+        ckpt: Path = run_dir / "checkpoints" / "last.ckpt"
+        if ckpt.exists():
+            candidates.append((ckpt.stat().st_mtime, ckpt))
+
+    if not candidates:
+        return None
+
+    # Most recently modified checkpoint wins.
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return str(candidates[0][1])
+
+
 @task_wrapper
 def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Trains the model. Can additionally evaluate on a testset, using best weights obtained during
@@ -120,7 +163,17 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     if cfg.get("train"):
         log.info("Starting training!")
-        trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
+
+        # Resolve checkpoint path: explicit > auto-resume > None (fresh start)
+        ckpt_path: str | None = cfg.get("ckpt_path")
+        if ckpt_path is None and cfg.get("auto_resume", False):
+            ckpt_path = _find_latest_checkpoint(cfg)
+            if ckpt_path is not None:
+                log.info(f"Auto-resume: resuming from {ckpt_path}")
+            else:
+                log.info("Auto-resume: no previous checkpoint found — starting fresh.")
+
+        trainer.fit(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
 
     train_metrics = trainer.callback_metrics
 

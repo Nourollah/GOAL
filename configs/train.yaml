@@ -46,5 +46,9 @@ test: True
 # simply provide checkpoint path to resume training
 ckpt_path: null
 
+# automatically find and resume from the latest checkpoint of a previous run
+# with the same dataset + model combination.  Ignored when ckpt_path is set.
+auto_resume: true
+
 # seed for random number generators in pytorch, numpy and python.random
 seed: null
