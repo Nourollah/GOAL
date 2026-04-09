@@ -25,7 +25,7 @@ def _resolve_sharding_strategy(name: str) -> typing.Any:
     """Map a human-readable sharding name to a ``ShardingStrategy`` enum value."""
     from torch.distributed.fsdp import ShardingStrategy
 
-    mapping: typing.Dict[str, ShardingStrategy] = {
+    mapping: dict[str, ShardingStrategy] = {
         "full_shard": ShardingStrategy.FULL_SHARD,
         "shard_grad_op": ShardingStrategy.SHARD_GRAD_OP,
         "no_shard": ShardingStrategy.NO_SHARD,
@@ -41,7 +41,7 @@ def _resolve_state_dict_type(name: str) -> typing.Any:
     """Map a human-readable state-dict name to a ``StateDictType`` enum value."""
     from torch.distributed.fsdp import StateDictType
 
-    mapping: typing.Dict[str, StateDictType] = {
+    mapping: dict[str, StateDictType] = {
         "full": StateDictType.FULL_STATE_DICT,
         "sharded": StateDictType.SHARDED_STATE_DICT,
         "local": StateDictType.LOCAL_STATE_DICT,
@@ -54,7 +54,7 @@ def _resolve_state_dict_type(name: str) -> typing.Any:
 
 
 def _resolve_auto_wrap_policy(
-    policy_name: typing.Optional[str],
+    policy_name: str | None,
     min_params: int,
 ) -> typing.Any:
     """Build an auto-wrap policy callable from config."""
@@ -87,7 +87,7 @@ def _resolve_auto_wrap_policy(
 # ------------------------------------------------------------------
 
 
-def build_fsdp_strategy(cfg: DictConfig) -> "FSDPStrategy":
+def build_fsdp_strategy(cfg: DictConfig) -> FSDPStrategy:
     """Build ``FSDPStrategy`` (FSDP1) from config.
 
     FSDP1 shards model parameters, gradients, and optimiser states
@@ -117,12 +117,12 @@ def build_fsdp_strategy(cfg: DictConfig) -> "FSDPStrategy":
     """
     from lightning.pytorch.strategies import FSDPStrategy
 
-    policy_name: typing.Optional[str] = cfg.get("auto_wrap_policy", None)
+    policy_name: str | None = cfg.get("auto_wrap_policy", None)
     min_params: int = cfg.get("size_based_min_params", 1_000_000)
     activation_ckpt: bool = cfg.get("activation_checkpointing", False)
     cpu_offload: bool = cfg.get("cpu_offload", False)
 
-    kwargs: typing.Dict[str, typing.Any] = {}
+    kwargs: dict[str, typing.Any] = {}
 
     auto_wrap: typing.Any = _resolve_auto_wrap_policy(policy_name, min_params)
     if auto_wrap is not None:
