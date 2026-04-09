@@ -15,7 +15,7 @@ if typing.TYPE_CHECKING:
     from lightning.pytorch.strategies import Strategy
 
 
-_KNOWN_STRATEGIES: typing.List[str] = [
+_KNOWN_STRATEGIES: list[str] = [
     "auto",
     "single",
     "ddp",
@@ -28,7 +28,7 @@ _KNOWN_STRATEGIES: typing.List[str] = [
 ]
 
 
-def build_strategy(cfg: DictConfig) -> "typing.Union[Strategy, str]":
+def build_strategy(cfg: DictConfig) -> Strategy | str:
     """Build a Lightning strategy from Hydra config.
 
     Single entry point for all strategy construction.  Called from
@@ -65,22 +65,27 @@ def build_strategy(cfg: DictConfig) -> "typing.Union[Strategy, str]":
 
     if name == "single":
         from lightning.pytorch.strategies import SingleDeviceStrategy
+
         return SingleDeviceStrategy()
 
     if name == "ddp":
         from goal.ml.training.strategies.ddp import build_ddp_strategy
+
         return build_ddp_strategy(strategy_cfg)
 
     if name == "fsdp":
         from goal.ml.training.strategies.fsdp import build_fsdp_strategy
+
         return build_fsdp_strategy(strategy_cfg)
 
     if name == "fsdp2":
         from goal.ml.training.strategies.fsdp import build_fsdp2_strategy
+
         return build_fsdp2_strategy(strategy_cfg)
 
     if name.startswith("deepspeed"):
         from goal.ml.training.strategies.deepspeed import build_deepspeed_strategy
+
         return build_deepspeed_strategy(strategy_cfg)
 
     available: str = ", ".join(_KNOWN_STRATEGIES)

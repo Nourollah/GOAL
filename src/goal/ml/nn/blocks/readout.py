@@ -25,7 +25,7 @@ class ScalarReadout(nn.Module):
         Width of the readout MLP hidden layer.
     """
 
-    def __init__(self, irreps_in: typing.Union[str, Irreps], hidden_dim: int = 64) -> None:
+    def __init__(self, irreps_in: str | Irreps, hidden_dim: int = 64) -> None:
         super().__init__()
         self.irreps_in = Irreps(irreps_in)
 
@@ -43,7 +43,7 @@ class ScalarReadout(nn.Module):
     def forward(
         self,
         node_feats: torch.Tensor,
-        batch: typing.Optional[torch.Tensor] = None,
+        batch: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute per-node scalar, then optionally sum over graphs.
 
@@ -59,10 +59,11 @@ class ScalarReadout(nn.Module):
         Tensor
             Per-graph scalar ``(B,)`` if batch is given, else per-node ``(N, 1)``.
         """
-        scalars = self.to_scalars(node_feats)                               # (N, num_scalars)
-        node_out = self.mlp(scalars)                                         # (N, 1)
+        scalars = self.to_scalars(node_feats)  # (N, num_scalars)
+        node_out = self.mlp(scalars)  # (N, 1)
 
         if batch is not None:
             from torch_geometric.utils import scatter
-            return scatter(node_out.squeeze(-1), batch, dim=0, reduce="sum") # (B,)
-        return node_out                                                      # (N, 1)
+
+            return scatter(node_out.squeeze(-1), batch, dim=0, reduce="sum")  # (B,)
+        return node_out  # (N, 1)

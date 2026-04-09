@@ -31,22 +31,22 @@ from goal.ml.training.module import GOALModule
 from goal.ml.training.strategies.factory import build_strategy
 
 
-def _instantiate_callbacks(cfg: typing.Optional[DictConfig]) -> typing.List[Callback]:
+def _instantiate_callbacks(cfg: DictConfig | None) -> list[Callback]:
     """Instantiate Lightning callbacks from Hydra config."""
     if not cfg:
         return []
-    callbacks: typing.List[Callback] = []
+    callbacks: list[Callback] = []
     for _, cb_conf in cfg.items():
         if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
             callbacks.append(hydra.utils.instantiate(cb_conf))
     return callbacks
 
 
-def _instantiate_loggers(cfg: typing.Optional[DictConfig]) -> typing.List[Logger]:
+def _instantiate_loggers(cfg: DictConfig | None) -> list[Logger]:
     """Instantiate Lightning loggers from Hydra config."""
     if not cfg:
         return []
-    loggers: typing.List[Logger] = []
+    loggers: list[Logger] = []
     for _, lg_conf in cfg.items():
         if isinstance(lg_conf, DictConfig) and "_target_" in lg_conf:
             loggers.append(hydra.utils.instantiate(lg_conf))
@@ -62,37 +62,39 @@ def _build_loss(cfg: DictConfig) -> CompositeLoss:
     - A **list** of ``{name, weight}`` dicts — multiple loss functions
       for the same property, each logged and weighted independently.
     """
-    losses: typing.List[WeightedLoss] = []
+    losses: list[WeightedLoss] = []
     for loss_cfg in cfg.training.losses:
         loss_cls: typing.Any = LOSS_REGISTRY.get(loss_cfg.name)
         fn_spec: typing.Any = loss_cfg.get("fn", "mse")
 
         if isinstance(fn_spec, str):
-            losses.append(WeightedLoss(
-                loss_cls(loss_fn=fn_spec),
-                weight=loss_cfg.weight,
-                label=loss_cfg.name,
-            ))
+            losses.append(
+                WeightedLoss(
+                    loss_cls(loss_fn=fn_spec),
+                    weight=loss_cfg.weight,
+                    label=loss_cfg.name,
+                )
+            )
         else:
             for sub in fn_spec:
                 sub_name: str = sub["name"] if isinstance(sub, dict) else sub.name
-                sub_weight: float = float(
-                    sub["weight"] if isinstance(sub, dict) else sub.weight
-                )
+                sub_weight: float = float(sub["weight"] if isinstance(sub, dict) else sub.weight)
                 fn_label: str = sub_name.rsplit(".", 1)[-1]
-                losses.append(WeightedLoss(
-                    loss_cls(loss_fn=sub_name),
-                    weight=sub_weight,
-                    label=f"{loss_cfg.name}_{fn_label}",
-                    group=loss_cfg.name,
-                ))
+                losses.append(
+                    WeightedLoss(
+                        loss_cls(loss_fn=sub_name),
+                        weight=sub_weight,
+                        label=f"{loss_cfg.name}_{fn_label}",
+                        group=loss_cfg.name,
+                    )
+                )
     return CompositeLoss(losses)
 
 
 def _build_head(cfg: DictConfig) -> typing.Any:
     """Build the task head from config."""
     head_cls: typing.Any = HEAD_REGISTRY.get(cfg.model.head.name)
-    head_kwargs: typing.Dict[str, typing.Any] = {k: v for k, v in cfg.model.head.items() if k != "name"}
+    head_kwargs: dict[str, typing.Any] = {k: v for k, v in cfg.model.head.items() if k != "name"}
     return head_cls(**head_kwargs)
 
 
@@ -101,7 +103,7 @@ def _build_backbone(backbone_cfg: DictConfig) -> typing.Any:
     adapter_cls: typing.Any = BACKBONE_REGISTRY.get(backbone_cfg.name)
 
     # Mode 1: Load from local fine-tuned checkpoint
-    local_ckpt: typing.Optional[str] = backbone_cfg.get("local_checkpoint")
+    local_ckpt: str | None = backbone_cfg.get("local_checkpoint")
     if local_ckpt:
         if not hasattr(adapter_cls, "from_local"):
             raise ValueError(
@@ -112,13 +114,12 @@ def _build_backbone(backbone_cfg: DictConfig) -> typing.Any:
 
     # Mode 2: Load pre-trained from hub
     if backbone_cfg.get("pretrained", False):
-        return adapter_cls.from_pretrained(
-            variant=backbone_cfg.get("variant", "large")
-        )
+        return adapter_cls.from_pretrained(variant=backbone_cfg.get("variant", "large"))
 
     # Mode 3: Fresh backbone from config
-    backbone_kwargs: typing.Dict[str, typing.Any] = {
-        k: v for k, v in backbone_cfg.items()
+    backbone_kwargs: dict[str, typing.Any] = {
+        k: v
+        for k, v in backbone_cfg.items()
         if k not in {"name", "pretrained", "variant", "local_checkpoint"}
     }
     return adapter_cls(**backbone_kwargs)
@@ -156,9 +157,9 @@ def finetune(cfg: DictConfig) -> None:
     datamodule: GOALDataModule = GOALDataModule(cfg)
 
     last_ckpt: Path = checkpoint_dir / "last.ckpt"
-    resume_path: typing.Optional[str] = str(last_ckpt) if last_ckpt.exists() else None
+    resume_path: str | None = str(last_ckpt) if last_ckpt.exists() else None
 
-    callbacks: typing.List[Callback] = [
+    callbacks: list[Callback] = [
         GOALCheckpoint(
             dirpath=str(checkpoint_dir),
             filename="epoch={epoch:04d}-val_loss={val/total:.4f}",
@@ -174,13 +175,13 @@ def finetune(cfg: DictConfig) -> None:
     ]
 
     # Instantiate callbacks and loggers from Hydra config (if present)
-    hydra_callbacks: typing.List[Callback] = _instantiate_callbacks(cfg.get("callbacks"))
-    loggers: typing.List[Logger] = _instantiate_loggers(cfg.get("logger"))
-    all_callbacks: typing.List[Callback] = callbacks + (hydra_callbacks or [])
+    hydra_callbacks: list[Callback] = _instantiate_callbacks(cfg.get("callbacks"))
+    loggers: list[Logger] = _instantiate_loggers(cfg.get("logger"))
+    all_callbacks: list[Callback] = callbacks + (hydra_callbacks or [])
 
     # Strategy: if cfg.strategy exists, use the strategy factory;
     # otherwise fall through to hydra.utils.instantiate (backward compat).
-    strategy_override: typing.Dict[str, typing.Any] = {}
+    strategy_override: dict[str, typing.Any] = {}
     if cfg.get("strategy") is not None:
         strategy_override["strategy"] = build_strategy(cfg)
 

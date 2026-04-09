@@ -43,7 +43,7 @@ class TrajectoryDataset(BaseAtomicDataset):
 
     def __init__(
         self,
-        root: typing.Union[str, Path],
+        root: str | Path,
         cutoff: float,
         split: str = "train",
         energy_key: str = "energy",
@@ -53,7 +53,7 @@ class TrajectoryDataset(BaseAtomicDataset):
         super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype)
         self.energy_key: str = energy_key
         self.forces_key: str = forces_key
-        self._graphs: typing.List[AtomicGraph] = []
+        self._graphs: list[AtomicGraph] = []
         self._load()
 
     def _load(self) -> None:

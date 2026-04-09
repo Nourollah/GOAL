@@ -45,22 +45,22 @@ class ExtXYZDataset(BaseAtomicDataset):
 
     def __init__(
         self,
-        root: typing.Union[str, Path],
+        root: str | Path,
         cutoff: float,
         split: str = "train",
         energy_key: str = "energy",
         forces_key: str = "forces",
         stress_key: str = "stress",
-        head: typing.Optional[str] = None,
+        head: str | None = None,
         dtype: torch.dtype = torch.float64,
     ) -> None:
         super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype)
         self.energy_key: str = energy_key
         self.forces_key: str = forces_key
         self.stress_key: str = stress_key
-        self.head: typing.Optional[str] = head
+        self.head: str | None = head
 
-        self._graphs: typing.List[AtomicGraph] = []
+        self._graphs: list[AtomicGraph] = []
         self._load()
 
     def _load(self) -> None:

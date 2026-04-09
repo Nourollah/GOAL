@@ -67,7 +67,7 @@ class MD17Dataset(BenchmarkDataset):
     root : str
         Directory for downloaded and cached data.
     molecule : str
-        One of :data:`MD17_MOLECULES` or :data:`REVISED_MD17_MOLECULES`.
+        One of ``MD17_MOLECULES`` or ``REVISED_MD17_MOLECULES``.
     revised : bool
         If ``True``, use rMD17; if ``False``, use original MD17.
     cutoff : float

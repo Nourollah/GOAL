@@ -63,7 +63,7 @@ class UMAAdapter:
         return cls(calc.trainer.model)
 
     @classmethod
-    def from_local(cls, checkpoint_path: typing.Union[str, Path], **kwargs: typing.Any) -> UMAAdapter:
+    def from_local(cls, checkpoint_path: str | Path, **kwargs: typing.Any) -> UMAAdapter:
         """Load a FairChem model from a local checkpoint file.
 
         Use this to load fine-tuned FairChem/OCP models.
@@ -112,7 +112,7 @@ class UMAAdapter:
 
     def forward(self, graph: AtomicGraph) -> NodeFeatures:
         """Translate AtomicGraph -> FairChem input, run model, return NodeFeatures."""
-        batch: typing.Dict[str, typing.Any] = self._to_fairchem_batch(graph)
+        batch: dict[str, typing.Any] = self._to_fairchem_batch(graph)
         out: typing.Any = self._model(batch)
         node_feats: typing.Any = out.get("node_feats", out.get("hidden_feats"))
         return NodeFeatures(
@@ -121,7 +121,7 @@ class UMAAdapter:
             node_energies=out.get("node_energy"),
         )
 
-    def _to_fairchem_batch(self, graph: AtomicGraph) -> typing.Dict[str, typing.Any]:
+    def _to_fairchem_batch(self, graph: AtomicGraph) -> dict[str, typing.Any]:
         """Convert GOAL AtomicGraph to FairChem's expected input format."""
         return {
             "pos": graph.positions,
@@ -136,6 +136,6 @@ class UMAAdapter:
         """Proxy to underlying model parameters (for freezing)."""
         return self._model.parameters()
 
-    def requires(self) -> typing.List[str]:
+    def requires(self) -> list[str]:
         """Required pip packages for this adapter."""
         return ["fairchem-core>=1.0"]

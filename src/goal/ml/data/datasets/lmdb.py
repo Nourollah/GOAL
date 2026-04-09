@@ -47,7 +47,7 @@ class LMDBDataset(BaseAtomicDataset):
 
     def __init__(
         self,
-        root: typing.Union[str, Path],
+        root: str | Path,
         cutoff: float,
         split: str = "train",
         energy_key: str = "energy",
@@ -83,7 +83,7 @@ class LMDBDataset(BaseAtomicDataset):
         )
 
         with self._env.begin(write=False) as txn:
-            length_bytes: typing.Optional[bytes] = txn.get(b"length")
+            length_bytes: bytes | None = txn.get(b"length")
             if length_bytes is not None:
                 self._length = int(length_bytes)
             else:
@@ -94,35 +94,36 @@ class LMDBDataset(BaseAtomicDataset):
 
     def __getitem__(self, idx: int) -> AtomicGraph:
         with self._env.begin(write=False) as txn:
-            raw: typing.Optional[bytes] = txn.get(str(idx).encode())
+            raw: bytes | None = txn.get(str(idx).encode())
             if raw is None:
                 raise IndexError(f"Index {idx} not found in LMDB")
 
-        data: typing.Dict[str, typing.Any] = pickle.loads(raw)
+        data: dict[str, typing.Any] = pickle.loads(raw)
         return self._dict_to_graph(data)
 
-    def _dict_to_graph(self, data: typing.Dict[str, typing.Any]) -> AtomicGraph:
+    def _dict_to_graph(self, data: dict[str, typing.Any]) -> AtomicGraph:
         """Convert a stored dict to an AtomicGraph."""
 
-        def _to_tensor(val: typing.Any, dtype: torch.dtype = self.dtype) -> typing.Optional[torch.Tensor]:
+        def _to_tensor(val: typing.Any, dtype: torch.dtype = self.dtype) -> torch.Tensor | None:
             if val is None:
                 return None
             if isinstance(val, torch.Tensor):
                 return val.to(dtype)
             return torch.tensor(val, dtype=dtype)
 
-        positions: typing.Optional[torch.Tensor] = _to_tensor(data["positions"])
-        atomic_numbers: typing.Optional[torch.Tensor] = _to_tensor(data["atomic_numbers"], dtype=torch.long)
-        cell: typing.Optional[torch.Tensor] = _to_tensor(data.get("cell", torch.zeros(3, 3)))
-        pbc: typing.Optional[torch.Tensor] = _to_tensor(data.get("pbc", torch.zeros(3)), dtype=torch.bool)
+        positions: torch.Tensor | None = _to_tensor(data["positions"])
+        atomic_numbers: torch.Tensor | None = _to_tensor(data["atomic_numbers"], dtype=torch.long)
+        cell: torch.Tensor | None = _to_tensor(data.get("cell", torch.zeros(3, 3)))
+        pbc: torch.Tensor | None = _to_tensor(data.get("pbc", torch.zeros(3)), dtype=torch.bool)
 
         # Use pre-computed graph if available, else build on-the-fly
         if "edge_index" in data:
-            edge_index: typing.Optional[torch.Tensor] = _to_tensor(data["edge_index"], dtype=torch.long)
-            edge_vectors: typing.Optional[torch.Tensor] = _to_tensor(data.get("edge_vectors"))
-            edge_lengths: typing.Optional[torch.Tensor] = _to_tensor(data.get("edge_lengths"))
+            edge_index: torch.Tensor | None = _to_tensor(data["edge_index"], dtype=torch.long)
+            edge_vectors: torch.Tensor | None = _to_tensor(data.get("edge_vectors"))
+            edge_lengths: torch.Tensor | None = _to_tensor(data.get("edge_lengths"))
         else:
             from torch_geometric.nn import radius_graph
+
             edge_index = radius_graph(positions, r=self.cutoff, loop=False)
             row: torch.Tensor
             col: torch.Tensor

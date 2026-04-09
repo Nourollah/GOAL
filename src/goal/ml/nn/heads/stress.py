@@ -42,27 +42,31 @@ class StressHead(nn.Module):
     ) -> None:
         super().__init__()
         self.readout: ScalarReadout = ScalarReadout(irreps_in=irreps_in, hidden_dim=hidden_dim)
-        self._output_keys: typing.List[str] = ["energy", "stress"]
+        self._output_keys: list[str] = ["energy", "stress"]
 
     @property
-    def output_keys(self) -> typing.List[str]:
+    def output_keys(self) -> list[str]:
         return self._output_keys
 
     def forward(
         self,
         features: NodeFeatures,
         graph: AtomicGraph,
-    ) -> typing.Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         node_energies: torch.Tensor = self.readout(features.node_feats).squeeze(-1)  # (N,)
 
-        batch: torch.Tensor = graph.batch if graph.batch is not None else torch.zeros(  # (N,)
-            graph.num_atoms, dtype=torch.long, device=node_energies.device
+        batch: torch.Tensor = (
+            graph.batch
+            if graph.batch is not None
+            else torch.zeros(  # (N,)
+                graph.num_atoms, dtype=torch.long, device=node_energies.device
+            )
         )
         energy: torch.Tensor = scatter(node_energies, batch, dim=0, reduce="sum")  # (B,)
 
-        outputs: typing.Dict[str, torch.Tensor] = {
-            "energy": energy,                                               # (B,)
-            "num_atoms": scatter(                                           # (B,)
+        outputs: dict[str, torch.Tensor] = {
+            "energy": energy,  # (B,)
+            "num_atoms": scatter(  # (B,)
                 torch.ones_like(node_energies), batch, dim=0, reduce="sum"
             ),
         }
@@ -70,7 +74,7 @@ class StressHead(nn.Module):
         # Stress via virial: sigma_ij = (1/V) * sum_a r_a_i * f_a_j
         # Implemented as derivative of energy w.r.t. strain
         if graph.pos.requires_grad:
-            forces_neg = torch.autograd.grad(                               # (N, 3)
+            forces_neg = torch.autograd.grad(  # (N, 3)
                 energy.sum(),
                 graph.pos,
                 create_graph=self.training,
@@ -79,29 +83,31 @@ class StressHead(nn.Module):
 
             # Virial contribution from pairwise interactions
             # stress = -(1/V) * sum_edges (r_ij outer f_j)
-            row, col = graph.edge_index                                     # (E,), (E,)
-            virial = torch.einsum(                                          # (E, 3, 3)
+            row, col = graph.edge_index  # (E,), (E,)
+            virial = torch.einsum(  # (E, 3, 3)
                 "ei,ej->eij",
-                graph.edge_attr,                                            # (E, 3)
-                forces_neg[col],                                            # (E, 3)
+                graph.edge_attr,  # (E, 3)
+                forces_neg[col],  # (E, 3)
             )
 
             # Sum virial per graph
             num_graphs = energy.shape[0]
-            stress = scatter(                                               # (B, 9)
-                virial.view(-1, 9),                                         # (E, 9)
+            stress = scatter(  # (B, 9)
+                virial.view(-1, 9),  # (E, 9)
                 batch[row],
                 dim=0,
                 reduce="sum",
                 dim_size=num_graphs,
-            ).view(-1, 3, 3)                                                # (B, 3, 3)
+            ).view(
+                -1, 3, 3
+            )  # (B, 3, 3)
 
             # Normalise by cell volume
             if graph.cell is not None:
-                cell = graph.cell.view(-1, 3, 3)                            # (B, 3, 3)
-                volumes = torch.det(cell).abs().clamp(min=1e-10)            # (B,)
-                stress = stress / volumes.unsqueeze(-1).unsqueeze(-1)       # (B, 3, 3)
+                cell = graph.cell.view(-1, 3, 3)  # (B, 3, 3)
+                volumes = torch.det(cell).abs().clamp(min=1e-10)  # (B,)
+                stress = stress / volumes.unsqueeze(-1).unsqueeze(-1)  # (B, 3, 3)
 
-            outputs["stress"] = stress                                      # (B, 3, 3)
+            outputs["stress"] = stress  # (B, 3, 3)
 
         return outputs

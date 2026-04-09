@@ -31,28 +31,28 @@ class ConcatAtomicDataset(Dataset):
 
     def __init__(
         self,
-        datasets: typing.List[Dataset],
+        datasets: list[Dataset],
         merge_strategy: str = "sequential",
-        seed: typing.Optional[int] = None,
+        seed: int | None = None,
     ) -> None:
         super().__init__()
-        self.datasets: typing.List[Dataset] = datasets
+        self.datasets: list[Dataset] = datasets
         self.merge_strategy: str = merge_strategy
 
         # Build cumulative lengths for O(log n) index lookup
-        self._cumulative_lengths: typing.List[int] = []
+        self._cumulative_lengths: list[int] = []
         total: int = 0
         for ds in datasets:
             total += len(ds)
             self._cumulative_lengths.append(total)
 
         # Build index mapping
-        self._indices: typing.List[int] = list(range(total))
+        self._indices: list[int] = list(range(total))
         if merge_strategy == "random":
             gen: torch.Generator = torch.Generator()
             if seed is not None:
                 gen.manual_seed(seed)
-            perm: typing.List[int] = torch.randperm(total, generator=gen).tolist()
+            perm: list[int] = torch.randperm(total, generator=gen).tolist()
             self._indices = perm
 
     def __len__(self) -> int:

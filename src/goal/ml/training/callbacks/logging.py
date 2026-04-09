@@ -29,7 +29,7 @@ class RichLoggingCallback(L.Callback):
         if not trainer.is_global_zero:
             return
 
-        metrics: typing.Dict[str, typing.Any] = trainer.callback_metrics
+        metrics: dict[str, typing.Any] = trainer.callback_metrics
         if not metrics:
             return
 

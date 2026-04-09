@@ -13,7 +13,7 @@ if typing.TYPE_CHECKING:
     from lightning.pytorch.strategies import DDPStrategy
 
 
-def build_ddp_strategy(cfg: DictConfig) -> "DDPStrategy":
+def build_ddp_strategy(cfg: DictConfig) -> DDPStrategy:
     """Build ``DDPStrategy`` from config.
 
     Parameters (all optional with defaults)

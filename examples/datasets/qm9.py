@@ -61,7 +61,7 @@ class QM9Dataset(BenchmarkDataset):
         Directory for downloaded and cached data.
     target : str or int or None
         Which property to predict.  Can be an integer (0–18) or a string
-        from :data:`QM9_TARGETS` values (e.g. ``'homo'``, ``'gap'``).
+        from ``QM9_TARGETS`` values (e.g. ``'homo'``, ``'gap'``).
         If ``None``, all 19 properties are stored.
     cutoff : float
         Neighbour list cutoff in Ångström.

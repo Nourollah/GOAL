@@ -24,7 +24,7 @@ class EquivariantLayerNorm(nn.Module):
         Small constant for numerical stability.
     """
 
-    def __init__(self, irreps: typing.Union[str, Irreps], eps: float = 1e-5) -> None:
+    def __init__(self, irreps: str | Irreps, eps: float = 1e-5) -> None:
         super().__init__()
         self.irreps = Irreps(irreps)
         self.eps = eps
@@ -40,21 +40,21 @@ class EquivariantLayerNorm(nn.Module):
 
         for mul, ir in self.irreps:
             dim = mul * ir.dim
-            chunk = x[:, idx : idx + dim]                                   # (N, mul * ir.dim)
+            chunk = x[:, idx : idx + dim]  # (N, mul * ir.dim)
             idx += dim
 
             if ir.l == 0:
-                scalar_features.append(chunk)                               # (N, mul)
+                scalar_features.append(chunk)  # (N, mul)
             else:
                 # Normalise by the norm of each irrep block
-                chunk_view = chunk.reshape(-1, mul, ir.dim)                 # (N, mul, 2l+1)
+                chunk_view = chunk.reshape(-1, mul, ir.dim)  # (N, mul, 2l+1)
                 norms = chunk_view.norm(dim=-1, keepdim=True).clamp(min=self.eps)  # (N, mul, 1)
-                chunk_view = chunk_view / norms                             # (N, mul, 2l+1)
-                outputs.append(chunk_view.reshape(-1, dim))                 # (N, mul * ir.dim)
+                chunk_view = chunk_view / norms  # (N, mul, 2l+1)
+                outputs.append(chunk_view.reshape(-1, dim))  # (N, mul * ir.dim)
 
         if scalar_features and self.scalar_norm is not None:
-            scalars = torch.cat(scalar_features, dim=-1)                    # (N, total_scalars)
-            scalars = self.scalar_norm(scalars)                             # (N, total_scalars)
+            scalars = torch.cat(scalar_features, dim=-1)  # (N, total_scalars)
+            scalars = self.scalar_norm(scalars)  # (N, total_scalars)
             outputs.insert(0, scalars)
 
-        return torch.cat(outputs, dim=-1)                                   # (N, irreps.dim)
+        return torch.cat(outputs, dim=-1)  # (N, irreps.dim)

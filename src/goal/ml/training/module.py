@@ -79,7 +79,7 @@ class GOALModule(L.LightningModule):
         - DTensor-based sharding
         """
         if self._compile_model:
-            compile_cfg: typing.Dict[str, typing.Any] = self.config.training.get("compile", {})
+            compile_cfg: dict[str, typing.Any] = self.config.training.get("compile", {})
             # torch.compile requires PyTorch 2.0+ and works best with CUDA
             if not hasattr(torch, "compile"):
                 warnings.warn(
@@ -94,7 +94,7 @@ class GOALModule(L.LightningModule):
                     dynamic=compile_cfg.get("dynamic", None),
                 )
 
-    def forward(self, graph: AtomicGraph) -> typing.Dict[str, torch.Tensor]:
+    def forward(self, graph: AtomicGraph) -> dict[str, torch.Tensor]:
         """Run backbone -> head pipeline."""
         features: typing.Any = self.backbone(graph)
         return self.head(features, graph)
@@ -109,8 +109,8 @@ class GOALModule(L.LightningModule):
 
     def training_step(self, batch: AtomicGraph, batch_idx: int) -> torch.Tensor:
         """Single training step -- forward, loss, logging."""
-        predictions: typing.Dict[str, torch.Tensor] = self(batch)
-        losses: typing.Dict[str, torch.Tensor] = self.loss(predictions, batch)
+        predictions: dict[str, torch.Tensor] = self(batch)
+        losses: dict[str, torch.Tensor] = self.loss(predictions, batch)
 
         # Log with gradient accumulation awareness
         self.log_dict(
@@ -122,7 +122,10 @@ class GOALModule(L.LightningModule):
         return losses["total"]
 
     def on_train_batch_end(
-        self, outputs: typing.Any, batch: AtomicGraph, batch_idx: int,
+        self,
+        outputs: typing.Any,
+        batch: AtomicGraph,
+        batch_idx: int,
     ) -> None:
         """Update EMA after each optimiser step."""
         if hasattr(self, "ema"):
@@ -159,7 +162,7 @@ class GOALModule(L.LightningModule):
             sync_dist=True,
         )
 
-    def configure_optimizers(self) -> typing.Dict[str, typing.Any]:
+    def configure_optimizers(self) -> dict[str, typing.Any]:
         """Set up optimiser and learning rate scheduler.
 
         Uses AdamW (PyTorch 2.x) as default. Supports cosine annealing
@@ -189,7 +192,11 @@ class GOALModule(L.LightningModule):
                 },
             }
         elif scheduler_type == "cosine_warmup":
-            from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
+            from torch.optim.lr_scheduler import (
+                CosineAnnealingLR,
+                LinearLR,
+                SequentialLR,
+            )
 
             warmup_epochs = opt_cfg.get("warmup_epochs", 10)
             warmup = LinearLR(
@@ -240,8 +247,3 @@ class GOALModule(L.LightningModule):
                 gradient_clip_val=clip_val,
                 gradient_clip_algorithm="norm",
             )
-
-    def on_train_batch_end(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        """Update EMA after each training step."""
-        if hasattr(self, "ema"):
-            self.ema.update()

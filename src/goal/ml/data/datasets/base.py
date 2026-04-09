@@ -21,7 +21,7 @@ class BaseAtomicDataset(Dataset, ABC):
 
     def __init__(
         self,
-        root: typing.Union[str, Path],
+        root: str | Path,
         cutoff: float,
         split: str = "train",
         dtype: torch.dtype = torch.float64,

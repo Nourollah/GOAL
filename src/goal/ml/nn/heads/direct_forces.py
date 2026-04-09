@@ -55,33 +55,37 @@ class DirectForcesHead(nn.Module):
         vector_irreps = Irreps("1x1o")
         self.force_proj: EquivariantLinear = EquivariantLinear(self.irreps_in, vector_irreps)
 
-        self._output_keys: typing.List[str] = ["energy", "forces"]
+        self._output_keys: list[str] = ["energy", "forces"]
 
     @property
-    def output_keys(self) -> typing.List[str]:
+    def output_keys(self) -> list[str]:
         return self._output_keys
 
     def forward(
         self,
         features: NodeFeatures,
         graph: AtomicGraph,
-    ) -> typing.Dict[str, torch.Tensor]:
-        node_feats: torch.Tensor = features.node_feats                      # (N, irreps_in.dim)
+    ) -> dict[str, torch.Tensor]:
+        node_feats: torch.Tensor = features.node_feats  # (N, irreps_in.dim)
 
         # Energy: scalar readout
         node_energies: torch.Tensor = self.readout(node_feats).squeeze(-1)  # (N,)
-        batch: torch.Tensor = graph.batch if graph.batch is not None else torch.zeros(  # (N,)
-            graph.num_atoms, dtype=torch.long, device=node_energies.device
+        batch: torch.Tensor = (
+            graph.batch
+            if graph.batch is not None
+            else torch.zeros(  # (N,)
+                graph.num_atoms, dtype=torch.long, device=node_energies.device
+            )
         )
         energy: torch.Tensor = scatter(node_energies, batch, dim=0, reduce="sum")  # (B,)
 
         # Forces: project equivariant features to l=1 vectors
-        forces: torch.Tensor = self.force_proj(node_feats)                  # (N, 3)
+        forces: torch.Tensor = self.force_proj(node_feats)  # (N, 3)
 
         return {
-            "energy": energy,                                               # (B,)
-            "forces": forces,                                               # (N, 3)
-            "num_atoms": scatter(                                           # (B,)
+            "energy": energy,  # (B,)
+            "forces": forces,  # (N, 3)
+            "num_atoms": scatter(  # (B,)
                 torch.ones_like(node_energies), batch, dim=0, reduce="sum"
             ),
         }

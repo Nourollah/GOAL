@@ -1,7 +1,7 @@
 """GOAL benchmark dataset examples.
 
 These are **not** part of the core ``goal.ml`` package.  Import this module
-to register benchmark datasets into the :data:`DATASET_REGISTRY`::
+to register benchmark datasets into the ``DATASET_REGISTRY``::
 
     import examples.datasets  # triggers lazy registration
 

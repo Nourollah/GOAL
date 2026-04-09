@@ -18,7 +18,6 @@ import lightning as L
 import torch
 from omegaconf import DictConfig, ListConfig
 from torch.utils.data import DataLoader, Dataset, random_split
-
 from torch_geometric.loader import DataLoader as PyGDataLoader
 
 from goal.ml.data.datasets.base import BaseAtomicDataset
@@ -26,12 +25,20 @@ from goal.ml.data.datasets.concat import ConcatAtomicDataset
 from goal.ml.registry import DATASET_REGISTRY
 
 # File extensions recognised when scanning directories
-_DATA_EXTENSIONS: typing.FrozenSet[str] = frozenset({
-    ".xyz", ".extxyz", ".h5", ".hdf5", ".lmdb", ".traj", ".db",
-})
+_DATA_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".xyz",
+        ".extxyz",
+        ".h5",
+        ".hdf5",
+        ".lmdb",
+        ".traj",
+        ".db",
+    }
+)
 
 
-def _resolve_paths(raw: typing.Union[str, typing.List[str], ListConfig]) -> typing.List[str]:
+def _resolve_paths(raw: str | list[str] | ListConfig) -> list[str]:
     """Normalise a single path or list of paths into a list of strings."""
     if isinstance(raw, (list, ListConfig)):
         return [str(p) for p in raw]
@@ -39,9 +46,9 @@ def _resolve_paths(raw: typing.Union[str, typing.List[str], ListConfig]) -> typi
 
 
 def _discover_files_in_dir(
-    directory: typing.Union[str, Path],
-    extensions: typing.FrozenSet[str] = _DATA_EXTENSIONS,
-) -> typing.List[str]:
+    directory: str | Path,
+    extensions: frozenset[str] = _DATA_EXTENSIONS,
+) -> list[str]:
     """Discover all data files in a directory (sorted for reproducibility).
 
     Parameters
@@ -66,9 +73,8 @@ def _discover_files_in_dir(
     dirpath: Path = Path(directory)
     if not dirpath.is_dir():
         raise FileNotFoundError(f"Directory not found: {dirpath}")
-    files: typing.List[str] = sorted(
-        str(f) for f in dirpath.iterdir()
-        if f.is_file() and f.suffix.lower() in extensions
+    files: list[str] = sorted(
+        str(f) for f in dirpath.iterdir() if f.is_file() and f.suffix.lower() in extensions
     )
     if not files:
         raise ValueError(
@@ -80,13 +86,13 @@ def _discover_files_in_dir(
 
 def _build_datasets(
     ds_cls: type,
-    paths: typing.List[str],
+    paths: list[str],
     split: str,
     cutoff: float,
-    extra: typing.Dict[str, typing.Any],
-) -> typing.List[BaseAtomicDataset]:
+    extra: dict[str, typing.Any],
+) -> list[BaseAtomicDataset]:
     """Instantiate one dataset per path."""
-    datasets: typing.List[BaseAtomicDataset] = []
+    datasets: list[BaseAtomicDataset] = []
     for p in paths:
         root: Path = Path(p)
         ds: BaseAtomicDataset = ds_cls(root=root, cutoff=cutoff, split=split, **extra)
@@ -95,9 +101,9 @@ def _build_datasets(
 
 
 def _merge_datasets(
-    datasets: typing.List[BaseAtomicDataset],
+    datasets: list[BaseAtomicDataset],
     merge_strategy: str = "sequential",
-    seed: typing.Optional[int] = None,
+    seed: int | None = None,
 ) -> Dataset:
     """Merge a list of datasets using the given strategy.
 
@@ -106,7 +112,9 @@ def _merge_datasets(
     if len(datasets) == 1:
         return datasets[0]
     return ConcatAtomicDataset(
-        datasets, merge_strategy=merge_strategy, seed=seed,
+        datasets,
+        merge_strategy=merge_strategy,
+        seed=seed,
     )
 
 
@@ -146,30 +154,38 @@ class GOALDataModule(L.LightningDataModule):
         self.cfg = cfg
         self.save_hyperparameters(logger=False)
 
-        self.data_train: typing.Optional[Dataset] = None
-        self.data_val: typing.Optional[Dataset] = None
-        self.data_test: typing.Optional[Dataset] = None
+        self.data_train: Dataset | None = None
+        self.data_val: Dataset | None = None
+        self.data_test: Dataset | None = None
 
     # ------------------------------------------------------------------
     # Keys that are DataModule-level, not dataset-level
     # ------------------------------------------------------------------
     _META_KEYS = {
-        "dataset_type", "root", "cutoff", "batch_size",
-        "num_workers", "pin_memory", "persistent_workers",
-        "prefetch_factor", "train_paths", "val_paths", "test_paths",
-        "train_dir", "val_dir", "test_dir",
-        "merge_strategy", "split_ratio", "split_seed",
+        "dataset_type",
+        "root",
+        "cutoff",
+        "batch_size",
+        "num_workers",
+        "pin_memory",
+        "persistent_workers",
+        "prefetch_factor",
+        "train_paths",
+        "val_paths",
+        "test_paths",
+        "train_dir",
+        "val_dir",
+        "test_dir",
+        "merge_strategy",
+        "split_ratio",
+        "split_seed",
     }
 
-    def _extra_kwargs(self) -> typing.Dict[str, typing.Any]:
+    def _extra_kwargs(self) -> dict[str, typing.Any]:
         """Dataset-specific kwargs (everything that isn't meta)."""
-        return {
-            k: v
-            for k, v in self.cfg.data.items()
-            if k not in self._META_KEYS
-        }
+        return {k: v for k, v in self.cfg.data.items() if k not in self._META_KEYS}
 
-    def setup(self, stage: typing.Optional[str] = None) -> None:
+    def setup(self, stage: str | None = None) -> None:
         """Instantiate datasets.
 
         Detects the loading mode automatically:
@@ -181,7 +197,7 @@ class GOALDataModule(L.LightningDataModule):
         data_cfg: typing.Any = self.cfg.data
         ds_cls: type = DATASET_REGISTRY.get(data_cfg.dataset_type)
         cutoff: float = data_cfg.cutoff
-        extra: typing.Dict[str, typing.Any] = self._extra_kwargs()
+        extra: dict[str, typing.Any] = self._extra_kwargs()
         merge: str = data_cfg.get("merge_strategy", "sequential")
         seed: int = data_cfg.get("split_seed", 42)
 
@@ -199,21 +215,36 @@ class GOALDataModule(L.LightningDataModule):
             self._setup_auto_split(ds_cls, data_cfg, cutoff, extra, merge, seed, stage)
 
     def _setup_from_dirs(
-        self, ds_cls, data_cfg, cutoff, extra, merge, seed, stage,
+        self,
+        ds_cls,
+        data_cfg,
+        cutoff,
+        extra,
+        merge,
+        seed,
+        stage,
     ) -> None:
         """Mode 4: discover data files from directories for each split."""
         if stage in ("fit", None):
-            train_paths: typing.List[str] = _discover_files_in_dir(data_cfg.train_dir)
-            train_datasets: typing.List[BaseAtomicDataset] = _build_datasets(
-                ds_cls, train_paths, "train", cutoff, extra,
+            train_paths: list[str] = _discover_files_in_dir(data_cfg.train_dir)
+            train_datasets: list[BaseAtomicDataset] = _build_datasets(
+                ds_cls,
+                train_paths,
+                "train",
+                cutoff,
+                extra,
             )
             self.data_train = _merge_datasets(train_datasets, merge, seed)
 
-            val_dir: typing.Optional[str] = data_cfg.get("val_dir")
+            val_dir: str | None = data_cfg.get("val_dir")
             if val_dir is not None:
-                val_paths: typing.List[str] = _discover_files_in_dir(val_dir)
-                val_datasets: typing.List[BaseAtomicDataset] = _build_datasets(
-                    ds_cls, val_paths, "val", cutoff, extra,
+                val_paths: list[str] = _discover_files_in_dir(val_dir)
+                val_datasets: list[BaseAtomicDataset] = _build_datasets(
+                    ds_cls,
+                    val_paths,
+                    "val",
+                    cutoff,
+                    extra,
                 )
                 self.data_val = _merge_datasets(val_datasets, merge, seed)
             else:
@@ -223,16 +254,27 @@ class GOALDataModule(L.LightningDataModule):
                 )
 
         if stage in ("test", None):
-            test_dir: typing.Optional[str] = data_cfg.get("test_dir")
+            test_dir: str | None = data_cfg.get("test_dir")
             if test_dir is not None:
-                test_paths: typing.List[str] = _discover_files_in_dir(test_dir)
-                test_datasets: typing.List[BaseAtomicDataset] = _build_datasets(
-                    ds_cls, test_paths, "test", cutoff, extra,
+                test_paths: list[str] = _discover_files_in_dir(test_dir)
+                test_datasets: list[BaseAtomicDataset] = _build_datasets(
+                    ds_cls,
+                    test_paths,
+                    "test",
+                    cutoff,
+                    extra,
                 )
                 self.data_test = _merge_datasets(test_datasets, merge, seed)
 
     def _setup_per_split(
-        self, ds_cls, data_cfg, cutoff, extra, merge, seed, stage,
+        self,
+        ds_cls,
+        data_cfg,
+        cutoff,
+        extra,
+        merge,
+        seed,
+        stage,
     ) -> None:
         """Mode 2: separate file lists for train / val / test."""
         if stage in ("fit", None):
@@ -252,7 +294,14 @@ class GOALDataModule(L.LightningDataModule):
                 self.data_test = _merge_datasets(test_datasets, merge, seed)
 
     def _setup_auto_split(
-        self, ds_cls, data_cfg, cutoff, extra, merge, seed, stage,
+        self,
+        ds_cls,
+        data_cfg,
+        cutoff,
+        extra,
+        merge,
+        seed,
+        stage,
     ) -> None:
         """Mode 1 / 3: load from root (single or list), then split."""
         roots = _resolve_paths(data_cfg.root)
@@ -266,7 +315,14 @@ class GOALDataModule(L.LightningDataModule):
             self._numeric_split(ds_cls, roots, cutoff, extra, merge, seed, split_ratio, stage)
 
     def _try_named_splits(
-        self, ds_cls, roots, cutoff, extra, merge, seed, stage,
+        self,
+        ds_cls,
+        roots,
+        cutoff,
+        extra,
+        merge,
+        seed,
+        stage,
     ) -> None:
         """Try loading named split files ({split}.xyz etc.)."""
         if stage in ("fit", None):
@@ -284,7 +340,15 @@ class GOALDataModule(L.LightningDataModule):
                 self.data_test = None
 
     def _numeric_split(
-        self, ds_cls, roots, cutoff, extra, merge, seed, split_ratio, stage,
+        self,
+        ds_cls,
+        roots,
+        cutoff,
+        extra,
+        merge,
+        seed,
+        split_ratio,
+        stage,
     ) -> None:
         """Load all data at once and split by ratio."""
         all_datasets = _build_datasets(ds_cls, roots, "train", cutoff, extra)
@@ -322,7 +386,7 @@ class GOALDataModule(L.LightningDataModule):
     # DataLoader construction
     # ------------------------------------------------------------------
 
-    def _loader_kwargs(self) -> typing.Dict[str, typing.Any]:
+    def _loader_kwargs(self) -> dict[str, typing.Any]:
         """Common DataLoader keyword arguments."""
         data_cfg = self.cfg.data
         num_workers = data_cfg.get("num_workers", 0)

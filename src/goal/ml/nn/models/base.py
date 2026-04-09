@@ -107,7 +107,7 @@ class FeatureExtractorBackbone(typing.Protocol):
     def extract_features(
         self,
         graph: AtomicGraph,
-        layer: typing.Union[int, str] = -1,
+        layer: int | str = -1,
     ) -> NodeFeatures:
         """Extract node features at a specific interaction layer.
 
@@ -151,12 +151,12 @@ class TaskHead(typing.Protocol):
         self,
         features: NodeFeatures,
         graph: AtomicGraph,
-    ) -> typing.Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """Map node features to task outputs (energy, forces, etc.)."""
         ...
 
     @property
-    def output_keys(self) -> typing.List[str]:
+    def output_keys(self) -> list[str]:
         """Keys this head produces: ``['energy', 'forces', 'stress']``."""
         ...
 
@@ -167,8 +167,8 @@ class LossFunction(typing.Protocol):
 
     def forward(
         self,
-        predictions: typing.Dict[str, torch.Tensor],
-        targets: typing.Dict[str, torch.Tensor],
+        predictions: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
     ) -> torch.Tensor: ...
 
     @property

@@ -36,14 +36,14 @@ class HDF5Dataset(BaseAtomicDataset):
 
     def __init__(
         self,
-        root: typing.Union[str, Path],
+        root: str | Path,
         cutoff: float,
         split: str = "train",
         dtype: torch.dtype = torch.float64,
     ) -> None:
         super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype)
         self._file: typing.Any = None
-        self._keys: typing.List[str] = []
+        self._keys: list[str] = []
         self._open()
 
     def _open(self) -> None:
@@ -65,7 +65,7 @@ class HDF5Dataset(BaseAtomicDataset):
     def __getitem__(self, idx: int) -> AtomicGraph:
         grp: typing.Any = self._file[self._keys[idx]]
 
-        def _tensor(name: str, dtype: torch.dtype = self.dtype) -> typing.Optional[torch.Tensor]:
+        def _tensor(name: str, dtype: torch.dtype = self.dtype) -> torch.Tensor | None:
             if name in grp:
                 return torch.tensor(grp[name][()], dtype=dtype)
             return None

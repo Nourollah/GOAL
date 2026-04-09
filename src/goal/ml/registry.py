@@ -28,14 +28,14 @@ class Registry:
 
     def __init__(self, name: str) -> None:
         self.name: str = name
-        self._registry: typing.Dict[str, type] = {}
-        self._lazy: typing.Dict[str, str] = {}  # name → 'module.path:ClassName'
+        self._registry: dict[str, type] = {}
+        self._lazy: dict[str, str] = {}  # name → 'module.path:ClassName'
 
     # ------------------------------------------------------------------
     # Registration mechanisms
     # ------------------------------------------------------------------
 
-    def register(self, name: str) -> typing.Callable[[typing.Type[T]], typing.Type[T]]:
+    def register(self, name: str) -> typing.Callable[[type[T]], type[T]]:
         """Decorator for explicit registration at import time.
 
         Use this for built-in classes within the GOAL package itself.
@@ -49,7 +49,7 @@ class Registry:
             class MyModel(nn.Module): ...
         """
 
-        def decorator(cls: typing.Type[T]) -> typing.Type[T]:
+        def decorator(cls: type[T]) -> type[T]:
             if name in self._registry:
                 raise KeyError(
                     f"'{name}' already registered in {self.name} registry. "
@@ -103,7 +103,7 @@ class Registry:
                     ) from e
                 self._registry[name] = getattr(module, cls_name)
             else:
-                available: typing.List[str] = sorted(list(self._registry) | set(self._lazy))
+                available: list[str] = sorted(list(self._registry) | set(self._lazy))
                 raise KeyError(
                     f"'{name}' not found in {self.name} registry.\n"
                     f"Available: {available}\n"
@@ -150,7 +150,7 @@ class Registry:
     def __contains__(self, name: str) -> bool:
         return name in self._registry or name in self._lazy
 
-    def list_available(self) -> typing.List[str]:
+    def list_available(self) -> list[str]:
         """Return sorted list of all registered and lazily-registered names."""
         return sorted(set(self._registry) | set(self._lazy))
 

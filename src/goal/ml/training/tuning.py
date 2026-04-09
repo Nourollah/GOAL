@@ -21,7 +21,6 @@ from pathlib import Path
 import lightning as L
 from omegaconf import DictConfig
 
-
 # ---------------------------------------------------------------------------
 # Basic: Lightning Tuner
 # ---------------------------------------------------------------------------
@@ -32,7 +31,7 @@ def run_lightning_tuner(
     datamodule: L.LightningDataModule,
     trainer: L.Trainer,
     cfg: DictConfig,
-) -> typing.Dict[str, typing.Any]:
+) -> dict[str, typing.Any]:
     """Run Lightning's built-in Tuner for LR and batch size discovery.
 
     Parameters
@@ -51,10 +50,10 @@ def run_lightning_tuner(
     dict
         Results with keys ``lr`` and/or ``batch_size`` if found.
     """
-    tuner_cfg: typing.Dict[str, typing.Any] = dict(cfg.hparams_search.get("tuner", {}))
+    tuner_cfg: dict[str, typing.Any] = dict(cfg.hparams_search.get("tuner", {}))
     tuner: L.pytorch.tuner.Tuner = L.pytorch.tuner.Tuner(trainer)
 
-    results: typing.Dict[str, typing.Any] = {}
+    results: dict[str, typing.Any] = {}
 
     if tuner_cfg.get("lr_find", False):
         lr_finder = tuner.lr_find(
@@ -102,7 +101,7 @@ def _require_ray_tune() -> None:
         ) from exc
 
 
-def _build_search_space(space_cfg: DictConfig) -> typing.Dict[str, typing.Any]:
+def _build_search_space(space_cfg: DictConfig) -> dict[str, typing.Any]:
     """Convert Hydra config to Ray Tune search space.
 
     Supports the standard Ray Tune primitives via config strings:
@@ -124,7 +123,7 @@ def _build_search_space(space_cfg: DictConfig) -> typing.Dict[str, typing.Any]:
     """
     from ray import tune
 
-    _SPACE_BUILDERS: typing.Dict[str, typing.Callable[..., typing.Any]] = {
+    _SPACE_BUILDERS: dict[str, typing.Callable[..., typing.Any]] = {
         "uniform": lambda c: tune.uniform(c.lower, c.upper),
         "loguniform": lambda c: tune.loguniform(c.lower, c.upper),
         "quniform": lambda c: tune.quniform(c.lower, c.upper, c.get("q", 1)),
@@ -133,7 +132,7 @@ def _build_search_space(space_cfg: DictConfig) -> typing.Dict[str, typing.Any]:
         "grid": lambda c: tune.grid_search(list(c.values)),
     }
 
-    space: typing.Dict[str, typing.Any] = {}
+    space: dict[str, typing.Any] = {}
     for param_name, param_cfg in space_cfg.items():
         builder = _SPACE_BUILDERS.get(param_cfg.type)
         if builder is None:
@@ -173,9 +172,7 @@ def run_ray_tune(
     hp_cfg: DictConfig = cfg.hparams_search
 
     # Search space
-    search_space: typing.Dict[str, typing.Any] = _build_search_space(
-        hp_cfg.search_space
-    )
+    search_space: dict[str, typing.Any] = _build_search_space(hp_cfg.search_space)
 
     # Scheduler
     scheduler_name: str = hp_cfg.get("scheduler", "asha")
@@ -191,18 +188,18 @@ def run_ray_tune(
             hyperparam_mutations=search_space,
         )
     else:
-        raise ValueError(
-            f"Unknown scheduler '{scheduler_name}'. Use 'asha' or 'pbt'."
-        )
+        raise ValueError(f"Unknown scheduler '{scheduler_name}'. Use 'asha' or 'pbt'.")
 
     # Search algorithm (optional)
     search_alg: typing.Any = None
-    search_alg_name: typing.Optional[str] = hp_cfg.get("search_algorithm")
+    search_alg_name: str | None = hp_cfg.get("search_algorithm")
     if search_alg_name == "optuna":
         from ray.tune.search.optuna import OptunaSearch
+
         search_alg = OptunaSearch()
     elif search_alg_name == "hyperopt":
         from ray.tune.search.hyperopt import HyperOptSearch
+
         search_alg = HyperOptSearch()
     elif search_alg_name is not None:
         raise ValueError(
@@ -239,13 +236,13 @@ def run_ray_tune(
 # ---------------------------------------------------------------------------
 
 
-def _build_wandb_sweep_config(hp_cfg: DictConfig) -> typing.Dict[str, typing.Any]:
+def _build_wandb_sweep_config(hp_cfg: DictConfig) -> dict[str, typing.Any]:
     """Convert Hydra ``hparams_search`` config to W&B sweep config dict.
 
     Maps the GOAL YAML schema to the W&B sweep spec
     (https://docs.wandb.ai/guides/sweeps/define-sweep-configuration).
     """
-    sweep_config: typing.Dict[str, typing.Any] = {
+    sweep_config: dict[str, typing.Any] = {
         "method": hp_cfg.get("sweep_method", "bayes"),
         "metric": {
             "name": hp_cfg.get("metric", "val/total"),
@@ -254,9 +251,9 @@ def _build_wandb_sweep_config(hp_cfg: DictConfig) -> typing.Dict[str, typing.Any
     }
 
     # Parameters — nested dotted keys flattened for W&B
-    parameters: typing.Dict[str, typing.Any] = {}
+    parameters: dict[str, typing.Any] = {}
     for param_name, param_cfg in hp_cfg.parameters.items():
-        param_spec: typing.Dict[str, typing.Any] = dict(param_cfg)
+        param_spec: dict[str, typing.Any] = dict(param_cfg)
         parameters[param_name] = param_spec
     sweep_config["parameters"] = parameters
 
@@ -269,7 +266,7 @@ def _build_wandb_sweep_config(hp_cfg: DictConfig) -> typing.Dict[str, typing.Any
 
 
 def run_wandb_sweep(
-    train_fn: typing.Callable[[typing.Dict[str, typing.Any]], None],
+    train_fn: typing.Callable[[dict[str, typing.Any]], None],
     cfg: DictConfig,
 ) -> str:
     """Create (or resume) a W&B sweep and run the agent.
@@ -292,14 +289,14 @@ def run_wandb_sweep(
     hp_cfg: DictConfig = cfg.hparams_search
 
     project: str = hp_cfg.get("project", "goal")
-    entity: typing.Optional[str] = hp_cfg.get("entity")
-    sweep_id: typing.Optional[str] = hp_cfg.get("sweep_id")
+    entity: str | None = hp_cfg.get("entity")
+    sweep_id: str | None = hp_cfg.get("sweep_id")
 
     if sweep_id is None:
-        sweep_config: typing.Dict[str, typing.Any] = _build_wandb_sweep_config(hp_cfg)
+        sweep_config: dict[str, typing.Any] = _build_wandb_sweep_config(hp_cfg)
         sweep_id = wandb.sweep(sweep_config, project=project, entity=entity)
 
-    count: typing.Optional[int] = hp_cfg.get("count", 20)
+    count: int | None = hp_cfg.get("count", 20)
 
     wandb.agent(
         sweep_id,

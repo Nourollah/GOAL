@@ -58,12 +58,14 @@ class ContinuousFilterConv(nn.Module):
     ) -> torch.Tensor:
         row: torch.Tensor
         col: torch.Tensor
-        row, col = edge_index                                               # (E,), (E,)
-        basis: torch.Tensor = self.basis(edge_lengths)                      # (E, num_basis)
-        filters: torch.Tensor = self.filter_net(basis)                      # (E, hidden_dim)
-        messages: torch.Tensor = node_feats[col] * filters                  # (E, hidden_dim)
-        aggregated: torch.Tensor = scatter(messages, row, dim=0, reduce="sum", dim_size=node_feats.size(0))  # (N, hidden_dim)
-        return node_feats + self.node_mlp(aggregated)                       # (N, hidden_dim)
+        row, col = edge_index  # (E,), (E,)
+        basis: torch.Tensor = self.basis(edge_lengths)  # (E, num_basis)
+        filters: torch.Tensor = self.filter_net(basis)  # (E, hidden_dim)
+        messages: torch.Tensor = node_feats[col] * filters  # (E, hidden_dim)
+        aggregated: torch.Tensor = scatter(
+            messages, row, dim=0, reduce="sum", dim_size=node_feats.size(0)
+        )  # (N, hidden_dim)
+        return node_feats + self.node_mlp(aggregated)  # (N, hidden_dim)
 
 
 @MODEL_REGISTRY.register("invariant_gnn")
@@ -110,14 +112,16 @@ class InvariantGNN(nn.Module):
         )
         self.input_proj = nn.Linear(embedding_dim, hidden_channels)
 
-        self.interactions = nn.ModuleList([
-            ContinuousFilterConv(
-                hidden_dim=hidden_channels,
-                num_basis=num_radial_basis,
-                cutoff=cutoff,
-            )
-            for _ in range(num_interactions)
-        ])
+        self.interactions = nn.ModuleList(
+            [
+                ContinuousFilterConv(
+                    hidden_dim=hidden_channels,
+                    num_basis=num_radial_basis,
+                    cutoff=cutoff,
+                )
+                for _ in range(num_interactions)
+            ]
+        )
 
     @property
     def hidden_dim(self) -> int:
@@ -131,20 +135,21 @@ class InvariantGNN(nn.Module):
     def irreps_out(self) -> typing.Any:
         """Invariant output: all scalar channels."""
         from e3nn.o3 import Irreps
+
         return Irreps(f"{self._hidden_dim}x0e")
 
     def forward(self, graph: AtomicGraph) -> NodeFeatures:
-        h: torch.Tensor = self.embedding(graph.z)                           # (N, embedding_dim)
-        h = self.input_proj(h)                                              # (N, hidden_channels)
+        h: torch.Tensor = self.embedding(graph.z)  # (N, embedding_dim)
+        h = self.input_proj(h)  # (N, hidden_channels)
 
         for interaction in self.interactions:
-            h = interaction(                                                 # (N, hidden_channels)
+            h = interaction(  # (N, hidden_channels)
                 node_feats=h,
-                edge_index=graph.edge_index,                                # (2, E)
-                edge_lengths=graph.edge_weight,                             # (E,)
+                edge_index=graph.edge_index,  # (2, E)
+                edge_lengths=graph.edge_weight,  # (E,)
             )
 
         return NodeFeatures(
-            node_feats=h,                                                   # (N, hidden_channels)
+            node_feats=h,  # (N, hidden_channels)
             irreps=f"{self._hidden_dim}x0e",
         )

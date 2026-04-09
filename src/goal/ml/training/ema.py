@@ -33,8 +33,8 @@ class EMAWrapper:
         decay: float = 0.999,
     ) -> None:
         self.decay: float = decay
-        self._shadow: typing.List[torch.Tensor] = [p.clone().detach() for p in parameters]
-        self._parameters: typing.List[nn.Parameter] = list(parameters)
+        self._shadow: list[torch.Tensor] = [p.clone().detach() for p in parameters]
+        self._parameters: list[nn.Parameter] = list(parameters)
 
     @torch.no_grad()
     def update(self) -> None:
@@ -54,7 +54,7 @@ class EMAWrapper:
             with ema.average_parameters():
                 predictions = model(batch)
         """
-        originals: typing.List[torch.Tensor] = [p.data.clone() for p in self._parameters]
+        originals: list[torch.Tensor] = [p.data.clone() for p in self._parameters]
         try:
             for param, shadow in zip(self._parameters, self._shadow):
                 param.data.copy_(shadow)
@@ -63,10 +63,10 @@ class EMAWrapper:
             for param, original in zip(self._parameters, originals):
                 param.data.copy_(original)
 
-    def state_dict(self) -> typing.Dict[str, typing.List[torch.Tensor]]:
+    def state_dict(self) -> dict[str, list[torch.Tensor]]:
         """Serialise EMA state for checkpointing."""
         return {"shadow": [s.clone() for s in self._shadow]}
 
-    def load_state_dict(self, state_dict: typing.Dict[str, typing.List[torch.Tensor]]) -> None:
+    def load_state_dict(self, state_dict: dict[str, list[torch.Tensor]]) -> None:
         """Restore EMA state from a checkpoint."""
         self._shadow = [s.clone() for s in state_dict["shadow"]]

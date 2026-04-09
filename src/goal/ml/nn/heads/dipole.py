@@ -45,36 +45,36 @@ class DipoleHead(nn.Module):
     ) -> None:
         super().__init__()
         self.readout: ScalarReadout = ScalarReadout(irreps_in=irreps_in, hidden_dim=hidden_dim)
-        self._output_keys: typing.List[str] = ["dipole", "charges", "total_charge"]
+        self._output_keys: list[str] = ["dipole", "charges", "total_charge"]
 
     @property
-    def output_keys(self) -> typing.List[str]:
+    def output_keys(self) -> list[str]:
         return self._output_keys
 
     def forward(
         self,
         features: NodeFeatures,
         graph: AtomicGraph,
-    ) -> typing.Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         # Per-atom partial charges
         charges: torch.Tensor = self.readout(features.node_feats).squeeze(-1)  # (N,)
 
-        batch: torch.Tensor = graph.batch if graph.batch is not None else torch.zeros(  # (N,)
-            graph.num_atoms, dtype=torch.long, device=charges.device
+        batch: torch.Tensor = (
+            graph.batch
+            if graph.batch is not None
+            else torch.zeros(graph.num_atoms, dtype=torch.long, device=charges.device)  # (N,)
         )
 
         # Dipole moment: mu = sum_i q_i * r_i
-        weighted_pos: torch.Tensor = graph.pos * charges.unsqueeze(-1)      # (N, 3)
+        weighted_pos: torch.Tensor = graph.pos * charges.unsqueeze(-1)  # (N, 3)
         dipole: torch.Tensor = scatter(weighted_pos, batch, dim=0, reduce="sum")  # (B, 3)
 
         # Total charge per graph (useful for charge neutrality loss)
         total_charge: torch.Tensor = scatter(charges, batch, dim=0, reduce="sum")  # (B,)
 
         return {
-            "dipole": dipole,                                               # (B, 3)
-            "charges": charges,                                             # (N,)
-            "total_charge": total_charge,                                   # (B,)
-            "num_atoms": scatter(                                           # (B,)
-                torch.ones_like(charges), batch, dim=0, reduce="sum"
-            ),
+            "dipole": dipole,  # (B, 3)
+            "charges": charges,  # (N,)
+            "total_charge": total_charge,  # (B,)
+            "num_atoms": scatter(torch.ones_like(charges), batch, dim=0, reduce="sum"),  # (B,)
         }

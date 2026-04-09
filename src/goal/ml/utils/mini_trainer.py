@@ -32,7 +32,6 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 
-
 # ---------------------------------------------------------------------------
 # History dataclass — stores per-epoch metrics
 # ---------------------------------------------------------------------------
@@ -53,27 +52,27 @@ class TrainingHistory:
         extra: Dict of additional per-epoch metric lists.
     """
 
-    train_loss: typing.List[float] = field(default_factory=list)
-    val_loss: typing.List[float] = field(default_factory=list)
-    lr: typing.List[float] = field(default_factory=list)
-    epoch_times: typing.List[float] = field(default_factory=list)
-    extra: typing.Dict[str, typing.List[float]] = field(default_factory=dict)
+    train_loss: list[float] = field(default_factory=list)
+    val_loss: list[float] = field(default_factory=list)
+    lr: list[float] = field(default_factory=list)
+    epoch_times: list[float] = field(default_factory=list)
+    extra: dict[str, list[float]] = field(default_factory=dict)
 
     @property
-    def best_val_loss(self) -> typing.Optional[float]:
+    def best_val_loss(self) -> float | None:
         """Return the lowest validation loss, or ``None`` if not tracked."""
         if not self.val_loss:
             return None
         return min(self.val_loss)
 
     @property
-    def best_epoch(self) -> typing.Optional[int]:
+    def best_epoch(self) -> int | None:
         """Return the epoch index (0-based) with the lowest validation loss."""
         if not self.val_loss:
             return None
         return int(torch.tensor(self.val_loss).argmin().item())
 
-    def plot(self, figsize: typing.Tuple[int, int] = (10, 4)) -> None:
+    def plot(self, figsize: tuple[int, int] = (10, 4)) -> None:
         """Plot training and validation loss curves.
 
         Requires ``matplotlib``. Safe to call in Jupyter notebooks.
@@ -84,14 +83,17 @@ class TrainingHistory:
         import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
-        epochs: typing.List[int] = list(range(1, len(self.train_loss) + 1))
+        epochs: list[int] = list(range(1, len(self.train_loss) + 1))
         ax.plot(epochs, self.train_loss, label="train")
         if self.val_loss:
             ax.plot(epochs, self.val_loss, label="val")
-            best: typing.Optional[int] = self.best_epoch
+            best: int | None = self.best_epoch
             if best is not None:
                 ax.axvline(
-                    x=best + 1, color="gray", linestyle="--", alpha=0.5,
+                    x=best + 1,
+                    color="gray",
+                    linestyle="--",
+                    alpha=0.5,
                     label=f"best val (epoch {best + 1})",
                 )
         ax.set_xlabel("Epoch")
@@ -125,7 +127,7 @@ class StepFn(typing.Protocol):
         model: nn.Module,
         loss_fn: nn.Module,
         device: torch.device,
-    ) -> typing.Dict[str, torch.Tensor]: ...
+    ) -> dict[str, torch.Tensor]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +140,7 @@ def default_step(
     model: nn.Module,
     loss_fn: nn.Module,
     device: torch.device,
-) -> typing.Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Default training step for ``(features, targets)`` tuple batches.
 
     Expects each batch to unpack as ``(x, y)`` where ``x`` is the input
@@ -169,7 +171,7 @@ def graph_step(
     model: nn.Module,
     loss_fn: nn.Module,
     device: torch.device,
-) -> typing.Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Training step for ``AtomicGraph`` batches with a full backbone + head.
 
     Expects the batch to be a PyG ``Data``/``Batch`` object with ``energy``
@@ -186,8 +188,8 @@ def graph_step(
         Dict with ``'loss'`` key and per-component breakdown.
     """
     batch = batch.to(device, non_blocking=True)
-    predictions: typing.Dict[str, torch.Tensor] = model(batch)
-    losses: typing.Dict[str, torch.Tensor] = loss_fn(predictions, batch)
+    predictions: dict[str, torch.Tensor] = model(batch)
+    losses: dict[str, torch.Tensor] = loss_fn(predictions, batch)
     return losses  # Must contain 'total' key from CompositeLoss
 
 
@@ -247,19 +249,19 @@ class MiniTrainer:
         model: nn.Module,
         loss_fn: nn.Module,
         optimizer: torch.optim.Optimizer,
-        scheduler: typing.Optional[torch.optim.lr_scheduler.LRScheduler] = None,
-        device: typing.Union[str, torch.device] = "auto",
-        step_fn: typing.Optional[StepFn] = None,
-        grad_clip: typing.Optional[float] = None,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+        device: str | torch.device = "auto",
+        step_fn: StepFn | None = None,
+        grad_clip: float | None = None,
         enable_progress: bool = True,
     ) -> None:
         self.model: nn.Module = model
         self.loss_fn: nn.Module = loss_fn
         self.optimizer: torch.optim.Optimizer = optimizer
-        self.scheduler: typing.Optional[torch.optim.lr_scheduler.LRScheduler] = scheduler
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = scheduler
         self.device: torch.device = self._resolve_device(device)
         self.step_fn: StepFn = step_fn or default_step
-        self.grad_clip: typing.Optional[float] = grad_clip
+        self.grad_clip: float | None = grad_clip
         self.enable_progress: bool = enable_progress
 
         # Move model and loss to device
@@ -268,14 +270,14 @@ class MiniTrainer:
 
         # State
         self._best_val_loss: float = float("inf")
-        self._best_state: typing.Optional[typing.Dict[str, typing.Any]] = None
+        self._best_state: dict[str, typing.Any] | None = None
 
     # ------------------------------------------------------------------
     # Device resolution
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_device(device: typing.Union[str, torch.device]) -> torch.device:
+    def _resolve_device(device: str | torch.device) -> torch.device:
         """Resolve ``'auto'`` to the best available device.
 
         Args:
@@ -322,6 +324,7 @@ class MiniTrainer:
             return iterable
         try:
             from tqdm.auto import tqdm
+
             return tqdm(iterable, total=total, desc=desc, leave=False)
         except ImportError:
             return iterable
@@ -347,13 +350,19 @@ class MiniTrainer:
         num_batches: int = 0
 
         progress: typing.Any = self._get_progress_bar(
-            loader, total=len(loader), desc="train", enabled=self.enable_progress,
+            loader,
+            total=len(loader),
+            desc="train",
+            enabled=self.enable_progress,
         )
 
         for batch in progress:
             self.optimizer.zero_grad()
-            result: typing.Dict[str, torch.Tensor] = self.step_fn(
-                batch, self.model, self.loss_fn, self.device,
+            result: dict[str, torch.Tensor] = self.step_fn(
+                batch,
+                self.model,
+                self.loss_fn,
+                self.device,
             )
             # Support both 'loss' and 'total' keys (CompositeLoss uses 'total')
             loss: torch.Tensor = result.get("loss", result.get("total"))
@@ -386,12 +395,18 @@ class MiniTrainer:
         num_batches: int = 0
 
         progress: typing.Any = self._get_progress_bar(
-            loader, total=len(loader), desc="val", enabled=self.enable_progress,
+            loader,
+            total=len(loader),
+            desc="val",
+            enabled=self.enable_progress,
         )
 
         for batch in progress:
-            result: typing.Dict[str, torch.Tensor] = self.step_fn(
-                batch, self.model, self.loss_fn, self.device,
+            result: dict[str, torch.Tensor] = self.step_fn(
+                batch,
+                self.model,
+                self.loss_fn,
+                self.device,
             )
             loss: torch.Tensor = result.get("loss", result.get("total"))
             total_loss += loss.item()
@@ -406,9 +421,9 @@ class MiniTrainer:
     def fit(
         self,
         train_loader: typing.Any,
-        val_loader: typing.Optional[typing.Any] = None,
+        val_loader: typing.Any | None = None,
         epochs: int = 10,
-        early_stopping_patience: typing.Optional[int] = None,
+        early_stopping_patience: int | None = None,
         checkpoint_best: bool = True,
         verbose: bool = True,
     ) -> TrainingHistory:
@@ -464,7 +479,8 @@ class MiniTrainer:
             history.lr.append(current_lr)
             if self.scheduler is not None:
                 if isinstance(
-                    self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau,
+                    self.scheduler,
+                    torch.optim.lr_scheduler.ReduceLROnPlateau,
                 ):
                     metric: float = val_loss if val_loader is not None else train_loss
                     self.scheduler.step(metric)
@@ -477,7 +493,7 @@ class MiniTrainer:
 
             # --- Logging ---
             if verbose:
-                parts: typing.List[str] = [
+                parts: list[str] = [
                     f"Epoch {epoch + 1:>{len(str(epochs))}}/{epochs}",
                     f"train_loss={train_loss:.6f}",
                     f"val_loss={val_loss_str}",
@@ -521,7 +537,7 @@ class MiniTrainer:
     def predict(
         self,
         loader: typing.Any,
-    ) -> typing.Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Run inference on a data loader and collect predictions + targets.
 
         Expects ``(x, y)`` tuple batches (compatible with ``default_step``).
@@ -534,8 +550,8 @@ class MiniTrainer:
             across all batches.
         """
         self.model.eval()
-        all_preds: typing.List[torch.Tensor] = []
-        all_targets: typing.List[torch.Tensor] = []
+        all_preds: list[torch.Tensor] = []
+        all_targets: list[torch.Tensor] = []
 
         for batch in loader:
             x: torch.Tensor

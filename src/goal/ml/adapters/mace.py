@@ -71,7 +71,7 @@ class MACEAdapter:
         return cls(model)
 
     @classmethod
-    def from_local(cls, checkpoint_path: typing.Union[str, Path], **kwargs: typing.Any) -> MACEAdapter:
+    def from_local(cls, checkpoint_path: str | Path, **kwargs: typing.Any) -> MACEAdapter:
         """Load a MACE model from a local checkpoint file.
 
         Use this to load fine-tuned MACE models saved as ``.pt`` files.
@@ -92,6 +92,7 @@ class MACEAdapter:
         # Handle case where checkpoint is a state_dict rather than full model
         if isinstance(model, dict) and "model" in model:
             from mace.tools.scripts_utils import get_default_args
+
             # NOTE: Full model reconstruction from state_dict requires
             # MACE model config. This path is best-effort.
             # For reliable loading, save the full model object.
@@ -115,15 +116,15 @@ class MACEAdapter:
 
     def forward(self, graph: AtomicGraph) -> NodeFeatures:
         """Translate AtomicGraph -> MACE input, run model, return NodeFeatures."""
-        mace_batch: typing.Dict[str, typing.Any] = self._to_mace_batch(graph)
-        out: typing.Dict[str, torch.Tensor] = self._model(mace_batch)
+        mace_batch: dict[str, typing.Any] = self._to_mace_batch(graph)
+        out: dict[str, torch.Tensor] = self._model(mace_batch)
         return NodeFeatures(
             node_feats=out["node_feats"],
             irreps=str(self.irreps_out),
             node_energies=out.get("node_energy"),
         )
 
-    def _to_mace_batch(self, graph: AtomicGraph) -> typing.Dict[str, typing.Any]:
+    def _to_mace_batch(self, graph: AtomicGraph) -> dict[str, typing.Any]:
         """Convert GOAL AtomicGraph to MACE's expected input format."""
         return {
             "positions": graph.positions,
@@ -141,12 +142,14 @@ class MACEAdapter:
         return self._model.parameters()
 
     def named_parameters(
-        self, prefix: str = "", recurse: bool = True,
-    ) -> typing.Iterator[typing.Tuple[str, torch.nn.Parameter]]:
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+    ) -> typing.Iterator[tuple[str, torch.nn.Parameter]]:
         """Proxy to underlying model named_parameters."""
         return self._model.named_parameters(prefix=prefix, recurse=recurse)
 
-    def requires(self) -> typing.List[str]:
+    def requires(self) -> list[str]:
         """Required pip packages for this adapter."""
         return ["mace-torch>=0.3"]
 
@@ -183,7 +186,7 @@ class MACEAdapter:
     def extract_features(
         self,
         graph: AtomicGraph,
-        layer: typing.Union[int, str] = -1,
+        layer: int | str = -1,
     ) -> NodeFeatures:
         """Extract MACE node features at any interaction layer.
 
@@ -214,18 +217,14 @@ class MACEAdapter:
         ) as extractor:
             mace_batch: dict = self._to_mace_batch(graph)
             self._model(mace_batch)
-            captured: typing.Dict[str, torch.Tensor] = extractor.captured
+            captured: dict[str, torch.Tensor] = extractor.captured
 
         n_layers: int = self.num_layers
 
         if layer == "all":
-            parts: typing.List[torch.Tensor] = [
-                captured[f"layer_{i}"] for i in range(n_layers)
-            ]
+            parts: list[torch.Tensor] = [captured[f"layer_{i}"] for i in range(n_layers)]
             node_feats: torch.Tensor = torch.cat(parts, dim=-1)
-            combined_irreps: str = "+".join(
-                str(self.irreps_at_layer(i)) for i in range(n_layers)
-            )
+            combined_irreps: str = "+".join(str(self.irreps_at_layer(i)) for i in range(n_layers))
             return NodeFeatures(node_feats=node_feats, irreps=combined_irreps)
 
         resolved: int
@@ -235,14 +234,12 @@ class MACEAdapter:
             resolved = layer if layer >= 0 else n_layers + layer
         else:
             raise ValueError(
-                f"Invalid layer specifier: {layer!r}. "
-                "Use an int, -1, 'final', or 'all'."
+                f"Invalid layer specifier: {layer!r}. " "Use an int, -1, 'final', or 'all'."
             )
 
         if resolved < 0 or resolved >= n_layers:
             raise IndexError(
-                f"Layer {resolved} out of range for model with "
-                f"{n_layers} interaction layers."
+                f"Layer {resolved} out of range for model with " f"{n_layers} interaction layers."
             )
 
         key: str = f"layer_{resolved}"

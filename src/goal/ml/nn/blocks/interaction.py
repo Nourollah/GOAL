@@ -37,8 +37,8 @@ class EquivariantInteractionBlock(nn.Module):
 
     def __init__(
         self,
-        irreps_node: typing.Union[str, Irreps],
-        irreps_edge: typing.Union[str, Irreps],
+        irreps_node: str | Irreps,
+        irreps_edge: str | Irreps,
         num_basis: int = 8,
         cutoff: float = 5.0,
         hidden_dim: int = 64,
@@ -94,30 +94,30 @@ class EquivariantInteractionBlock(nn.Module):
         Tensor
             Updated node features with residual connection, shape ``(N, irreps_node.dim)``.
         """
-        row, col = edge_index                                           # (E,), (E,)
+        row, col = edge_index  # (E,), (E,)
 
         # Spherical harmonics of edge directions
-        edge_sh = spherical_harmonics(                                      # (E, irreps_edge.dim)
+        edge_sh = spherical_harmonics(  # (E, irreps_edge.dim)
             self.irreps_edge,
-            edge_vectors,                                                   # (E, 3)
+            edge_vectors,  # (E, 3)
             normalize=True,
             normalization="component",
         )
 
         # Radial weights
-        rbf = self.radial_basis(edge_lengths)                               # (E, num_basis)
-        env = self.envelope(edge_lengths).unsqueeze(-1)                     # (E, 1)
-        tp_weights = self.radial_mlp(rbf) * env                             # (E, weight_numel)
+        rbf = self.radial_basis(edge_lengths)  # (E, num_basis)
+        env = self.envelope(edge_lengths).unsqueeze(-1)  # (E, 1)
+        tp_weights = self.radial_mlp(rbf) * env  # (E, weight_numel)
 
         # Messages via tensor product
-        sender_feats = node_feats[row]                                      # (E, irreps_node.dim)
-        messages = self.tp(sender_feats, edge_sh, tp_weights)               # (E, irreps_node.dim)
+        sender_feats = node_feats[row]  # (E, irreps_node.dim)
+        messages = self.tp(sender_feats, edge_sh, tp_weights)  # (E, irreps_node.dim)
 
         # Aggregate messages (sum over neighbours)
-        agg = torch.zeros_like(node_feats)                                  # (N, irreps_node.dim)
-        agg.index_add_(0, col, messages)                                    # (N, irreps_node.dim)
+        agg = torch.zeros_like(node_feats)  # (N, irreps_node.dim)
+        agg.index_add_(0, col, messages)  # (N, irreps_node.dim)
 
         # Post-process with linear + norm + residual
-        out = self.linear(agg)                                              # (N, irreps_node.dim)
-        out = self.norm(out)                                                # (N, irreps_node.dim)
-        return node_feats + out                                             # (N, irreps_node.dim)
+        out = self.linear(agg)  # (N, irreps_node.dim)
+        out = self.norm(out)  # (N, irreps_node.dim)
+        return node_feats + out  # (N, irreps_node.dim)

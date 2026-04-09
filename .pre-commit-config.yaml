@@ -33,10 +33,10 @@ repos:
 
   # python upgrading syntax to newer version
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.19.1
+    rev: v3.21.2
     hooks:
       - id: pyupgrade
-        args: [--py314-plus]
+        args: [--py313-plus]
 
   # python docstring coverage checking
   - repo: https://github.com/econchick/interrogate
@@ -95,7 +95,7 @@ repos:
     hooks:
       - id: codespell
         args:
-          - --skip=logs/**,data/**,*.ipynb
+          - --skip=logs/**,data/**,*.ipynb,pixi.lock
           # - --ignore-words-list=abc,def
 
   # jupyter notebook cell output clearing

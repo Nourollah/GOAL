@@ -29,12 +29,14 @@ class BesselBasis(nn.Module):
         self.cutoff: float = cutoff
 
         # Frequencies: n * pi / cutoff for n = 1, ..., num_basis
-        freqs: torch.Tensor = torch.arange(1, num_basis + 1, dtype=torch.float64) * math.pi / cutoff
+        freqs: torch.Tensor = (
+            torch.arange(1, num_basis + 1, dtype=torch.float64) * math.pi / cutoff
+        )
         self.register_buffer("freqs", freqs)
 
     def forward(self, distances: torch.Tensor) -> torch.Tensor:
         """Expand distances into Bessel basis, shape ``(E,) → (E, num_basis)``."""
-        d: torch.Tensor = distances.unsqueeze(-1)                          # (E, 1)
+        d: torch.Tensor = distances.unsqueeze(-1)  # (E, 1)
         return (2.0 / self.cutoff) ** 0.5 * torch.sin(self.freqs * d) / d  # (E, num_basis)
 
 
@@ -59,14 +61,14 @@ class PolynomialEnvelope(nn.Module):
 
     def forward(self, distances: torch.Tensor) -> torch.Tensor:
         """Compute envelope values, shape ``(E,) → (E,)``."""
-        d_scaled: torch.Tensor = distances / self.cutoff                    # (E,)
-        envelope: torch.Tensor = (                                           # (E,)
+        d_scaled: torch.Tensor = distances / self.cutoff  # (E,)
+        envelope: torch.Tensor = (  # (E,)
             1.0
             - ((self.p + 1) * (self.p + 2) / 2) * d_scaled.pow(self.p)
             + self.p * (self.p + 2) * d_scaled.pow(self.p + 1)
             - (self.p * (self.p + 1) / 2) * d_scaled.pow(self.p + 2)
         )
-        return envelope * (distances < self.cutoff).float()                  # (E,)
+        return envelope * (distances < self.cutoff).float()  # (E,)
 
 
 class RadialMLP(nn.Module):
@@ -92,7 +94,7 @@ class RadialMLP(nn.Module):
         num_layers: int = 2,
     ) -> None:
         super().__init__()
-        layers: typing.List[nn.Module] = []
+        layers: list[nn.Module] = []
         in_dim: int = num_basis
         for _ in range(num_layers):
             layers.extend([nn.Linear(in_dim, hidden_dim), nn.SiLU()])
@@ -102,4 +104,4 @@ class RadialMLP(nn.Module):
 
     def forward(self, basis: torch.Tensor) -> torch.Tensor:
         """Map radial basis features to weights, shape ``(E, num_basis) → (E, num_out)``."""
-        return self.net(basis)                                              # (E, num_out)
+        return self.net(basis)  # (E, num_out)

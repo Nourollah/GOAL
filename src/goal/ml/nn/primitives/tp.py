@@ -28,9 +28,9 @@ class WeightedTensorProduct(nn.Module):
 
     def __init__(
         self,
-        irreps_in1: typing.Union[str, Irreps],
-        irreps_in2: typing.Union[str, Irreps],
-        irreps_out: typing.Union[str, Irreps],
+        irreps_in1: str | Irreps,
+        irreps_in2: str | Irreps,
+        irreps_out: str | Irreps,
     ) -> None:
         super().__init__()
         self.irreps_in1 = Irreps(irreps_in1)
@@ -51,7 +51,7 @@ class WeightedTensorProduct(nn.Module):
         self,
         x1: torch.Tensor,
         x2: torch.Tensor,
-        weight: typing.Optional[torch.Tensor] = None,
+        weight: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute the tensor product.
 
@@ -64,4 +64,4 @@ class WeightedTensorProduct(nn.Module):
         weight : Tensor or None
             External weights from a radial network, shape ``(N, weight_numel)``.
         """
-        return self._tp(x1, x2, weight)                                     # (N, irreps_out.dim)
+        return self._tp(x1, x2, weight)  # (N, irreps_out.dim)

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import typing
 
+import torch
 import torch.nn as nn
-from e3nn.o3 import Irreps, Linear as E3Linear
+from e3nn.o3 import Irreps
+from e3nn.o3 import Linear as E3Linear
 
 
 class EquivariantLinear(nn.Module):
@@ -26,8 +28,8 @@ class EquivariantLinear(nn.Module):
 
     def __init__(
         self,
-        irreps_in: typing.Union[str, Irreps],
-        irreps_out: typing.Union[str, Irreps],
+        irreps_in: str | Irreps,
+        irreps_out: str | Irreps,
         biases: bool = True,
     ) -> None:
         super().__init__()
@@ -39,6 +41,6 @@ class EquivariantLinear(nn.Module):
             biases=biases,
         )
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply equivariant linear transformation."""
-        return self._linear(x)                                              # (N, irreps_out.dim)
+        return self._linear(x)  # (N, irreps_out.dim)

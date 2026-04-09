@@ -73,7 +73,7 @@ class GOALCalculator(Calculator):
         Forwarded to ``ase.calculators.calculator.Calculator.__init__``.
     """
 
-    implemented_properties: typing.ClassVar[typing.List[str]] = [
+    implemented_properties: typing.ClassVar[list[str]] = [
         "energy",
         "forces",
         "stress",
@@ -81,36 +81,30 @@ class GOALCalculator(Calculator):
 
     def __init__(
         self,
-        checkpoint_path: typing.Optional[typing.Union[str, Path]] = None,
-        module: typing.Optional[typing.Any] = None,
-        cutoff: typing.Optional[float] = None,
+        checkpoint_path: str | Path | None = None,
+        module: typing.Any | None = None,
+        cutoff: float | None = None,
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
-        head: typing.Optional[str] = None,
+        head: str | None = None,
         **kwargs: typing.Any,
     ) -> None:
         super().__init__(**kwargs)
 
         if checkpoint_path is not None and module is not None:
-            raise ValueError(
-                "Provide either 'checkpoint_path' or 'module', not both."
-            )
+            raise ValueError("Provide either 'checkpoint_path' or 'module', not both.")
         if checkpoint_path is None and module is None:
-            raise ValueError(
-                "Provide either 'checkpoint_path' or 'module'."
-            )
+            raise ValueError("Provide either 'checkpoint_path' or 'module'.")
 
         self.device: torch.device = torch.device(device)
         self.dtype: torch.dtype = dtype
-        self.head: typing.Optional[str] = head
+        self.head: str | None = head
 
         if checkpoint_path is not None:
             self._module, self._cutoff = self._load_checkpoint(checkpoint_path)
         else:
             if cutoff is None:
-                raise ValueError(
-                    "'cutoff' is required when providing a module directly."
-                )
+                raise ValueError("'cutoff' is required when providing a module directly.")
             self._module = module
             self._cutoff = float(cutoff)
 
@@ -119,8 +113,8 @@ class GOALCalculator(Calculator):
 
     def _load_checkpoint(
         self,
-        path: typing.Union[str, Path],
-    ) -> typing.Tuple[typing.Any, float]:
+        path: str | Path,
+    ) -> tuple[typing.Any, float]:
         """Load a GOALModule from a Lightning checkpoint.
 
         Extracts the cutoff from the saved Hydra config stored in the
@@ -149,9 +143,9 @@ class GOALCalculator(Calculator):
     @torch.no_grad()
     def calculate(
         self,
-        atoms: typing.Optional[Atoms] = None,
-        properties: typing.Optional[typing.List[str]] = None,
-        system_changes: typing.List[str] = all_changes,
+        atoms: Atoms | None = None,
+        properties: list[str] | None = None,
+        system_changes: list[str] = all_changes,
     ) -> None:
         """Calculate energy, forces, and/or stress for the given Atoms.
 
@@ -176,7 +170,7 @@ class GOALCalculator(Calculator):
         )
         graph = graph.to(self.device)
 
-        predictions: typing.Dict[str, torch.Tensor] = self._module(graph)
+        predictions: dict[str, torch.Tensor] = self._module(graph)
 
         # Energy — scalar per structure
         if "energy" in predictions:
@@ -202,6 +196,5 @@ class GOALCalculator(Calculator):
 
     def __repr__(self) -> str:
         return (
-            f"GOALCalculator(cutoff={self._cutoff}, "
-            f"device={self.device}, dtype={self.dtype})"
+            f"GOALCalculator(cutoff={self._cutoff}, " f"device={self.device}, dtype={self.dtype})"
         )

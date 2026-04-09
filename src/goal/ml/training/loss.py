@@ -33,20 +33,21 @@ import torch.nn as nn
 
 from goal.ml.registry import LOSS_REGISTRY
 
-
 # ---------------------------------------------------------------------------
 # Loss function lookup
 # ---------------------------------------------------------------------------
 
 
 def _rmse_loss(
-    input: torch.Tensor, target: torch.Tensor, **kwargs: typing.Any,
+    input: torch.Tensor,
+    target: torch.Tensor,
+    **kwargs: typing.Any,
 ) -> torch.Tensor:
     """Root mean squared error — √MSE."""
     return torch.sqrt(nn.functional.mse_loss(input, target, **kwargs))
 
 
-_LOSS_FN_MAP: typing.Dict[str, typing.Callable[..., torch.Tensor]] = {
+_LOSS_FN_MAP: dict[str, typing.Callable[..., torch.Tensor]] = {
     "mse": nn.functional.mse_loss,
     "mae": nn.functional.l1_loss,
     "l1": nn.functional.l1_loss,
@@ -76,7 +77,7 @@ def resolve_loss_fn(name: str) -> typing.Callable[..., torch.Tensor]:
     ValueError
         If the name cannot be resolved.
     """
-    fn: typing.Optional[typing.Callable[..., torch.Tensor]] = _LOSS_FN_MAP.get(name)
+    fn: typing.Callable[..., torch.Tensor] | None = _LOSS_FN_MAP.get(name)
     if fn is not None:
         return fn
     # Dotted import path: e.g. "torchmetrics.functional.mean_squared_error"
@@ -88,9 +89,7 @@ def resolve_loss_fn(name: str) -> typing.Callable[..., torch.Tensor]:
             module = importlib.import_module(module_path)
             return getattr(module, attr_name)
         except (ImportError, AttributeError) as exc:
-            raise ValueError(
-                f"Cannot resolve loss function '{name}': {exc}"
-            ) from exc
+            raise ValueError(f"Cannot resolve loss function '{name}': {exc}") from exc
     available: str = ", ".join(sorted(_LOSS_FN_MAP.keys()))
     raise ValueError(
         f"Unknown loss function '{name}'. "
@@ -120,19 +119,19 @@ class WeightedLoss(nn.Module):
         self,
         loss: nn.Module,
         weight: float,
-        label: typing.Optional[str] = None,
-        group: typing.Optional[str] = None,
+        label: str | None = None,
+        group: str | None = None,
     ) -> None:
         super().__init__()
         self.loss: nn.Module = loss
         self.weight: float = weight
         self.label: str = label or loss.__class__.__name__
-        self.group: typing.Optional[str] = group
+        self.group: str | None = group
 
     def forward(
         self,
-        predictions: typing.Dict[str, torch.Tensor],
-        targets: typing.Dict[str, torch.Tensor],
+        predictions: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
     ) -> torch.Tensor:
         return self.weight * self.loss(predictions, targets)
 
@@ -154,7 +153,7 @@ class CompositeLoss(nn.Module):
         {"total": 12.0, "forces_mse": 4.0, "forces_rmse": 8.0, "forces": 12.0, "energy": 2.5}
     """
 
-    def __init__(self, losses: typing.List[WeightedLoss]) -> None:
+    def __init__(self, losses: list[WeightedLoss]) -> None:
         super().__init__()
         self.losses: nn.ModuleList = nn.ModuleList(losses)
 
@@ -163,9 +162,9 @@ class CompositeLoss(nn.Module):
 
     def forward(
         self,
-        predictions: typing.Dict[str, torch.Tensor],
-        targets: typing.Dict[str, torch.Tensor],
-    ) -> typing.Dict[str, torch.Tensor]:
+        predictions: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         """Compute all constituent losses and return a breakdown dict.
 
         Returns
@@ -177,9 +176,9 @@ class CompositeLoss(nn.Module):
         """
         device: torch.device = next(iter(predictions.values())).device
         total: torch.Tensor = torch.tensor(0.0, device=device)
-        breakdown: typing.Dict[str, torch.Tensor] = {}
-        group_sums: typing.Dict[str, torch.Tensor] = {}
-        group_counts: typing.Dict[str, int] = {}
+        breakdown: dict[str, torch.Tensor] = {}
+        group_sums: dict[str, torch.Tensor] = {}
+        group_counts: dict[str, int] = {}
 
         for loss in self.losses:
             val: torch.Tensor = loss(predictions, targets)
@@ -217,8 +216,8 @@ class EnergyLoss(nn.Module):
 
     def forward(
         self,
-        pred: typing.Dict[str, torch.Tensor],
-        target: typing.Dict[str, torch.Tensor],
+        pred: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
         return self.loss_fn(
             pred["energy"] / pred["num_atoms"],
@@ -236,8 +235,8 @@ class ForcesLoss(nn.Module):
 
     def forward(
         self,
-        pred: typing.Dict[str, torch.Tensor],
-        target: typing.Dict[str, torch.Tensor],
+        pred: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
         return self.loss_fn(pred["forces"], target["forces"])
 
@@ -252,8 +251,8 @@ class StressLoss(nn.Module):
 
     def forward(
         self,
-        pred: typing.Dict[str, torch.Tensor],
-        target: typing.Dict[str, torch.Tensor],
+        pred: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
         return self.loss_fn(pred["stress"], target["stress"])
 
@@ -268,8 +267,8 @@ class DipoleLoss(nn.Module):
 
     def forward(
         self,
-        pred: typing.Dict[str, torch.Tensor],
-        target: typing.Dict[str, torch.Tensor],
+        pred: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
         return self.loss_fn(pred["dipole"], target["dipole"])
 
@@ -284,8 +283,8 @@ class ChargeLoss(nn.Module):
 
     def forward(
         self,
-        pred: typing.Dict[str, torch.Tensor],
-        target: typing.Dict[str, torch.Tensor],
+        pred: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
         target_charge: torch.Tensor = target.get(
             "total_charge",

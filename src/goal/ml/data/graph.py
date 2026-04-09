@@ -31,21 +31,21 @@ class AtomicGraph(Data):
     def __init__(
         self,
         # Atomic structure — always required
-        positions: torch.Tensor,       # (N, 3) float64
+        positions: torch.Tensor,  # (N, 3) float64
         atomic_numbers: torch.Tensor,  # (N,)   int64
-        cell: torch.Tensor,            # (3, 3) float64, zeros if no PBC
-        pbc: torch.Tensor,             # (3,)   bool
+        cell: torch.Tensor,  # (3, 3) float64, zeros if no PBC
+        pbc: torch.Tensor,  # (3,)   bool
         # Graph topology — always required
-        edge_index: torch.Tensor,      # (2, E) int64
-        edge_vectors: torch.Tensor,    # (E, 3) float64, r_j - r_i
-        edge_lengths: torch.Tensor,    # (E,)   float64
+        edge_index: torch.Tensor,  # (2, E) int64
+        edge_vectors: torch.Tensor,  # (E, 3) float64, r_j - r_i
+        edge_lengths: torch.Tensor,  # (E,)   float64
         # Training targets — optional, None for inference
-        energy: typing.Optional[torch.Tensor] = None,    # (1,)   float64
-        forces: typing.Optional[torch.Tensor] = None,    # (N, 3) float64
-        stress: typing.Optional[torch.Tensor] = None,    # (3, 3) float64
+        energy: torch.Tensor | None = None,  # (1,)   float64
+        forces: torch.Tensor | None = None,  # (N, 3) float64
+        stress: torch.Tensor | None = None,  # (3, 3) float64
         # Metadata
-        weight: typing.Optional[torch.Tensor] = None,    # (1,)   float64, sample weight
-        head: typing.Optional[str] = None,               # multihead training tag
+        weight: torch.Tensor | None = None,  # (1,)   float64, sample weight
+        head: str | None = None,  # multihead training tag
         **kwargs: typing.Any,
     ) -> None:
         super().__init__(
@@ -102,11 +102,11 @@ class AtomicGraph(Data):
         cls,
         atoms,  # ase.Atoms — typed loosely to avoid hard ase import
         cutoff: float,
-        energy: typing.Optional[float] = None,
+        energy: float | None = None,
         forces=None,
         stress=None,
         weight: float = 1.0,
-        head: typing.Optional[str] = None,
+        head: str | None = None,
         dtype: torch.dtype = torch.float64,
     ) -> AtomicGraph:
         """Convert ASE ``Atoms`` to ``AtomicGraph``.
@@ -143,21 +143,15 @@ class AtomicGraph(Data):
             edge_index=edge_index,
             edge_vectors=edge_vecs,
             edge_lengths=edge_lens,
-            energy=(
-                torch.tensor([energy], dtype=dtype) if energy is not None else None
-            ),
-            forces=(
-                torch.tensor(forces, dtype=dtype) if forces is not None else None
-            ),
-            stress=(
-                torch.tensor(stress, dtype=dtype) if stress is not None else None
-            ),
+            energy=(torch.tensor([energy], dtype=dtype) if energy is not None else None),
+            forces=(torch.tensor(forces, dtype=dtype) if forces is not None else None),
+            stress=(torch.tensor(stress, dtype=dtype) if stress is not None else None),
             weight=torch.tensor([weight], dtype=dtype),
             head=head,
         )
 
     @classmethod
-    def from_dict(cls, d: typing.Dict[str, typing.Any], cutoff: float) -> AtomicGraph:
+    def from_dict(cls, d: dict[str, typing.Any], cutoff: float) -> AtomicGraph:
         """Build from raw dict — used in adapters to translate
         MACE / fairchem dict conventions into ``AtomicGraph``.
         """
@@ -213,7 +207,7 @@ class NodeFeatures:
     irreps: str
     """e3nn irreps string, e.g. ``'256x0e+256x1o'``."""
 
-    node_energies: typing.Optional[torch.Tensor] = None
+    node_energies: torch.Tensor | None = None
     """(N,) atomic energy contributions, if available."""
 
 

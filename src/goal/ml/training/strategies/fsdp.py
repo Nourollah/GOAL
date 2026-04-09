@@ -20,6 +20,7 @@ if typing.TYPE_CHECKING:
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _resolve_sharding_strategy(name: str) -> typing.Any:
     """Map a human-readable sharding name to a ``ShardingStrategy`` enum value."""
     from torch.distributed.fsdp import ShardingStrategy
@@ -31,8 +32,7 @@ def _resolve_sharding_strategy(name: str) -> typing.Any:
     }
     if name not in mapping:
         raise ValueError(
-            f"Unknown sharding_strategy '{name}'.  "
-            f"Choose from: {list(mapping.keys())}"
+            f"Unknown sharding_strategy '{name}'.  " f"Choose from: {list(mapping.keys())}"
         )
     return mapping[name]
 
@@ -48,8 +48,7 @@ def _resolve_state_dict_type(name: str) -> typing.Any:
     }
     if name not in mapping:
         raise ValueError(
-            f"Unknown state_dict_type '{name}'.  "
-            f"Choose from: {list(mapping.keys())}"
+            f"Unknown state_dict_type '{name}'.  " f"Choose from: {list(mapping.keys())}"
         )
     return mapping[name]
 
@@ -63,8 +62,10 @@ def _resolve_auto_wrap_policy(
         return None
 
     if policy_name == "size":
-        from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
         import functools
+
+        from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+
         return functools.partial(
             size_based_auto_wrap_policy,
             min_num_params=min_params,
@@ -72,6 +73,7 @@ def _resolve_auto_wrap_policy(
 
     if policy_name == "transformer":
         from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+
         return transformer_auto_wrap_policy
 
     raise ValueError(
@@ -128,11 +130,13 @@ def build_fsdp_strategy(cfg: DictConfig) -> "FSDPStrategy":
 
     if cpu_offload:
         from torch.distributed.fsdp import CPUOffload
+
         kwargs["cpu_offload"] = CPUOffload(offload_params=True)
 
     if activation_ckpt and policy_name == "size":
         kwargs["activation_checkpointing_policy"] = _resolve_auto_wrap_policy(
-            "size", min_params,
+            "size",
+            min_params,
         )
 
     return FSDPStrategy(**kwargs)

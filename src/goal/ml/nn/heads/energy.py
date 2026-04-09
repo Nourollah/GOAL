@@ -40,27 +40,31 @@ class EnergyHead(nn.Module):
     ) -> None:
         super().__init__()
         self.readout: ScalarReadout = ScalarReadout(irreps_in=irreps_in, hidden_dim=hidden_dim)
-        self._output_keys: typing.List[str] = ["energy"]
+        self._output_keys: list[str] = ["energy"]
 
     @property
-    def output_keys(self) -> typing.List[str]:
+    def output_keys(self) -> list[str]:
         return self._output_keys
 
     def forward(
         self,
         features: NodeFeatures,
         graph: AtomicGraph,
-    ) -> typing.Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         node_energies: torch.Tensor = self.readout(features.node_feats).squeeze(-1)  # (N,)
 
-        batch: torch.Tensor = graph.batch if graph.batch is not None else torch.zeros(  # (N,)
-            graph.num_atoms, dtype=torch.long, device=node_energies.device
+        batch: torch.Tensor = (
+            graph.batch
+            if graph.batch is not None
+            else torch.zeros(  # (N,)
+                graph.num_atoms, dtype=torch.long, device=node_energies.device
+            )
         )
         energy: torch.Tensor = scatter(node_energies, batch, dim=0, reduce="sum")  # (B,)
 
         return {
-            "energy": energy,                                                # (B,)
-            "num_atoms": scatter(                                            # (B,)
+            "energy": energy,  # (B,)
+            "num_atoms": scatter(  # (B,)
                 torch.ones_like(node_energies), batch, dim=0, reduce="sum"
             ),
         }

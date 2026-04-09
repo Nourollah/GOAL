@@ -15,15 +15,17 @@ from pathlib import Path
 class FoundationAdapter(typing.Protocol):
     """Protocol that all foundation model adapters must satisfy."""
 
-    def forward(self, graph: "AtomicGraph") -> "NodeFeatures": ...
+    def forward(self, graph: AtomicGraph) -> NodeFeatures: ...  # noqa: F821
 
     @classmethod
-    def from_pretrained(cls, variant: str) -> "FoundationAdapter": ...
+    def from_pretrained(cls, variant: str) -> FoundationAdapter: ...
 
     @classmethod
     def from_local(
-        cls, checkpoint_path: typing.Union[str, Path], **kwargs: typing.Any,
-    ) -> "FoundationAdapter":
+        cls,
+        checkpoint_path: str | Path,
+        **kwargs: typing.Any,
+    ) -> FoundationAdapter:
         """Load from a local fine-tuned checkpoint.
 
         If not implemented, raises ``NotImplementedError`` with a clear
@@ -35,6 +37,6 @@ class FoundationAdapter(typing.Protocol):
         """Access underlying model parameters (for freezing etc.)."""
         ...
 
-    def requires(self) -> typing.List[str]:
+    def requires(self) -> list[str]:
         """Return list of required pip packages."""
         ...

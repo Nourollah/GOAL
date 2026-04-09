@@ -9,7 +9,7 @@ import torch
 class TestAtomicGraph:
     """Verify AtomicGraph construction, properties, and batching."""
 
-    def _make_graph(self, num_atoms: int = 5) -> AtomicGraph:
+    def _make_graph(self, num_atoms: int = 5) -> AtomicGraph:  # noqa: F821
         """Create a minimal valid AtomicGraph for testing."""
         from goal.ml.data.graph import AtomicGraph
 

@@ -31,22 +31,22 @@ from goal.ml.training.module import GOALModule
 from goal.ml.training.strategies.factory import build_strategy
 
 
-def _instantiate_callbacks(cfg: typing.Optional[DictConfig]) -> typing.List[Callback]:
+def _instantiate_callbacks(cfg: DictConfig | None) -> list[Callback]:
     """Instantiate Lightning callbacks from Hydra config."""
     if not cfg:
         return []
-    callbacks: typing.List[Callback] = []
+    callbacks: list[Callback] = []
     for _, cb_conf in cfg.items():
         if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
             callbacks.append(hydra.utils.instantiate(cb_conf))
     return callbacks
 
 
-def _instantiate_loggers(cfg: typing.Optional[DictConfig]) -> typing.List[Logger]:
+def _instantiate_loggers(cfg: DictConfig | None) -> list[Logger]:
     """Instantiate Lightning loggers from Hydra config."""
     if not cfg:
         return []
-    loggers: typing.List[Logger] = []
+    loggers: list[Logger] = []
     for _, lg_conf in cfg.items():
         if isinstance(lg_conf, DictConfig) and "_target_" in lg_conf:
             loggers.append(hydra.utils.instantiate(lg_conf))
@@ -57,7 +57,7 @@ def _gpu_supports_tf32() -> bool:
     """Check whether the current CUDA device supports TF32 (Ampere+, sm_80+)."""
     if not torch.cuda.is_available():
         return False
-    capability: typing.Tuple[int, int] = torch.cuda.get_device_capability()
+    capability: tuple[int, int] = torch.cuda.get_device_capability()
     return capability[0] >= 8  # Ampere = 8.0, Hopper = 9.0
 
 
@@ -78,7 +78,7 @@ def _setup_performance(cfg: DictConfig) -> None:
     - **cuDNN deterministic**: Forces deterministic cuDNN algorithms.
       Only meaningful when CUDA is available.
     """
-    perf: typing.Dict[str, typing.Any] = cfg.training.get("performance", {})
+    perf: dict[str, typing.Any] = cfg.training.get("performance", {})
     has_cuda: bool = torch.cuda.is_available()
 
     # TF32 for matmul — only effective on Ampere+ GPUs (sm_80+)
@@ -120,39 +120,41 @@ def _build_loss(cfg: DictConfig) -> CompositeLoss:
               - name: rmse
                 weight: 8.0
     """
-    losses: typing.List[WeightedLoss] = []
+    losses: list[WeightedLoss] = []
     for loss_cfg in cfg.training.losses:
         loss_cls: typing.Any = LOSS_REGISTRY.get(loss_cfg.name)
         fn_spec: typing.Any = loss_cfg.get("fn", "mse")
 
         if isinstance(fn_spec, str):
             # Single loss function — backward compatible
-            losses.append(WeightedLoss(
-                loss_cls(loss_fn=fn_spec),
-                weight=loss_cfg.weight,
-                label=loss_cfg.name,
-            ))
+            losses.append(
+                WeightedLoss(
+                    loss_cls(loss_fn=fn_spec),
+                    weight=loss_cfg.weight,
+                    label=loss_cfg.name,
+                )
+            )
         else:
             # Composite: list of {name, weight} sub-fns
             for sub in fn_spec:
                 sub_name: str = sub["name"] if isinstance(sub, dict) else sub.name
-                sub_weight: float = float(
-                    sub["weight"] if isinstance(sub, dict) else sub.weight
-                )
+                sub_weight: float = float(sub["weight"] if isinstance(sub, dict) else sub.weight)
                 fn_label: str = sub_name.rsplit(".", 1)[-1]
-                losses.append(WeightedLoss(
-                    loss_cls(loss_fn=sub_name),
-                    weight=sub_weight,
-                    label=f"{loss_cfg.name}_{fn_label}",
-                    group=loss_cfg.name,
-                ))
+                losses.append(
+                    WeightedLoss(
+                        loss_cls(loss_fn=sub_name),
+                        weight=sub_weight,
+                        label=f"{loss_cfg.name}_{fn_label}",
+                        group=loss_cfg.name,
+                    )
+                )
     return CompositeLoss(losses)
 
 
 def _build_head(cfg: DictConfig) -> typing.Any:
     """Build the task head from config."""
     head_cls: typing.Any = HEAD_REGISTRY.get(cfg.model.head.name)
-    head_kwargs: typing.Dict[str, typing.Any] = {k: v for k, v in cfg.model.head.items() if k != "name"}
+    head_kwargs: dict[str, typing.Any] = {k: v for k, v in cfg.model.head.items() if k != "name"}
     return head_cls(**head_kwargs)
 
 
@@ -181,7 +183,9 @@ def train(cfg: DictConfig) -> None:
 
     # Build components via registry
     backbone_cls: typing.Any = BACKBONE_REGISTRY.get(cfg.model.backbone.name)
-    backbone_kwargs: typing.Dict[str, typing.Any] = {k: v for k, v in cfg.model.backbone.items() if k != "name"}
+    backbone_kwargs: dict[str, typing.Any] = {
+        k: v for k, v in cfg.model.backbone.items() if k != "name"
+    }
     backbone: typing.Any = backbone_cls(**backbone_kwargs)
 
     head: typing.Any = _build_head(cfg)
@@ -198,9 +202,9 @@ def train(cfg: DictConfig) -> None:
 
     # Automatic checkpoint resumption — last.ckpt if exists, else None
     last_ckpt: Path = checkpoint_dir / "last.ckpt"
-    resume_path: typing.Optional[str] = str(last_ckpt) if last_ckpt.exists() else None
+    resume_path: str | None = str(last_ckpt) if last_ckpt.exists() else None
 
-    callbacks: typing.List[Callback] = [
+    callbacks: list[Callback] = [
         GOALCheckpoint(
             dirpath=str(checkpoint_dir),
             filename="epoch={epoch:04d}-val_loss={val/total:.4f}",
@@ -216,21 +220,22 @@ def train(cfg: DictConfig) -> None:
     ]
 
     # Optionally add SLURM plugin
-    plugins: typing.List[typing.Any] = []
+    plugins: list[typing.Any] = []
     if cfg.training.get("slurm_mode", False):
         from lightning.pytorch.plugins.environments import SLURMEnvironment
+
         plugins.append(SLURMEnvironment(auto_requeue=True))
 
     # Instantiate callbacks and loggers from Hydra config (if present)
-    hydra_callbacks: typing.List[Callback] = _instantiate_callbacks(cfg.get("callbacks"))
-    loggers: typing.List[Logger] = _instantiate_loggers(cfg.get("logger"))
+    hydra_callbacks: list[Callback] = _instantiate_callbacks(cfg.get("callbacks"))
+    loggers: list[Logger] = _instantiate_loggers(cfg.get("logger"))
 
     # Merge callbacks: GOAL-specific + Hydra-configured
-    all_callbacks: typing.List[Callback] = callbacks + (hydra_callbacks or [])
+    all_callbacks: list[Callback] = callbacks + (hydra_callbacks or [])
 
     # Strategy: if cfg.strategy exists, use the strategy factory;
     # otherwise fall through to hydra.utils.instantiate (backward compat).
-    strategy_override: typing.Dict[str, typing.Any] = {}
+    strategy_override: dict[str, typing.Any] = {}
     if cfg.get("strategy") is not None:
         strategy_override["strategy"] = build_strategy(cfg)
 

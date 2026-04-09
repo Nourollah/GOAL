@@ -22,7 +22,6 @@ from torch_geometric.utils import scatter
 
 from goal.ml.data.graph import AtomicGraph, NodeFeatures
 
-
 # ---------------------------------------------------------------------------
 # HookBasedExtractor
 # ---------------------------------------------------------------------------
@@ -64,15 +63,15 @@ class HookBasedExtractor:
         self,
         model: nn.Module,
         blocks_attr: str = "interactions",
-        output_index: typing.Optional[int] = None,
+        output_index: int | None = None,
         detach: bool = True,
     ) -> None:
         self._model: nn.Module = model
         self._blocks_attr: str = blocks_attr
-        self._output_index: typing.Optional[int] = output_index
+        self._output_index: int | None = output_index
         self._detach: bool = detach
-        self._hooks: typing.List[torch.utils.hooks.RemovableHook] = []
-        self.captured: typing.Dict[str, torch.Tensor] = {}
+        self._hooks: list[torch.utils.hooks.RemovableHook] = []
+        self.captured: dict[str, torch.Tensor] = {}
         self._attach()
 
     # ------------------------------------------------------------------
@@ -88,7 +87,8 @@ class HookBasedExtractor:
             self._hooks.append(hook)
 
     def _make_hook(
-        self, key: str,
+        self,
+        key: str,
     ) -> typing.Callable:
         """Return a hook closure that stores the block's output tensor."""
 
@@ -113,7 +113,7 @@ class HookBasedExtractor:
         self._hooks.clear()
         self.captured.clear()
 
-    def extract(self, *args: typing.Any, **kwargs: typing.Any) -> typing.Dict[str, torch.Tensor]:
+    def extract(self, *args: typing.Any, **kwargs: typing.Any) -> dict[str, torch.Tensor]:
         """Run the model forward pass and return captured features.
 
         All positional and keyword arguments are forwarded to
@@ -135,8 +135,8 @@ class HookBasedExtractor:
 
     def __exit__(
         self,
-        exc_type: typing.Optional[type],
-        exc_val: typing.Optional[BaseException],
+        exc_type: type | None,
+        exc_val: BaseException | None,
         exc_tb: typing.Any,
     ) -> None:
         self.remove()
@@ -208,8 +208,10 @@ class LayerBackbone:
         return self._adapter.parameters()
 
     def named_parameters(
-        self, prefix: str = "", recurse: bool = True,
-    ) -> typing.Iterator[typing.Tuple[str, nn.Parameter]]:
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+    ) -> typing.Iterator[tuple[str, nn.Parameter]]:
         """Proxy to underlying adapter named_parameters."""
         if hasattr(self._adapter, "named_parameters"):
             return self._adapter.named_parameters(prefix=prefix, recurse=recurse)
@@ -257,9 +259,8 @@ class MultiScaleBackbone:
     @property
     def irreps_out(self) -> Irreps:
         """Concatenated irreps across all layers."""
-        parts: typing.List[Irreps] = [
-            self._adapter.irreps_at_layer(i)
-            for i in range(self._adapter.num_layers)
+        parts: list[Irreps] = [
+            self._adapter.irreps_at_layer(i) for i in range(self._adapter.num_layers)
         ]
         combined: str = "+".join(str(p) for p in parts)
         return Irreps(combined)
@@ -279,8 +280,10 @@ class MultiScaleBackbone:
         return self._adapter.parameters()
 
     def named_parameters(
-        self, prefix: str = "", recurse: bool = True,
-    ) -> typing.Iterator[typing.Tuple[str, nn.Parameter]]:
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+    ) -> typing.Iterator[tuple[str, nn.Parameter]]:
         """Proxy to underlying adapter named_parameters."""
         if hasattr(self._adapter, "named_parameters"):
             return self._adapter.named_parameters(prefix=prefix, recurse=recurse)
@@ -348,8 +351,10 @@ class FrozenBackbone:
         return self._backbone.parameters()
 
     def named_parameters(
-        self, prefix: str = "", recurse: bool = True,
-    ) -> typing.Iterator[typing.Tuple[str, nn.Parameter]]:
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+    ) -> typing.Iterator[tuple[str, nn.Parameter]]:
         """Return underlying named parameters (all frozen)."""
         if hasattr(self._backbone, "named_parameters"):
             return self._backbone.named_parameters(prefix=prefix, recurse=recurse)
@@ -386,7 +391,7 @@ def extract_scalars(features: NodeFeatures) -> torch.Tensor:
     """
     irreps: Irreps = Irreps(features.irreps)
     node_feats: torch.Tensor = features.node_feats
-    scalar_slices: typing.List[torch.Tensor] = []
+    scalar_slices: list[torch.Tensor] = []
     offset: int = 0
 
     for mul, ir in irreps:
@@ -397,8 +402,10 @@ def extract_scalars(features: NodeFeatures) -> torch.Tensor:
 
     if not scalar_slices:
         return torch.zeros(
-            node_feats.shape[0], 0,
-            dtype=node_feats.dtype, device=node_feats.device,
+            node_feats.shape[0],
+            0,
+            dtype=node_feats.dtype,
+            device=node_feats.device,
         )
     return torch.cat(scalar_slices, dim=-1)
 
@@ -426,7 +433,7 @@ def extract_irrep_channels(
     """
     irreps: Irreps = Irreps(features.irreps)
     node_feats: torch.Tensor = features.node_feats
-    slices: typing.List[torch.Tensor] = []
+    slices: list[torch.Tensor] = []
     offset: int = 0
 
     for mul, ir in irreps:
@@ -437,8 +444,10 @@ def extract_irrep_channels(
 
     if not slices:
         return torch.zeros(
-            node_feats.shape[0], 0,
-            dtype=node_feats.dtype, device=node_feats.device,
+            node_feats.shape[0],
+            0,
+            dtype=node_feats.dtype,
+            device=node_feats.device,
         )
     return torch.cat(slices, dim=-1)
 
@@ -493,15 +502,15 @@ def describe_irreps(irreps_str: str) -> None:
     irreps: Irreps = Irreps(irreps_str)
     total_dim: int = irreps.dim
 
-    _L_NAMES: typing.Dict[int, str] = {
+    _L_NAMES: dict[int, str] = {
         0: "scalar",
         1: "vector",
         2: "matrix",
         3: "octupole",
     }
-    _PARITY: typing.Dict[int, str] = {1: "even", -1: "odd"}
+    _PARITY: dict[int, str] = {1: "even", -1: "odd"}
 
-    rows: typing.List[typing.Tuple[str, int, str, str, int]] = []
+    rows: list[tuple[str, int, str, str, int]] = []
     for mul, ir in irreps:
         l_name: str = _L_NAMES.get(ir.l, f"L={ir.l}")
         parity: str = _PARITY.get(ir.p, str(ir.p))

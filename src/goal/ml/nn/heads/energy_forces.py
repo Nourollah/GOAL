@@ -46,12 +46,12 @@ class EnergyForcesHead(nn.Module):
         super().__init__()
         self.compute_stress: bool = compute_stress
         self.readout: ScalarReadout = ScalarReadout(irreps_in=irreps_in, hidden_dim=hidden_dim)
-        self._output_keys: typing.List[str] = ["energy", "forces"]
+        self._output_keys: list[str] = ["energy", "forces"]
         if compute_stress:
             self._output_keys.append("stress")
 
     @property
-    def output_keys(self) -> typing.List[str]:
+    def output_keys(self) -> list[str]:
         """Keys this head produces."""
         return self._output_keys
 
@@ -59,7 +59,7 @@ class EnergyForcesHead(nn.Module):
         self,
         features: NodeFeatures,
         graph: AtomicGraph,
-    ) -> typing.Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """Compute energy and forces (and optionally stress).
 
         Parameters
@@ -75,32 +75,36 @@ class EnergyForcesHead(nn.Module):
             ``{'energy': (B,), 'forces': (N, 3), ...}``
         """
         # Per-node scalar contribution
-        node_energies: torch.Tensor = self.readout(features.node_feats)     # (N, 1)
-        node_energies = node_energies.squeeze(-1)                           # (N,)
+        node_energies: torch.Tensor = self.readout(features.node_feats)  # (N, 1)
+        node_energies = node_energies.squeeze(-1)  # (N,)
 
         # Sum per graph to get total energy
-        batch: torch.Tensor = graph.batch if graph.batch is not None else torch.zeros(  # (N,)
-            graph.num_atoms, dtype=torch.long, device=node_energies.device
+        batch: torch.Tensor = (
+            graph.batch
+            if graph.batch is not None
+            else torch.zeros(  # (N,)
+                graph.num_atoms, dtype=torch.long, device=node_energies.device
+            )
         )
         energy: torch.Tensor = scatter(node_energies, batch, dim=0, reduce="sum")  # (B,)
 
-        outputs: typing.Dict[str, torch.Tensor] = {
-            "energy": energy,                                               # (B,)
-            "num_atoms": scatter(                                           # (B,)
+        outputs: dict[str, torch.Tensor] = {
+            "energy": energy,  # (B,)
+            "num_atoms": scatter(  # (B,)
                 torch.ones_like(node_energies), batch, dim=0, reduce="sum"
             ),
         }
 
         # Forces via autograd — negative gradient of energy w.r.t. positions
         if graph.pos.requires_grad:
-            forces: torch.Tensor = torch.autograd.grad(                     # (N, 3)
+            forces: torch.Tensor = torch.autograd.grad(  # (N, 3)
                 energy.sum(),
                 graph.pos,
                 create_graph=self.training,
                 retain_graph=True,
             )[0]
-            outputs["forces"] = -forces                                     # (N, 3)
+            outputs["forces"] = -forces  # (N, 3)
         else:
-            outputs["forces"] = torch.zeros_like(graph.pos)                 # (N, 3)
+            outputs["forces"] = torch.zeros_like(graph.pos)  # (N, 3)
 
         return outputs

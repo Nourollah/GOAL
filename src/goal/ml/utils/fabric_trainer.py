@@ -65,7 +65,6 @@ import torch.nn as nn
 
 from goal.ml.utils.mini_trainer import TrainingHistory
 
-
 # ---------------------------------------------------------------------------
 # Fabric setup helper
 # ---------------------------------------------------------------------------
@@ -74,10 +73,10 @@ from goal.ml.utils.mini_trainer import TrainingHistory
 def setup_fabric(
     accelerator: str = "auto",
     strategy: str = "auto",
-    devices: typing.Union[int, str] = "auto",
+    devices: int | str = "auto",
     num_nodes: int = 1,
-    precision: typing.Optional[str] = None,
-) -> "lightning.Fabric":
+    precision: str | None = None,
+) -> lightning.Fabric:  # noqa: F821
     """Create and launch a configured ``lightning.Fabric`` instance.
 
     Thin convenience wrapper so callers don't need to remember the
@@ -101,7 +100,7 @@ def setup_fabric(
     """
     import lightning
 
-    kwargs: typing.Dict[str, typing.Any] = {
+    kwargs: dict[str, typing.Any] = {
         "accelerator": accelerator,
         "strategy": strategy,
         "devices": devices,
@@ -135,7 +134,7 @@ class FabricStepFn(typing.Protocol):
         batch: typing.Any,
         model: nn.Module,
         loss_fn: nn.Module,
-    ) -> typing.Dict[str, torch.Tensor]: ...
+    ) -> dict[str, torch.Tensor]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +146,7 @@ def default_fabric_step(
     batch: typing.Any,
     model: nn.Module,
     loss_fn: nn.Module,
-) -> typing.Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Default step for ``(x, y)`` tuple batches.
 
     Same semantics as ``mini_trainer.default_step`` but without
@@ -173,7 +172,7 @@ def graph_fabric_step(
     batch: typing.Any,
     model: nn.Module,
     loss_fn: nn.Module,
-) -> typing.Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Step for ``AtomicGraph`` batches with a backbone + head model.
 
     Expects the model to return ``Dict[str, Tensor]`` and the loss
@@ -187,7 +186,7 @@ def graph_fabric_step(
     Returns:
         Dict with ``'total'`` and per-component breakdown.
     """
-    predictions: typing.Dict[str, torch.Tensor] = model(batch)
+    predictions: dict[str, torch.Tensor] = model(batch)
     return loss_fn(predictions, batch)
 
 
@@ -268,22 +267,22 @@ class FabricTrainer:
         loss_fn: nn.Module,
         optimizer: torch.optim.Optimizer,
         train_loader: typing.Any,
-        val_loader: typing.Optional[typing.Any] = None,
+        val_loader: typing.Any | None = None,
         accelerator: str = "auto",
         strategy: str = "auto",
-        devices: typing.Union[int, str] = "auto",
+        devices: int | str = "auto",
         num_nodes: int = 1,
-        precision: typing.Optional[str] = None,
-        scheduler: typing.Optional[torch.optim.lr_scheduler.LRScheduler] = None,
-        step_fn: typing.Optional[FabricStepFn] = None,
-        grad_clip: typing.Optional[float] = None,
+        precision: str | None = None,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+        step_fn: FabricStepFn | None = None,
+        grad_clip: float | None = None,
         grad_accumulation_steps: int = 1,
         enable_progress: bool = True,
     ) -> None:
         self.loss_fn: nn.Module = loss_fn
-        self.scheduler: typing.Optional[torch.optim.lr_scheduler.LRScheduler] = scheduler
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = scheduler
         self.step_fn: FabricStepFn = step_fn or default_fabric_step
-        self.grad_clip: typing.Optional[float] = grad_clip
+        self.grad_clip: float | None = grad_clip
         self.grad_accumulation_steps: int = max(1, grad_accumulation_steps)
         self.enable_progress: bool = enable_progress
 
@@ -303,13 +302,13 @@ class FabricTrainer:
 
         # Fabric-wrap data loaders
         self.train_loader: typing.Any = self.fabric.setup_dataloaders(train_loader)
-        self.val_loader: typing.Optional[typing.Any] = None
+        self.val_loader: typing.Any | None = None
         if val_loader is not None:
             self.val_loader = self.fabric.setup_dataloaders(val_loader)
 
         # Best model state
         self._best_val_loss: float = float("inf")
-        self._best_state: typing.Optional[typing.Dict[str, typing.Any]] = None
+        self._best_state: dict[str, typing.Any] | None = None
 
     # ------------------------------------------------------------------
     # Progress bar helper
@@ -327,6 +326,7 @@ class FabricTrainer:
             return iterable
         try:
             from tqdm.auto import tqdm
+
             return tqdm(iterable, total=total, desc=desc, leave=False)
         except ImportError:
             return iterable
@@ -346,20 +346,22 @@ class FabricTrainer:
         num_batches: int = 0
 
         progress: typing.Any = self._get_progress_bar(
-            self.train_loader, total=len(self.train_loader),
-            desc="train", enabled=self.enable_progress,
+            self.train_loader,
+            total=len(self.train_loader),
+            desc="train",
+            enabled=self.enable_progress,
         )
 
         for batch_idx, batch in enumerate(progress):
-            is_accumulating: bool = (
-                (batch_idx + 1) % self.grad_accumulation_steps != 0
-            )
+            is_accumulating: bool = (batch_idx + 1) % self.grad_accumulation_steps != 0
 
             # Fabric context manager for gradient accumulation —
             # skips all-reduce sync on accumulation steps (performance).
             with self.fabric.no_backward_sync(self.model, enabled=is_accumulating):
-                result: typing.Dict[str, torch.Tensor] = self.step_fn(
-                    batch, self.model, self.loss_fn,
+                result: dict[str, torch.Tensor] = self.step_fn(
+                    batch,
+                    self.model,
+                    self.loss_fn,
                 )
                 loss: torch.Tensor = result.get("loss", result.get("total"))
                 self.fabric.backward(loss / self.grad_accumulation_steps)
@@ -367,8 +369,10 @@ class FabricTrainer:
             if not is_accumulating or (batch_idx + 1) == len(self.train_loader):
                 if self.grad_clip is not None:
                     self.fabric.clip_gradients(
-                        self.model, self.optimizer,
-                        max_norm=self.grad_clip, norm_type=2.0,
+                        self.model,
+                        self.optimizer,
+                        max_norm=self.grad_clip,
+                        norm_type=2.0,
                     )
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -390,13 +394,17 @@ class FabricTrainer:
         num_batches: int = 0
 
         progress: typing.Any = self._get_progress_bar(
-            self.val_loader, total=len(self.val_loader),
-            desc="val", enabled=self.enable_progress,
+            self.val_loader,
+            total=len(self.val_loader),
+            desc="val",
+            enabled=self.enable_progress,
         )
 
         for batch in progress:
-            result: typing.Dict[str, torch.Tensor] = self.step_fn(
-                batch, self.model, self.loss_fn,
+            result: dict[str, torch.Tensor] = self.step_fn(
+                batch,
+                self.model,
+                self.loss_fn,
             )
             loss: torch.Tensor = result.get("loss", result.get("total"))
             total_loss += loss.item()
@@ -411,7 +419,7 @@ class FabricTrainer:
     def fit(
         self,
         epochs: int = 10,
-        early_stopping_patience: typing.Optional[int] = None,
+        early_stopping_patience: int | None = None,
         checkpoint_best: bool = True,
         verbose: bool = True,
     ) -> TrainingHistory:
@@ -450,9 +458,7 @@ class FabricTrainer:
                     if checkpoint_best:
                         # Get raw model state (unwrap Fabric wrapper)
                         raw_model: nn.Module = (
-                            self.model.module
-                            if hasattr(self.model, "module")
-                            else self.model
+                            self.model.module if hasattr(self.model, "module") else self.model
                         )
                         self._best_state = copy.deepcopy(raw_model.state_dict())
                 else:
@@ -465,7 +471,8 @@ class FabricTrainer:
             history.lr.append(current_lr)
             if self.scheduler is not None:
                 if isinstance(
-                    self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau,
+                    self.scheduler,
+                    torch.optim.lr_scheduler.ReduceLROnPlateau,
                 ):
                     metric: float = val_loss if self.val_loader is not None else train_loss
                     self.scheduler.step(metric)
@@ -478,7 +485,7 @@ class FabricTrainer:
 
             # --- Logging (rank 0 only) ---
             if verbose and self.fabric.is_global_zero:
-                parts: typing.List[str] = [
+                parts: list[str] = [
                     f"Epoch {epoch + 1:>{len(str(epochs))}}/{epochs}",
                     f"train_loss={train_loss:.6f}",
                     f"val_loss={val_loss_str}",
@@ -513,9 +520,7 @@ class FabricTrainer:
                 "No best checkpoint available. "
                 "Run fit() with val_loader and checkpoint_best=True first."
             )
-        raw_model: nn.Module = (
-            self.model.module if hasattr(self.model, "module") else self.model
-        )
+        raw_model: nn.Module = self.model.module if hasattr(self.model, "module") else self.model
         raw_model.load_state_dict(self._best_state)
 
     def save_checkpoint(self, path: str) -> None:
@@ -527,7 +532,7 @@ class FabricTrainer:
         Args:
             path: File path for the checkpoint.
         """
-        state: typing.Dict[str, typing.Any] = {
+        state: dict[str, typing.Any] = {
             "model": self.model,
             "optimizer": self.optimizer,
         }
@@ -539,7 +544,7 @@ class FabricTrainer:
         Args:
             path: File path to the checkpoint.
         """
-        state: typing.Dict[str, typing.Any] = {
+        state: dict[str, typing.Any] = {
             "model": self.model,
             "optimizer": self.optimizer,
         }

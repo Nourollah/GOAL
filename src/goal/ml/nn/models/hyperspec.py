@@ -59,14 +59,16 @@ class HyperSpecModel(nn.Module):
         self._cutoff: float = cutoff
 
         # Build irreps for hidden features: hidden_channels scalars + vectors + ...
-        irreps_parts: typing.List[str] = []
+        irreps_parts: list[str] = []
         for l_val in range(lmax + 1):
             parity: str = "e" if l_val % 2 == 0 else "o"
             irreps_parts.append(f"{hidden_channels}x{l_val}{parity}")
         self._irreps_hidden: Irreps = Irreps("+".join(irreps_parts))
 
         # Edge spherical harmonics irreps
-        sh_parts: typing.List[str] = [f"1x{l_val}{'e' if l_val % 2 == 0 else 'o'}" for l_val in range(lmax + 1)]
+        sh_parts: list[str] = [
+            f"1x{l_val}{'e' if l_val % 2 == 0 else 'o'}" for l_val in range(lmax + 1)
+        ]
         self._irreps_edge: Irreps = Irreps("+".join(sh_parts))
 
         # Atomic embedding → initial node features (scalar only → full irreps)
@@ -75,18 +77,22 @@ class HyperSpecModel(nn.Module):
             embedding_dim=embedding_dim,
         )
         scalar_irreps: Irreps = Irreps(f"{embedding_dim}x0e")
-        self.input_linear: EquivariantLinear = EquivariantLinear(scalar_irreps, self._irreps_hidden)
+        self.input_linear: EquivariantLinear = EquivariantLinear(
+            scalar_irreps, self._irreps_hidden
+        )
 
         # Interaction layers
-        self.interactions = nn.ModuleList([
-            EquivariantInteractionBlock(
-                irreps_node=self._irreps_hidden,
-                irreps_edge=self._irreps_edge,
-                num_basis=num_radial_basis,
-                cutoff=cutoff,
-            )
-            for _ in range(num_interactions)
-        ])
+        self.interactions = nn.ModuleList(
+            [
+                EquivariantInteractionBlock(
+                    irreps_node=self._irreps_hidden,
+                    irreps_edge=self._irreps_edge,
+                    num_basis=num_radial_basis,
+                    cutoff=cutoff,
+                )
+                for _ in range(num_interactions)
+            ]
+        )
 
     @property
     def irreps_out(self) -> Irreps:
@@ -112,19 +118,19 @@ class HyperSpecModel(nn.Module):
             Equivariant node features after all interaction layers.
         """
         # Initial embedding (scalar features only)
-        h: torch.Tensor = self.embedding(graph.z)                           # (N, embedding_dim)
-        h = self.input_linear(h)                                            # (N, irreps_hidden.dim)
+        h: torch.Tensor = self.embedding(graph.z)  # (N, embedding_dim)
+        h = self.input_linear(h)  # (N, irreps_hidden.dim)
 
         # Message passing
         for interaction in self.interactions:
-            h = interaction(                                                 # (N, irreps_hidden.dim)
+            h = interaction(  # (N, irreps_hidden.dim)
                 node_feats=h,
-                edge_index=graph.edge_index,                                # (2, E)
-                edge_vectors=graph.edge_attr,                               # (E, 3)
-                edge_lengths=graph.edge_weight,                             # (E,)
+                edge_index=graph.edge_index,  # (2, E)
+                edge_vectors=graph.edge_attr,  # (E, 3)
+                edge_lengths=graph.edge_weight,  # (E,)
             )
 
         return NodeFeatures(
-            node_feats=h,                                                   # (N, irreps_hidden.dim)
+            node_feats=h,  # (N, irreps_hidden.dim)
             irreps=str(self._irreps_hidden),
         )

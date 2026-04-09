@@ -41,4 +41,4 @@ class AtomicNumberEmbedding(nn.Module):
         Tensor
             Embedding vectors, shape ``(N, embedding_dim)``.
         """
-        return self.embedding(atomic_numbers)                                # (N, embedding_dim)
+        return self.embedding(atomic_numbers)  # (N, embedding_dim)
