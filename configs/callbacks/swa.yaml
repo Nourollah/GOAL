@@ -1,0 +1,16 @@
+# Stochastic Weight Averaging (SWA) callback
+# Averages model weights during the last portion of training.
+# Typically gives 1-3% accuracy improvement with no extra compute.
+#
+# Usage: python train.py callbacks=swa
+# Note: Mutually exclusive with EMA - use one or the other.
+
+swa:
+  _target_: lightning.pytorch.callbacks.StochasticWeightAveraging
+  # Start SWA at this fraction of total training
+  swa_lrs: 1.0e-4
+  # Start averaging at this epoch
+  swa_epoch_start: 0.75
+  # Frequency of weight averaging (in steps)
+  annealing_epochs: 10
+  annealing_strategy: cos

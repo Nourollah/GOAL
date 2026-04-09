@@ -1,0 +1,10 @@
+# ThroughputMonitor callback — tracks samples/sec and tokens/sec
+# Lightning 2.5+ with variable batch size support in 2.6
+# Useful for benchmarking and identifying data bottlenecks
+#
+# Usage: python train.py callbacks=throughput_monitor
+
+throughput_monitor:
+  _target_: lightning.pytorch.callbacks.ThroughputMonitor
+  # logging frequency (in batches)
+  window_size: 100

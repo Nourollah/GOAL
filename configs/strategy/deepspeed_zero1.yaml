@@ -1,0 +1,15 @@
+# DeepSpeed ZeRO Stage 1 — optimizer state partitioning only.
+# Lowest memory saving but also lowest communication overhead.
+# Good starting point when DDP runs out of memory.
+#
+# Usage: python train.py +strategy=deepspeed_zero1
+
+name: deepspeed_zero1
+stage: 1
+
+# Communication bucket sizes (bytes)
+allgather_bucket_size: 200_000_000
+reduce_bucket_size: 200_000_000
+
+# Logging verbosity: WARNING, INFO, ERROR
+logging_level: WARNING

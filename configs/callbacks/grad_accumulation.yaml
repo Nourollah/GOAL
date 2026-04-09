@@ -1,0 +1,14 @@
+# Gradient Accumulation Scheduler callback
+# Dynamically increases accumulation steps during training.
+# Useful for starting with small effective batch sizes and ramping up.
+#
+# Usage: python train.py callbacks=grad_accumulation
+
+grad_accumulation:
+  _target_: lightning.pytorch.callbacks.GradientAccumulationScheduler
+  # Dict mapping epoch → accumulation steps
+  # Example: {0: 1, 4: 2, 8: 4} means:
+  #   epochs 0-3: accumulate every 1 step (normal)
+  #   epochs 4-7: accumulate every 2 steps (2× effective batch)
+  #   epochs 8+:  accumulate every 4 steps (4× effective batch)
+  scheduling: {0: 1, 10: 2}

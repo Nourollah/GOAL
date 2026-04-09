@@ -1,0 +1,35 @@
+# GMD Data Configuration — ExtXYZ dataset
+#
+# Loading modes:
+#   Mode 1 (default): single root, auto-split from train.xyz/val.xyz/test.xyz
+#   Mode 2: per-split paths via train_paths/val_paths/test_paths
+#   Mode 3: root is a list → merged then auto-split via split_ratio
+
+data:
+  dataset_type: xyz
+  root: ${paths.data_dir}
+  cutoff: 5.0
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true   # keep worker processes alive between epochs
+  prefetch_factor: 2         # batches prefetched per worker
+  energy_key: energy
+  forces_key: forces
+  stress_key: stress
+
+  # --- Multi-file / splitting options ---
+  # Per-split paths (Mode 2) — uncomment to use:
+  # train_paths:
+  #   - /data/dataset_A/train.xyz
+  #   - /data/dataset_B/train.xyz
+  # val_paths:
+  #   - /data/dataset_A/val.xyz
+  # test_paths:
+  #   - /data/dataset_A/test.xyz
+
+  # Merge strategy for multi-file: "sequential" or "random"
+  merge_strategy: sequential
+  # Auto-split ratio when loading from a single source (no named splits)
+  split_ratio: [0.8, 0.1, 0.1]
+  split_seed: 42

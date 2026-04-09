@@ -3,105 +3,58 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "src"
-version = "0.0.1"
-description = "Describe Your Cool Project"
+name = "gmd"
+version = "0.1.0"
+description = "General Molecular Dynamics — training equivariant graph neural networks on atomistic systems"
 readme = "README.md"
 requires-python = ">=3.14"
 authors = [{ name = "Amir Masoud Nourollah", email = "nourollah.am@gmail.com" }]
 license = { text = "MIT" }
-keywords = []
+keywords = ["molecular-dynamics", "machine-learning", "force-fields", "equivariant", "gnn"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-  "lightning",
-  "hydra-core",
+  "torch>=2.4",
+  "torch-geometric>=2",
+  "e3nn>=0.5",
+  "lightning>=2.6",
+  "hydra-core>=1.3",
+  "ase>=3.23",
+  "wandb",
+  "rich>=13",
+  "rootutils",
+  "hydra-colorlog",
+  "lmdb",
 ]
 
+[project.optional-dependencies]
+mace = ["mace-torch>=0.3"]
+fairchem = ["fairchem-core>=1.0"]
+deepspeed = ["deepspeed>=0.14"]
+tune = ["ray[tune]>=2.9", "optuna>=3.0"]
+torchmetrics = ["torchmetrics>=1.0"]
+examples = ["h5py>=3.10", "requests>=2.31"]
+dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
+all = ["gmd[mace,fairchem,deepspeed,tune,torchmetrics,examples]"]
+
 [project.urls]
-Repository = "https://github.com/user/project"
+Repository = "https://github.com/user/gmd"
 
 [project.scripts]
-train_command = "src.train:main"
-eval_command = "src.eval:main"
+gmd-train = "gmd.cli.train:train"
+gmd-eval = "gmd.cli.evaluate:evaluate"
+gmd-finetune = "gmd.cli.finetune:finetune"
+gmd-tune = "gmd.cli.tune:tune"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-
+# src/ is the source root: packages under src/ are importable directly
+# e.g. src/gmd/ → import gmd; src/utils/ → import src.utils (via rootutils)
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["src*"]
-
-# --- Pixi workspace ---
-[tool.pixi.workspace]
-name = "myenv"
-version = "0.0.1"
-description = "Pixi-managed Python project"
-channels = ["pytorch", "conda-forge"]
-platforms = ["linux-64", "linux-aarch64"]
-
-# --- Pixi dependencies (shared across architectures) ---
-[tool.pixi.dependencies]
-python = "3.10.*"
-lightning = "2.*"
-torchmetrics = "0.*"
-hydra-core = "1.*"
-rich = "13.*"
-pre-commit = "3.*"
-pytest = "7.*"
-pip = ">=23"
-
-# --- Pixi PyPI deps (shared) ---
-[tool.pixi.pypi-dependencies]
-hydra-optuna-sweeper = "*"
-hydra-colorlog = "*"
-rootutils = "*"
-
-# --- Platform features ---
-[tool.pixi.feature.x86_cpu]
-platforms = ["linux-64"]
-
-[tool.pixi.feature.x86_cpu.dependencies]
-pytorch = "2.*"
-torchvision = "0.*"
-
-[tool.pixi.feature.arm_cpu]
-platforms = ["linux-aarch64"]
-
-[tool.pixi.feature.arm_cpu.dependencies]
-pytorch = "2.*"
-
-# --- Named environments ---
-[tool.pixi.environments]
-x86 = ["x86_cpu"]
-arm = ["arm_cpu"]
-
-# --- Tasks ---
-[tool.pixi.tasks]
-clean = """
-rm -rf dist && \
-find . -type f -name "*.DS_Store" -ls -delete && \
-find . | grep -E "(__pycache__|\\.pyc|\\.pyo)" | xargs rm -rf && \
-find . | grep -E ".pytest_cache" | xargs rm -rf && \
-find . | grep -E ".ipynb_checkpoints" | xargs rm -rf && \
-rm -f .coverage
-"""
-clean-logs = "rm -rf logs/**"
-format = "pre-commit run -a"
-sync = "git pull && git pull origin main"
-test = "pytest -k \"not slow\""
-test-full = "pytest"
-dev-install = "python -m pip install -e ."
-train = "python -m src.train"
-eval = "python -m src.eval"
-
-# Run only training-related tests (by path or keyword)
-test_train = "pytest -q tests/test_train.py"
-test_train_k = "pytest -q -k train"
-
-# Smoke-test: just import/execute the train module (fast sanity check)
-train_smoke = "python -m src.train --help"
+include = ["gmd*"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -128,3 +81,105 @@ exclude_lines = [
   "raise NotImplementedError()",
   "if __name__ == .__main__.:",
 ]
+
+# ---------------------------------------------------------------------------
+# Pixi workspace configuration (replaces pixi.toml)
+# ---------------------------------------------------------------------------
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "linux-aarch64"]
+
+[tool.pixi.dependencies]
+python = "3.14.*"
+
+[tool.pixi.pypi-dependencies]
+gmd = { path = ".", editable = true }
+
+# --- Platform features ---
+
+[tool.pixi.feature.cpu]
+platforms = ["linux-64", "linux-aarch64"]
+
+[tool.pixi.feature.cpu.dependencies]
+pytorch-cpu = ">=2.10"
+
+[tool.pixi.feature.cuda]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.cuda.dependencies]
+pytorch-gpu = ">=2.10"
+
+[tool.pixi.feature.cuda.system-requirements]
+cuda = "12.0"
+
+[tool.pixi.feature.dev.dependencies]
+pytest = ">=7"
+ruff = "*"
+mypy = "*"
+pre-commit = ">=3"
+
+[tool.pixi.feature.dev.pypi-dependencies]
+pytest-cov = "*"
+
+# --- Optional adapter features ---
+# Some optional deps have Python version or e3nn version conflicts with
+# the core environment.  They are available as pip extras — install via:
+#   pip install -e ".[mace]"       # MACE adapter (pins e3nn==0.4.4)
+#   pip install -e ".[fairchem]"   # FairChem adapter
+#   pip install -e ".[tune]"       # Ray Tune + Optuna (needs Python ≤3.13)
+#   pip install -e ".[all]"        # everything
+#
+# Pixi features are provided where compatible.  Features that cannot be
+# resolved in the pixi environment (e3nn conflict, missing cp314 wheels)
+# are commented out — users should fall back to pip install for those.
+
+# [tool.pixi.feature.mace.pypi-dependencies]
+# mace-torch = ">=0.3"            # conflicts: pins e3nn==0.4.4
+
+[tool.pixi.feature.fairchem.pypi-dependencies]
+fairchem-core = ">=1.0"
+
+[tool.pixi.feature.deepspeed.pypi-dependencies]
+deepspeed = ">=0.14"
+
+# [tool.pixi.feature.tune.pypi-dependencies]
+# ray = { version = ">=2.9", extras = ["tune"] }  # no cp314 wheels yet
+# optuna = ">=3.0"
+
+[tool.pixi.feature.examples.pypi-dependencies]
+h5py = ">=3.10"
+requests = ">=2.31"
+
+[tool.pixi.environments]
+default = ["cpu"]
+cuda = ["cuda"]
+dev = ["cpu", "dev"]
+dev-cuda = ["cuda", "dev"]
+fairchem = ["cuda", "fairchem"]
+cuda-deepspeed = ["cuda", "deepspeed"]
+examples = ["cuda", "examples"]
+# mace = ["cuda", "mace"]          # pip install -e ".[mace]" instead
+# tune = ["cpu", "tune"]            # pip install -e ".[tune]" instead
+# cuda-tune = ["cuda", "tune"]
+
+# --- Tasks ---
+
+[tool.pixi.tasks]
+clean = """
+rm -rf dist build *.egg-info && \
+find . -type f -name '*.DS_Store' -ls -delete && \
+find . | grep -E '(__pycache__|\\.pyc|\\.pyo)' | xargs rm -rf && \
+find . | grep -E '.pytest_cache' | xargs rm -rf && \
+find . | grep -E '.ipynb_checkpoints' | xargs rm -rf && \
+rm -f .coverage
+"""
+clean-logs = "rm -rf logs/**"
+test = "pytest -k 'not slow'"
+test-full = "pytest"
+lint = "ruff check src/ tests/"
+format = "ruff format src/ tests/"
+typecheck = "mypy src/gmd/"
+train = "python -m gmd.cli.train"
+eval = "python -m gmd.cli.evaluate"
+finetune = "python -m gmd.cli.finetune"

@@ -1,0 +1,35 @@
+# FSDP2 trainer configuration (Lightning 2.4+ / PyTorch 2.4+)
+#
+# FSDP2 is the next-generation fully sharded data parallelism built on
+# DTensor.  It integrates natively with torch.compile and FP8 training.
+# Use via ModelParallelStrategy — the recommended path for large models
+# that benefit from both FSDP sharding *and* torch.compile.
+#
+# Key advantages over FSDP (v1):
+#   - DTensor-based: composable with tensor parallelism
+#   - torch.compile compatible: compile within each shard
+#   - FP8 support: via torch.distributed.tensor.parallel
+#   - Simpler per-parameter sharding: no auto_wrap_policy needed
+#
+# Usage:
+#   gmd-train trainer=fsdp2
+#   gmd-train trainer=fsdp2 trainer.devices=8
+#
+# Requires implementing configure_model() in GMDModule for
+# per-parameter sharding (already set up in the codebase).
+
+defaults:
+  - default
+
+accelerator: gpu
+devices: auto
+num_nodes: 1
+strategy:
+  _target_: lightning.pytorch.strategies.ModelParallelStrategy
+  # data_parallel_size controls FSDP2 sharding degree
+  # defaults to world_size (all GPUs) when not specified
+  # data_parallel_size: auto
+  # tensor_parallel_size: 1  # increase for tensor parallelism
+
+precision: "bf16-mixed"
+sync_batchnorm: true

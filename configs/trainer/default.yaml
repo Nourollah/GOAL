@@ -5,15 +5,40 @@ default_root_dir: ${paths.output_dir}
 min_epochs: 1 # prevents early stopping
 max_epochs: 10
 
-accelerator: cpu
-devices: 1
+accelerator: auto
+devices: auto
 
-# mixed precision for extra speed-up
-# precision: 16
+# Precision: '32', 'bf16-mixed', '16-mixed', '64-true'
+precision: "32"
 
 # perform a validation loop every N training epochs
 check_val_every_n_epoch: 1
 
-# set True to to ensure deterministic results
+# logging frequency
+log_every_n_steps: 50
+
+# set True to ensure deterministic results
 # makes training slower but gives more reproducibility than just setting seeds
-deterministic: False
+deterministic: false
+
+# gradient clipping (0 = disabled, handled by module if preferred)
+gradient_clip_val: 0
+gradient_clip_algorithm: "norm"
+
+# gradient accumulation — simulate larger batch sizes
+# e.g. accumulate_grad_batches=4 with batch_size=8 → effective batch = 32
+accumulate_grad_batches: 1
+
+# detect anomalies (useful for debugging NaN/Inf, disable for production)
+detect_anomaly: false
+
+# enable model summary (Lightning 2.6 auto-uses RichModelSummary if rich installed)
+enable_model_summary: true
+
+# enable progress bar (Lightning 2.6 auto-uses RichProgressBar if rich installed)
+enable_progress_bar: true
+
+# sanity check — runs N validation batches before training starts
+# catches data loading, metric computation, and model errors early
+# set to 0 to skip, -1 to use the entire validation set
+num_sanity_val_steps: 2

@@ -1,0 +1,14 @@
+# EMA Weight Averaging callback (Lightning 2.6+)
+# Built-in exponential moving average of model parameters.
+# Use this instead of GMD's manual EMA when you want Lightning's
+# native integration with checkpointing and logging.
+#
+# Note: When using this callback, set training.ema.enabled=false
+# in training config to avoid double EMA.
+#
+# Usage: python train.py callbacks=ema_weight_averaging
+
+ema_weight_averaging:
+  _target_: lightning.pytorch.callbacks.EMAWeightAveraging
+  # Exponential decay rate (higher = smoother, slower tracking)
+  decay: 0.999

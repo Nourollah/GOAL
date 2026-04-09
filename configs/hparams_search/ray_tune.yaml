@@ -1,0 +1,50 @@
+# Ray Tune — advanced hyperparameter optimisation
+# Usage: gmd-tune hparams_search=ray_tune
+#
+# Requires: pip install 'ray[tune]' optuna
+# Or:       pip install -e '.[tune]'
+
+hparams_search:
+  method: ray
+
+  # --- Trial budget ---
+  num_samples: 20              # total trials to run
+  max_epochs: 100              # max epochs per trial (early stopped by scheduler)
+  metric: val/total            # metric to optimise
+  mode: min                    # 'min' or 'max'
+  experiment_name: gmd_tune
+  storage_path: null           # null → auto (logs/ray_tune/)
+
+  # --- Scheduler: early stopping of bad trials ---
+  # 'asha' — Asynchronous Successive Halving (recommended)
+  # 'pbt'  — Population-Based Training
+  scheduler: asha
+  grace_period: 10             # min epochs before pruning (ASHA)
+  reduction_factor: 3          # keep top 1/3 of trials (ASHA)
+
+  # --- Search algorithm (optional) ---
+  # null    → random search (no extra deps)
+  # optuna  → Bayesian optimisation via Optuna
+  # hyperopt → Tree-structured Parzen Estimators
+  search_algorithm: optuna
+
+  # --- Search space ---
+  # Each key is a dotted Hydra config path.
+  # Types: uniform, loguniform, quniform, choice, randint, grid
+  search_space:
+    training.optimizer.lr:
+      type: loguniform
+      lower: 1.0e-5
+      upper: 1.0e-2
+    training.optimizer.weight_decay:
+      type: loguniform
+      lower: 1.0e-8
+      upper: 1.0e-3
+    training.losses.0.weight:
+      type: uniform
+      lower: 1.0
+      upper: 20.0
+    training.ema.decay:
+      type: uniform
+      lower: 0.99
+      upper: 0.9999

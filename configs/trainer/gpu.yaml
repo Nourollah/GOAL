@@ -1,5 +1,8 @@
 defaults:
   - default
 
+# Single GPU training
+# Usage: python train.py trainer=gpu
 accelerator: gpu
 devices: 1
+precision: "32"

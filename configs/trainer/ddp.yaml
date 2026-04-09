@@ -1,9 +1,24 @@
 defaults:
   - default
 
-strategy: ddp
+# DDP (Distributed Data Parallel) — the go-to multi-GPU strategy.
+# Replicates the full model on each GPU and syncs gradients.
+# Use for models that fit in a single GPU memory.
+#
+# Usage: python train.py trainer=ddp
+#   Override devices: python train.py trainer=ddp trainer.devices=8
+
+strategy:
+  _target_: lightning.pytorch.strategies.DDPStrategy
+  # Set True if your model has unused parameters (e.g. frozen backbone)
+  find_unused_parameters: false
+  # Set True for models with fixed computation graphs (better perf)
+  static_graph: false
+  # Gradient as bucket view — minor memory saving
+  gradient_as_bucket_view: true
 
 accelerator: gpu
 devices: 4
 num_nodes: 1
-sync_batchnorm: True
+sync_batchnorm: true
+precision: "32"

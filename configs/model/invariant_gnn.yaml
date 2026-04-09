@@ -1,0 +1,19 @@
+# GMD Model Configuration — Invariant GNN
+# SchNet-like invariant backbone (scalar features only)
+# Use when equivariance is not needed or for fast baseline experiments
+
+model:
+  backbone:
+    name: invariant_gnn
+    num_elements: 120
+    embedding_dim: 64
+    hidden_channels: 128
+    num_interactions: 3
+    cutoff: 5.0
+    num_radial_basis: 20
+
+  head:
+    name: energy_forces
+    irreps_in: "128x0e"
+    hidden_dim: 64
+    compute_stress: false

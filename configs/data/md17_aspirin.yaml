@@ -1,0 +1,19 @@
+# MD17 — aspirin (revised)
+# Usage: gmd-train data=md17_aspirin
+
+data:
+  _target_: examples.datasets.md17.MD17Dataset
+  root: ${hydra:runtime.cwd}/data/md17
+  molecule: aspirin
+  revised: true
+  cutoff: 5.0
+  train_size: 950
+  val_size: 50
+  seed: 42
+  dtype: float64
+
+  # DataModule settings
+  batch_size: 32
+  valid_batch_size: 64
+  num_workers: 4
+  pin_memory: true

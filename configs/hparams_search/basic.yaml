@@ -1,0 +1,21 @@
+# Lightning Tuner — basic LR and batch size discovery
+# Usage: gmd-tune hparams_search=basic
+
+hparams_search:
+  method: tuner
+
+  tuner:
+    # Learning rate finder
+    lr_find: true
+    min_lr: 1.0e-8
+    max_lr: 1.0
+    num_training_steps: 100
+    lr_find_mode: exponential   # 'exponential' or 'linear'
+    auto_apply: true            # automatically set found LR on module
+
+    # Batch size scaler
+    scale_batch_size: false     # set true to auto-find max batch size
+    batch_size_mode: power      # 'power' (2^n) or 'binsearch'
+    steps_per_trial: 3
+    init_batch_size: 2
+    max_trials: 25

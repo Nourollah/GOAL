@@ -1,0 +1,27 @@
+# FSDP2 (ModelParallelStrategy) — recommended for large models.
+#
+# FSDP2 is the next-generation FSDP built on DTensor with per-parameter
+# sharding, native torch.compile support, and FP8 compatibility.
+#
+# Usage:
+#   gmd-train strategy=fsdp2
+
+name: fsdp2
+
+# Auto-wrap policy (used as guidance for configure_model wrapping)
+auto_wrap_policy: size
+
+# Smaller threshold than FSDP1 — FSDP2 per-parameter sharding is finer
+size_based_min_params: 500_000
+
+# Re-compute activations during backward
+activation_checkpointing: true
+
+# Offload parameters to CPU
+cpu_offload: false
+
+# 'full_shard' | 'shard_grad_op' | 'no_shard'
+sharding_strategy: full_shard
+
+# 'full' | 'sharded' | 'local'
+state_dict_type: full

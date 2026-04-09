@@ -1,0 +1,59 @@
+# GMD Training Configuration — Defaults
+
+training:
+  max_epochs: 500
+  devices: auto
+  num_nodes: 1
+  precision: "32"            # '64-true', '32', 'bf16-mixed', '16-mixed'
+  strategy: auto             # 'auto', 'ddp', 'fsdp', or _target_ dict
+  gradient_clip: 10.0
+  log_every_n_steps: 50
+  checkpoint_dir: ${paths.output_dir}/checkpoints
+
+  # torch.compile support (Lightning 2.5+)
+  compile_model: false
+  compile:
+    mode: default            # 'default', 'reduce-overhead', 'max-autotune'
+    fullgraph: false         # True = compile entire graph (faster, stricter)
+    dynamic: null            # null, true, false — dynamic shape support
+
+  # SLURM settings
+  slurm_mode: false
+
+  # --- Performance tuning ---
+  performance:
+    # TF32 matmul precision for Ampere+ GPUs (A100/H100/RTX 30xx/40xx)
+    # "highest" = full fp32, "high" = TF32 + some fp32, "medium" = TF32 only
+    float32_matmul_precision: high
+    # Auto-tune convolution algorithms for fixed input sizes
+    cudnn_benchmark: true
+    # Exact reproducibility (slower — set true only for debugging)
+    cudnn_deterministic: false
+
+  # Optimiser
+  optimizer:
+    lr: 0.001
+    weight_decay: 0.0
+    amsgrad: true
+    min_lr: 1.0e-7
+    # Scheduler type: 'reduce_on_plateau', 'cosine', 'cosine_warmup'
+    scheduler_type: reduce_on_plateau
+    warmup_epochs: 10        # only used with cosine_warmup
+    scheduler:
+      patience: 50
+      factor: 0.5
+
+  # Exponential moving average
+  ema:
+    enabled: true
+    decay: 0.999
+
+  # Loss components with weights
+  # fn: loss function — 'mse', 'mae', 'huber', 'smooth_l1' (default: mse)
+  losses:
+    - name: energy
+      weight: 4.0
+      fn: mse
+    - name: forces
+      weight: 100.0
+      fn: mse

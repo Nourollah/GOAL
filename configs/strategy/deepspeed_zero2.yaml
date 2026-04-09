@@ -1,0 +1,23 @@
+# DeepSpeed ZeRO Stage 2 — shards optimiser states + gradients.
+#
+# ~8x memory reduction vs DDP with minimal communication overhead.
+# Good default when DDP runs out of memory.
+#
+# Usage:
+#   gmd-train strategy=deepspeed_zero2
+
+name: deepspeed_zero2
+
+stage: 2
+
+offload_optimizer: false
+offload_parameters: false
+
+overlap_comm: true
+contiguous_gradients: true
+
+allgather_bucket_size: 200_000_000
+reduce_bucket_size: 200_000_000
+
+# logging.WARNING = 30
+logging_level: 30

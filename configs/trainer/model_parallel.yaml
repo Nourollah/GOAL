@@ -1,0 +1,19 @@
+# ModelParallelStrategy trainer configuration (Lightning 2.4+)
+# Supports FSDP2 + tensor parallelism + torch.compile + FP8
+# This is the recommended strategy for very large models (500M+ params)
+#
+# Usage: python train.py trainer=model_parallel
+#
+# Requires implementing configure_model() in your LightningModule
+# for DTensor-based sharding (see GMDModule.configure_model)
+
+defaults:
+  - default
+
+accelerator: gpu
+devices: auto
+num_nodes: 1
+strategy:
+  _target_: lightning.pytorch.strategies.ModelParallelStrategy
+
+precision: "bf16-mixed"

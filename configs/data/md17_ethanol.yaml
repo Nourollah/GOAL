@@ -1,0 +1,8 @@
+# MD17 — ethanol (revised)
+# Usage: gmd-train data=md17_ethanol
+
+defaults:
+  - md17_aspirin
+
+data:
+  molecule: ethanol

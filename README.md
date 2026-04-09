@@ -1,1297 +1,1234 @@
 <div align="center">
 
-# Lightning-Hydra-Template
+# 🧬 GMD — General Molecular Dynamics
 
-[![python](https://img.shields.io/badge/-Python_3.8_%7C_3.9_%7C_3.10-blue?logo=python&logoColor=white)](https://github.com/pre-commit/pre-commit)
-[![pytorch](https://img.shields.io/badge/PyTorch_2.0+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
-[![lightning](https://img.shields.io/badge/-Lightning_2.0+-792ee5?logo=pytorchlightning&logoColor=white)](https://pytorchlightning.ai/)
+[![python](https://img.shields.io/badge/-Python_3.14+-blue?logo=python&logoColor=white)](https://python.org)
+[![pytorch](https://img.shields.io/badge/PyTorch_2.4+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
+[![lightning](https://img.shields.io/badge/-Lightning_2.6+-792ee5?logo=pytorchlightning&logoColor=white)](https://lightning.ai/)
 [![hydra](https://img.shields.io/badge/Config-Hydra_1.3-89b8cd)](https://hydra.cc/)
-[![black](https://img.shields.io/badge/Code%20Style-Black-black.svg?labelColor=gray)](https://black.readthedocs.io/en/stable/)
-[![isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/) <br>
-[![tests](https://github.com/ashleve/lightning-hydra-template/actions/workflows/test.yml/badge.svg)](https://github.com/ashleve/lightning-hydra-template/actions/workflows/test.yml)
-[![code-quality](https://github.com/ashleve/lightning-hydra-template/actions/workflows/code-quality-main.yaml/badge.svg)](https://github.com/ashleve/lightning-hydra-template/actions/workflows/code-quality-main.yaml)
-[![codecov](https://codecov.io/gh/ashleve/lightning-hydra-template/branch/main/graph/badge.svg)](https://codecov.io/gh/ashleve/lightning-hydra-template) <br>
-[![license](https://img.shields.io/badge/License-MIT-green.svg?labelColor=gray)](https://github.com/ashleve/lightning-hydra-template#license)
-[![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ashleve/lightning-hydra-template/pulls)
-[![contributors](https://img.shields.io/github/contributors/ashleve/lightning-hydra-template.svg)](https://github.com/ashleve/lightning-hydra-template/graphs/contributors)
+[![cuda](https://img.shields.io/badge/CUDA-12.6+-76B900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
+[![license](https://img.shields.io/badge/License-MIT-green.svg?labelColor=gray)](LICENSE)
 
-A clean template to kickstart your deep learning project 🚀⚡🔥<br>
-Click on [<kbd>Use this template</kbd>](https://github.com/ashleve/lightning-hydra-template/generate) to initialize new repository.
+**Train equivariant graph neural networks on atomistic systems.**
 
-_Suggestions are always welcome!_
+Energy, forces, stress, and dipole prediction — from single-GPU prototyping to multi-node distributed training.
+
+> **Python 3.14** — GIL-free interpreter with real multithreading support for data loading and preprocessing.
 
 </div>
 
-<br>
-
-## 📌  Introduction
-
-**Why you might want to use it:**
-
-✅ Save on boilerplate <br>
-Easily add new models, datasets, tasks, experiments, and train on different accelerators, like multi-GPU, TPU or SLURM clusters.
-
-✅ Education <br>
-Thoroughly commented. You can use this repo as a learning resource.
-
-✅ Reusability <br>
-Collection of useful MLOps tools, configs, and code snippets. You can use this repo as a reference for various utilities.
-
-**Why you might not want to use it:**
-
-❌ Things break from time to time <br>
-Lightning and Hydra are still evolving and integrate many libraries, which means sometimes things break. For the list of currently known problems visit [this page](https://github.com/ashleve/lightning-hydra-template/labels/bug).
-
-❌ Not adjusted for data engineering <br>
-Template is not really adjusted for building data pipelines that depend on each other. It's more efficient to use it for model prototyping on ready-to-use data.
-
-❌ Overfitted to simple use case <br>
-The configuration setup is built with simple lightning training in mind. You might need to put some effort to adjust it for different use cases, e.g. lightning fabric.
-
-❌ Might not support your workflow <br>
-For example, you can't resume hydra-based multirun or hyperparameter search.
-
-> **Note**: _Keep in mind this is unofficial community project._
-
-<br>
-
-## Main Technologies
-
-[PyTorch Lightning](https://github.com/PyTorchLightning/pytorch-lightning) - a lightweight PyTorch wrapper for high-performance AI research. Think of it as a framework for organizing your PyTorch code.
-
-[Hydra](https://github.com/facebookresearch/hydra) - a framework for elegantly configuring complex applications. The key feature is the ability to dynamically create a hierarchical configuration by composition and override it through config files and the command line.
-
-<br>
-
-## Main Ideas
-
-- [**Rapid Experimentation**](#your-superpowers): thanks to hydra command line superpowers
-- [**Minimal Boilerplate**](#how-it-works): thanks to automating pipelines with config instantiation
-- [**Main Configs**](#main-config): allow you to specify default training configuration
-- [**Experiment Configs**](#experiment-config): allow you to override chosen hyperparameters and version control experiments
-- [**Workflow**](#workflow): comes down to 4 simple steps
-- [**Experiment Tracking**](#experiment-tracking): Tensorboard, W&B, Neptune, Comet, MLFlow and CSVLogger
-- [**Logs**](#logs): all logs (checkpoints, configs, etc.) are stored in a dynamically generated folder structure
-- [**Hyperparameter Search**](#hyperparameter-search): simple search is effortless with Hydra plugins like Optuna Sweeper
-- [**Tests**](#tests): generic, easy-to-adapt smoke tests for speeding up the development
-- [**Continuous Integration**](#continuous-integration): automatically test and lint your repo with Github Actions
-- [**Best Practices**](#best-practices): a couple of recommended tools, practices and standards
-
-<br>
-
-## Project Structure
-
-The directory structure of new project looks like this:
-
-```
-├── .github                   <- Github Actions workflows
-│
-├── configs                   <- Hydra configs
-│   ├── callbacks                <- Callbacks configs
-│   ├── data                     <- Data configs
-│   ├── debug                    <- Debugging configs
-│   ├── experiment               <- Experiment configs
-│   ├── extras                   <- Extra utilities configs
-│   ├── hparams_search           <- Hyperparameter search configs
-│   ├── hydra                    <- Hydra configs
-│   ├── local                    <- Local configs
-│   ├── logger                   <- Logger configs
-│   ├── model                    <- Model configs
-│   ├── paths                    <- Project paths configs
-│   ├── trainer                  <- Trainer configs
-│   │
-│   ├── eval.yaml             <- Main config for evaluation
-│   └── train.yaml            <- Main config for training
-│
-├── data                   <- Project data
-│
-├── logs                   <- Logs generated by hydra and lightning loggers
-│
-├── notebooks              <- Jupyter notebooks. Naming convention is a number (for ordering),
-│                             the creator's initials, and a short `-` delimited description,
-│                             e.g. `1.0-jqp-initial-data-exploration.ipynb`.
-│
-├── scripts                <- Shell scripts
-│
-├── src                    <- Source code
-│   ├── data                     <- Data scripts
-│   ├── models                   <- Model scripts
-│   ├── utils                    <- Utility scripts
-│   │
-│   ├── eval.py                  <- Run evaluation
-│   └── train.py                 <- Run training
-│
-├── tests                  <- Tests of any kind
-│
-├── .env.example              <- Example of file for storing private environment variables
-├── .gitignore                <- List of files ignored by git
-├── .pre-commit-config.yaml   <- Configuration of pre-commit hooks for code formatting
-├── .project-root             <- File for inferring the position of project root directory
-├── environment.yaml          <- File for installing conda environment
-├── Makefile                  <- Makefile with commands like `make train` or `make test`
-├── pyproject.toml            <- Configuration options for testing and linting
-├── requirements.txt          <- File for installing python dependencies
-├── setup.py                  <- File for installing project as a package
-└── README.md
-```
-
-<br>
-
-## 🚀  Quickstart
-
-```bash
-# clone project
-git clone https://github.com/ashleve/lightning-hydra-template
-cd lightning-hydra-template
-
-# [OPTIONAL] create conda environment
-conda create -n myenv python=3.9
-conda activate myenv
-
-# install pytorch according to instructions
-# https://pytorch.org/get-started/
-
-# install requirements
-pip install -r requirements.txt
-```
-
-Template contains example with MNIST classification.<br>
-When running `python src/train.py` you should see something like this:
-
-<div align="center">
-
-![](https://github.com/ashleve/lightning-hydra-template/blob/resources/terminal.png)
-
-</div>
-
-## ⚡  Your Superpowers
-
-<details>
-<summary><b>Override any config parameter from command line</b></summary>
-
-```bash
-python train.py trainer.max_epochs=20 model.optimizer.lr=1e-4
-```
-
-> **Note**: You can also add new parameters with `+` sign.
-
-```bash
-python train.py +model.new_param="owo"
-```
-
-</details>
-
-<details>
-<summary><b>Train on CPU, GPU, multi-GPU and TPU</b></summary>
-
-```bash
-# train on CPU
-python train.py trainer=cpu
-
-# train on 1 GPU
-python train.py trainer=gpu
-
-# train on TPU
-python train.py +trainer.tpu_cores=8
-
-# train with DDP (Distributed Data Parallel) (4 GPUs)
-python train.py trainer=ddp trainer.devices=4
-
-# train with DDP (Distributed Data Parallel) (8 GPUs, 2 nodes)
-python train.py trainer=ddp trainer.devices=4 trainer.num_nodes=2
-
-# simulate DDP on CPU processes
-python train.py trainer=ddp_sim trainer.devices=2
-
-# accelerate training on mac
-python train.py trainer=mps
-```
-
-> **Warning**: Currently there are problems with DDP mode, read [this issue](https://github.com/ashleve/lightning-hydra-template/issues/393) to learn more.
-
-</details>
-
-<details>
-<summary><b>Train with mixed precision</b></summary>
-
-```bash
-# train with pytorch native automatic mixed precision (AMP)
-python train.py trainer=gpu +trainer.precision=16
-```
-
-</details>
-
-<!-- deepspeed support still in beta
-<details>
-<summary><b>Optimize large scale models on multiple GPUs with Deepspeed</b></summary>
-
-```bash
-python train.py +trainer.
-```
-
-</details>
- -->
-
-<details>
-<summary><b>Train model with any logger available in PyTorch Lightning, like W&B or Tensorboard</b></summary>
-
-```yaml
-# set project and entity names in `configs/logger/wandb`
-wandb:
-  project: "your_project_name"
-  entity: "your_wandb_team_name"
-```
-
-```bash
-# train model with Weights&Biases (link to wandb dashboard should appear in the terminal)
-python train.py logger=wandb
-```
-
-> **Note**: Lightning provides convenient integrations with most popular logging frameworks. Learn more [here](#experiment-tracking).
-
-> **Note**: Using wandb requires you to [setup account](https://www.wandb.com/) first. After that just complete the config as below.
-
-> **Note**: Click [here](https://wandb.ai/hobglob/template-dashboard/) to see example wandb dashboard generated with this template.
-
-</details>
-
-<details>
-<summary><b>Train model with chosen experiment config</b></summary>
-
-```bash
-python train.py experiment=example
-```
-
-> **Note**: Experiment configs are placed in [configs/experiment/](configs/experiment/).
-
-</details>
-
-<details>
-<summary><b>Attach some callbacks to run</b></summary>
-
-```bash
-python train.py callbacks=default
-```
-
-> **Note**: Callbacks can be used for things such as as model checkpointing, early stopping and [many more](https://pytorch-lightning.readthedocs.io/en/latest/extensions/callbacks.html#built-in-callbacks).
-
-> **Note**: Callbacks configs are placed in [configs/callbacks/](configs/callbacks/).
-
-</details>
-
-<details>
-<summary><b>Use different tricks available in Pytorch Lightning</b></summary>
-
-```yaml
-# gradient clipping may be enabled to avoid exploding gradients
-python train.py +trainer.gradient_clip_val=0.5
-
-# run validation loop 4 times during a training epoch
-python train.py +trainer.val_check_interval=0.25
-
-# accumulate gradients
-python train.py +trainer.accumulate_grad_batches=10
-
-# terminate training after 12 hours
-python train.py +trainer.max_time="00:12:00:00"
-```
-
-> **Note**: PyTorch Lightning provides about [40+ useful trainer flags](https://pytorch-lightning.readthedocs.io/en/latest/common/trainer.html#trainer-flags).
-
-</details>
-
-<details>
-<summary><b>Easily debug</b></summary>
-
-```bash
-# runs 1 epoch in default debugging mode
-# changes logging directory to `logs/debugs/...`
-# sets level of all command line loggers to 'DEBUG'
-# enforces debug-friendly configuration
-python train.py debug=default
-
-# run 1 train, val and test loop, using only 1 batch
-python train.py debug=fdr
-
-# print execution time profiling
-python train.py debug=profiler
-
-# try overfitting to 1 batch
-python train.py debug=overfit
-
-# raise exception if there are any numerical anomalies in tensors, like NaN or +/-inf
-python train.py +trainer.detect_anomaly=true
-
-# use only 20% of the data
-python train.py +trainer.limit_train_batches=0.2 \
-+trainer.limit_val_batches=0.2 +trainer.limit_test_batches=0.2
-```
-
-> **Note**: Visit [configs/debug/](configs/debug/) for different debugging configs.
-
-</details>
-
-<details>
-<summary><b>Resume training from checkpoint</b></summary>
-
-```yaml
-python train.py ckpt_path="/path/to/ckpt/name.ckpt"
-```
-
-> **Note**: Checkpoint can be either path or URL.
-
-> **Note**: Currently loading ckpt doesn't resume logger experiment, but it will be supported in future Lightning release.
-
-</details>
-
-<details>
-<summary><b>Evaluate checkpoint on test dataset</b></summary>
-
-```yaml
-python eval.py ckpt_path="/path/to/ckpt/name.ckpt"
-```
-
-> **Note**: Checkpoint can be either path or URL.
-
-</details>
-
-<details>
-<summary><b>Create a sweep over hyperparameters</b></summary>
-
-```bash
-# this will run 6 experiments one after the other,
-# each with different combination of batch_size and learning rate
-python train.py -m data.batch_size=32,64,128 model.lr=0.001,0.0005
-```
-
-> **Note**: Hydra composes configs lazily at job launch time. If you change code or configs after launching a job/sweep, the final composed configs might be impacted.
-
-</details>
-
-<details>
-<summary><b>Create a sweep over hyperparameters with Optuna</b></summary>
-
-```bash
-# this will run hyperparameter search defined in `configs/hparams_search/mnist_optuna.yaml`
-# over chosen experiment config
-python train.py -m hparams_search=mnist_optuna experiment=example
-```
-
-> **Note**: Using [Optuna Sweeper](https://hydra.cc/docs/next/plugins/optuna_sweeper) doesn't require you to add any boilerplate to your code, everything is defined in a [single config file](configs/hparams_search/mnist_optuna.yaml).
-
-> **Warning**: Optuna sweeps are not failure-resistant (if one job crashes then the whole sweep crashes).
-
-</details>
-
-<details>
-<summary><b>Execute all experiments from folder</b></summary>
-
-```bash
-python train.py -m 'experiment=glob(*)'
-```
-
-> **Note**: Hydra provides special syntax for controlling behavior of multiruns. Learn more [here](https://hydra.cc/docs/next/tutorials/basic/running_your_app/multi-run). The command above executes all experiments from [configs/experiment/](configs/experiment/).
-
-</details>
-
-<details>
-<summary><b>Execute run for multiple different seeds</b></summary>
-
-```bash
-python train.py -m seed=1,2,3,4,5 trainer.deterministic=True logger=csv tags=["benchmark"]
-```
-
-> **Note**: `trainer.deterministic=True` makes pytorch more deterministic but impacts the performance.
-
-</details>
-
-<details>
-<summary><b>Execute sweep on a remote AWS cluster</b></summary>
-
-> **Note**: This should be achievable with simple config using [Ray AWS launcher for Hydra](https://hydra.cc/docs/next/plugins/ray_launcher). Example is not implemented in this template.
-
-</details>
-
-<!-- <details>
-<summary><b>Execute sweep on a SLURM cluster</b></summary>
-
-> This should be achievable with either [the right lightning trainer flags](https://pytorch-lightning.readthedocs.io/en/latest/clouds/cluster.html?highlight=SLURM#slurm-managed-cluster) or simple config using [Submitit launcher for Hydra](https://hydra.cc/docs/plugins/submitit_launcher). Example is not yet implemented in this template.
-
-</details> -->
-
-<details>
-<summary><b>Use Hydra tab completion</b></summary>
-
-> **Note**: Hydra allows you to autocomplete config argument overrides in shell as you write them, by pressing `tab` key. Read the [docs](https://hydra.cc/docs/tutorials/basic/running_your_app/tab_completion).
-
-</details>
-
-<details>
-<summary><b>Apply pre-commit hooks</b></summary>
-
-```bash
-pre-commit run -a
-```
-
-> **Note**: Apply pre-commit hooks to do things like auto-formatting code and configs, performing code analysis or removing output from jupyter notebooks. See [# Best Practices](#best-practices) for more.
-
-Update pre-commit hook versions in `.pre-commit-config.yaml` with:
-
-```bash
-pre-commit autoupdate
-```
-
-</details>
-
-<details>
-<summary><b>Run tests</b></summary>
-
-```bash
-# run all tests
-pytest
-
-# run tests from specific file
-pytest tests/test_train.py
-
-# run all tests except the ones marked as slow
-pytest -k "not slow"
-```
-
-</details>
-
-<details>
-<summary><b>Use tags</b></summary>
-
-Each experiment should be tagged in order to easily filter them across files or in logger UI:
-
-```bash
-python train.py tags=["mnist","experiment_X"]
-```
-
-> **Note**: You might need to escape the bracket characters in your shell with `python train.py tags=\["mnist","experiment_X"\]`.
-
-If no tags are provided, you will be asked to input them from command line:
-
-```bash
->>> python train.py tags=[]
-[2022-07-11 15:40:09,358][src.utils.utils][INFO] - Enforcing tags! <cfg.extras.enforce_tags=True>
-[2022-07-11 15:40:09,359][src.utils.rich_utils][WARNING] - No tags provided in config. Prompting user to input tags...
-Enter a list of comma separated tags (dev):
-```
-
-If no tags are provided for multirun, an error will be raised:
-
-```bash
->>> python train.py -m +x=1,2,3 tags=[]
-ValueError: Specify tags before launching a multirun!
-```
-
-> **Note**: Appending lists from command line is currently not supported in hydra :(
-
-</details>
-
-<br>
-
-## ❤️  Contributions
-
-This project exists thanks to all the people who contribute.
-
-![Contributors](https://readme-contributors.now.sh/ashleve/lightning-hydra-template?extension=jpg&width=400&aspectRatio=1)
-
-Have a question? Found a bug? Missing a specific feature? Feel free to file a new issue, discussion or PR with respective title and description.
-
-Before making an issue, please verify that:
-
-- The problem still exists on the current `main` branch.
-- Your python dependencies are updated to recent versions.
-
-Suggestions for improvements are always welcome!
-
-<br>
-
-## How It Works
-
-All PyTorch Lightning modules are dynamically instantiated from module paths specified in config. Example model config:
-
-```yaml
-_target_: src.models.mnist_model.MNISTLitModule
-lr: 0.001
-net:
-  _target_: src.models.components.simple_dense_net.SimpleDenseNet
-  input_size: 784
-  lin1_size: 256
-  lin2_size: 256
-  lin3_size: 256
-  output_size: 10
-```
-
-Using this config we can instantiate the object with the following line:
-
-```python
-model = hydra.utils.instantiate(config.model)
-```
-
-This allows you to easily iterate over new models! Every time you create a new one, just specify its module path and parameters in appropriate config file. <br>
-
-Switch between models and datamodules with command line arguments:
-
-```bash
-python train.py model=mnist
-```
-
-Example pipeline managing the instantiation logic: [src/train.py](src/train.py).
-
-<br>
-
-## Main Config
-
-Location: [configs/train.yaml](configs/train.yaml) <br>
-Main project config contains default training configuration.<br>
-It determines how config is composed when simply executing command `python train.py`.<br>
-
-<details>
-<summary><b>Show main project config</b></summary>
-
-```yaml
-# order of defaults determines the order in which configs override each other
-defaults:
-  - _self_
-  - data: mnist.yaml
-  - model: mnist.yaml
-  - callbacks: default.yaml
-  - logger: null # set logger here or use command line (e.g. `python train.py logger=csv`)
-  - trainer: default.yaml
-  - paths: default.yaml
-  - extras: default.yaml
-  - hydra: default.yaml
-
-  # experiment configs allow for version control of specific hyperparameters
-  # e.g. best hyperparameters for given model and datamodule
-  - experiment: null
-
-  # config for hyperparameter optimization
-  - hparams_search: null
-
-  # optional local config for machine/user specific settings
-  # it's optional since it doesn't need to exist and is excluded from version control
-  - optional local: default.yaml
-
-  # debugging config (enable through command line, e.g. `python train.py debug=default)
-  - debug: null
-
-# task name, determines output directory path
-task_name: "train"
-
-# tags to help you identify your experiments
-# you can overwrite this in experiment configs
-# overwrite from command line with `python train.py tags="[first_tag, second_tag]"`
-# appending lists from command line is currently not supported :(
-# https://github.com/facebookresearch/hydra/issues/1547
-tags: ["dev"]
-
-# set False to skip model training
-train: True
-
-# evaluate on test set, using best model weights achieved during training
-# lightning chooses best weights based on the metric specified in checkpoint callback
-test: True
-
-# simply provide checkpoint path to resume training
-ckpt_path: null
-
-# seed for random number generators in pytorch, numpy and python.random
-seed: null
-```
-
-</details>
-
-<br>
-
-## Experiment Config
-
-Location: [configs/experiment](configs/experiment)<br>
-Experiment configs allow you to overwrite parameters from main config.<br>
-For example, you can use them to version control best hyperparameters for each combination of model and dataset.
-
-<details>
-<summary><b>Show example experiment config</b></summary>
-
-```yaml
-# @package _global_
-
-# to execute this experiment run:
-# python train.py experiment=example
-
-defaults:
-  - override /data: mnist.yaml
-  - override /model: mnist.yaml
-  - override /callbacks: default.yaml
-  - override /trainer: default.yaml
-
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
-
-tags: ["mnist", "simple_dense_net"]
-
-seed: 12345
-
-trainer:
-  min_epochs: 10
-  max_epochs: 10
-  gradient_clip_val: 0.5
-
-model:
-  optimizer:
-    lr: 0.002
-  net:
-    lin1_size: 128
-    lin2_size: 256
-    lin3_size: 64
-
-data:
-  batch_size: 64
-
-logger:
-  wandb:
-    tags: ${tags}
-    group: "mnist"
-```
-
-</details>
-
-<br>
-
-## Workflow
-
-**Basic workflow**
-
-1. Write your PyTorch Lightning module (see [models/mnist_module.py](src/models/mnist_module.py) for example)
-2. Write your PyTorch Lightning datamodule (see [data/mnist_datamodule.py](src/data/mnist_datamodule.py) for example)
-3. Write your experiment config, containing paths to model and datamodule
-4. Run training with chosen experiment config:
-   ```bash
-   python src/train.py experiment=experiment_name.yaml
-   ```
-
-**Experiment design**
-
-_Say you want to execute many runs to plot how accuracy changes in respect to batch size._
-
-1. Execute the runs with some config parameter that allows you to identify them easily, like tags:
-
-   ```bash
-   python train.py -m logger=csv data.batch_size=16,32,64,128 tags=["batch_size_exp"]
-   ```
-
-2. Write a script or notebook that searches over the `logs/` folder and retrieves csv logs from runs containing given tags in config. Plot the results.
-
-<br>
-
-## Logs
-
-Hydra creates new output directory for every executed run.
-
-Default logging structure:
-
-```
-├── logs
-│   ├── task_name
-│   │   ├── runs                        # Logs generated by single runs
-│   │   │   ├── YYYY-MM-DD_HH-MM-SS       # Datetime of the run
-│   │   │   │   ├── .hydra                  # Hydra logs
-│   │   │   │   ├── csv                     # Csv logs
-│   │   │   │   ├── wandb                   # Weights&Biases logs
-│   │   │   │   ├── checkpoints             # Training checkpoints
-│   │   │   │   └── ...                     # Any other thing saved during training
-│   │   │   └── ...
-│   │   │
-│   │   └── multiruns                   # Logs generated by multiruns
-│   │       ├── YYYY-MM-DD_HH-MM-SS       # Datetime of the multirun
-│   │       │   ├──1                        # Multirun job number
-│   │       │   ├──2
-│   │       │   └── ...
-│   │       └── ...
-│   │
-│   └── debugs                          # Logs generated when debugging config is attached
-│       └── ...
-```
-
-</details>
-
-You can change this structure by modifying paths in [hydra configuration](configs/hydra).
-
-<br>
-
-## Experiment Tracking
-
-PyTorch Lightning supports many popular logging frameworks: [Weights&Biases](https://www.wandb.com/), [Neptune](https://neptune.ai/), [Comet](https://www.comet.ml/), [MLFlow](https://mlflow.org), [Tensorboard](https://www.tensorflow.org/tensorboard/).
-
-These tools help you keep track of hyperparameters and output metrics and allow you to compare and visualize results. To use one of them simply complete its configuration in [configs/logger](configs/logger) and run:
-
-```bash
-python train.py logger=logger_name
-```
-
-You can use many of them at once (see [configs/logger/many_loggers.yaml](configs/logger/many_loggers.yaml) for example).
-
-You can also write your own logger.
-
-Lightning provides convenient method for logging custom metrics from inside LightningModule. Read the [docs](https://pytorch-lightning.readthedocs.io/en/latest/extensions/logging.html#automatic-logging) or take a look at [MNIST example](src/models/mnist_module.py).
-
-<br>
-
-## Tests
-
-Template comes with generic tests implemented with `pytest`.
-
-```bash
-# run all tests
-pytest
-
-# run tests from specific file
-pytest tests/test_train.py
-
-# run all tests except the ones marked as slow
-pytest -k "not slow"
-```
-
-Most of the implemented tests don't check for any specific output - they exist to simply verify that executing some commands doesn't end up in throwing exceptions. You can execute them once in a while to speed up the development.
-
-Currently, the tests cover cases like:
-
-- running 1 train, val and test step
-- running 1 epoch on 1% of data, saving ckpt and resuming for the second epoch
-- running 2 epochs on 1% of data, with DDP simulated on CPU
-
-And many others. You should be able to modify them easily for your use case.
-
-There is also `@RunIf` decorator implemented, that allows you to run tests only if certain conditions are met, e.g. GPU is available or system is not windows. See the [examples](tests/test_train.py).
-
-<br>
-
-## Hyperparameter Search
-
-You can define hyperparameter search by adding new config file to [configs/hparams_search](configs/hparams_search).
-
-<details>
-<summary><b>Show example hyperparameter search config</b></summary>
-
-```yaml
-# @package _global_
-
-defaults:
-  - override /hydra/sweeper: optuna
-
-# choose metric which will be optimized by Optuna
-# make sure this is the correct name of some metric logged in lightning module!
-optimized_metric: "val/acc_best"
-
-# here we define Optuna hyperparameter search
-# it optimizes for value returned from function with @hydra.main decorator
-hydra:
-  sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
-
-    # 'minimize' or 'maximize' the objective
-    direction: maximize
-
-    # total number of runs that will be executed
-    n_trials: 20
-
-    # choose Optuna hyperparameter sampler
-    # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
-    sampler:
-      _target_: optuna.samplers.TPESampler
-      seed: 1234
-      n_startup_trials: 10 # number of random sampling runs before optimization starts
-
-    # define hyperparameter search space
-    params:
-      model.optimizer.lr: interval(0.0001, 0.1)
-      data.batch_size: choice(32, 64, 128, 256)
-      model.net.lin1_size: choice(64, 128, 256)
-      model.net.lin2_size: choice(64, 128, 256)
-      model.net.lin3_size: choice(32, 64, 128, 256)
-```
-
-</details>
-
-Next, execute it with: `python train.py -m hparams_search=mnist_optuna`
-
-Using this approach doesn't require adding any boilerplate to code, everything is defined in a single config file. The only necessary thing is to return the optimized metric value from the launch file.
-
-You can use different optimization frameworks integrated with Hydra, like [Optuna, Ax or Nevergrad](https://hydra.cc/docs/plugins/optuna_sweeper/).
-
-The `optimization_results.yaml` will be available under `logs/task_name/multirun` folder.
-
-This approach doesn't support resuming interrupted search and advanced techniques like prunning - for more sophisticated search and workflows, you should probably write a dedicated optimization task (without multirun feature).
-
-<br>
-
-## Continuous Integration
-
-Template comes with CI workflows implemented in Github Actions:
-
-- `.github/workflows/test.yaml`: running all tests with pytest
-- `.github/workflows/code-quality-main.yaml`: running pre-commits on main branch for all files
-- `.github/workflows/code-quality-pr.yaml`: running pre-commits on pull requests for modified files only
-
-<br>
-
-## Distributed Training
-
-Lightning supports multiple ways of doing distributed training. The most common one is DDP, which spawns separate process for each GPU and averages gradients between them. To learn about other approaches read the [lightning docs](https://lightning.ai/docs/pytorch/latest/advanced/speed.html).
-
-You can run DDP on mnist example with 4 GPUs like this:
-
-```bash
-python train.py trainer=ddp
-```
-
-> **Note**: When using DDP you have to be careful how you write your models - read the [docs](https://lightning.ai/docs/pytorch/latest/advanced/speed.html).
-
-<br>
-
-## Accessing Datamodule Attributes In Model
-
-The simplest way is to pass datamodule attribute directly to model on initialization:
-
-```python
-# ./src/train.py
-datamodule = hydra.utils.instantiate(config.data)
-model = hydra.utils.instantiate(config.model, some_param=datamodule.some_param)
-```
-
-> **Note**: Not a very robust solution, since it assumes all your datamodules have `some_param` attribute available.
-
-Similarly, you can pass a whole datamodule config as an init parameter:
-
-```python
-# ./src/train.py
-model = hydra.utils.instantiate(config.model, dm_conf=config.data, _recursive_=False)
-```
-
-You can also pass a datamodule config parameter to your model through variable interpolation:
-
-```yaml
-# ./configs/model/my_model.yaml
-_target_: src.models.my_module.MyLitModule
-lr: 0.01
-some_param: ${data.some_param}
-```
-
-Another approach is to access datamodule in LightningModule directly through Trainer:
-
-```python
-# ./src/models/mnist_module.py
-def on_train_start(self):
-  self.some_param = self.trainer.datamodule.some_param
-```
-
-> **Note**: This only works after the training starts since otherwise trainer won't be yet available in LightningModule.
-
-<br>
-
-## Best Practices
-
-<details>
-<summary><b>Use Miniconda</b></summary>
-
-It's usually unnecessary to install full anaconda environment, miniconda should be enough (weights around 80MB).
-
-Big advantage of conda is that it allows for installing packages without requiring certain compilers or libraries to be available in the system (since it installs precompiled binaries), so it often makes it easier to install some dependencies e.g. cudatoolkit for GPU support.
-
-It also allows you to access your environments globally which might be more convenient than creating new local environment for every project.
-
-Example installation:
-
-```bash
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
-```
-
-Update conda:
-
-```bash
-conda update -n base -c defaults conda
-```
-
-Create new conda environment:
-
-```bash
-conda create -n myenv python=3.10
-conda activate myenv
-```
-
-</details>
-
-<details>
-<summary><b>Use automatic code formatting</b></summary>
-
-Use pre-commit hooks to standardize code formatting of your project and save mental energy.<br>
-Simply install pre-commit package with:
-
-```bash
-pip install pre-commit
-```
-
-Next, install hooks from [.pre-commit-config.yaml](.pre-commit-config.yaml):
-
-```bash
-pre-commit install
-```
-
-After that your code will be automatically reformatted on every new commit.
-
-To reformat all files in the project use command:
-
-```bash
-pre-commit run -a
-```
-
-To update hook versions in [.pre-commit-config.yaml](.pre-commit-config.yaml) use:
-
-```bash
-pre-commit autoupdate
-```
-
-</details>
-
-<details>
-<summary><b>Set private environment variables in .env file</b></summary>
-
-System specific variables (e.g. absolute paths to datasets) should not be under version control or it will result in conflict between different users. Your private keys also shouldn't be versioned since you don't want them to be leaked.<br>
-
-Template contains `.env.example` file, which serves as an example. Create a new file called `.env` (this name is excluded from version control in .gitignore).
-You should use it for storing environment variables like this:
-
-```
-MY_VAR=/home/user/my_system_path
-```
-
-All variables from `.env` are loaded in `train.py` automatically.
-
-Hydra allows you to reference any env variable in `.yaml` configs like this:
-
-```yaml
-path_to_data: ${oc.env:MY_VAR}
-```
-
-</details>
-
-<details>
-<summary><b>Name metrics using '/' character</b></summary>
-
-Depending on which logger you're using, it's often useful to define metric name with `/` character:
-
-```python
-self.log("train/loss", loss)
-```
-
-This way loggers will treat your metrics as belonging to different sections, which helps to get them organised in UI.
-
-</details>
-
-<details>
-<summary><b>Use torchmetrics</b></summary>
-
-Use official [torchmetrics](https://github.com/PytorchLightning/metrics) library to ensure proper calculation of metrics. This is especially important for multi-GPU training!
-
-For example, instead of calculating accuracy by yourself, you should use the provided `Accuracy` class like this:
-
-```python
-from torchmetrics.classification.accuracy import Accuracy
-
-
-class LitModel(LightningModule):
-    def __init__(self)
-        self.train_acc = Accuracy()
-        self.val_acc = Accuracy()
-
-    def training_step(self, batch, batch_idx):
-        ...
-        acc = self.train_acc(predictions, targets)
-        self.log("train/acc", acc)
-        ...
-
-    def validation_step(self, batch, batch_idx):
-        ...
-        acc = self.val_acc(predictions, targets)
-        self.log("val/acc", acc)
-        ...
-```
-
-Make sure to use different metric instance for each step to ensure proper value reduction over all GPU processes.
-
-Torchmetrics provides metrics for most use cases, like F1 score or confusion matrix. Read [documentation](https://torchmetrics.readthedocs.io/en/latest/#more-reading) for more.
-
-</details>
-
-<details>
-<summary><b>Follow PyTorch Lightning style guide</b></summary>
-
-The style guide is available [here](https://pytorch-lightning.readthedocs.io/en/latest/starter/style_guide.html).<br>
-
-1. Be explicit in your init. Try to define all the relevant defaults so that the user doesn’t have to guess. Provide type hints. This way your module is reusable across projects!
-
-   ```python
-   class LitModel(LightningModule):
-       def __init__(self, layer_size: int = 256, lr: float = 0.001):
-   ```
-
-2. Preserve the recommended method order.
-
-   ```python
-   class LitModel(LightningModule):
-
-       def __init__():
-           ...
-
-       def forward():
-           ...
-
-       def training_step():
-           ...
-
-       def training_step_end():
-           ...
-
-       def on_train_epoch_end():
-           ...
-
-       def validation_step():
-           ...
-
-       def validation_step_end():
-           ...
-
-       def on_validation_epoch_end():
-           ...
-
-       def test_step():
-           ...
-
-       def test_step_end():
-           ...
-
-       def on_test_epoch_end():
-           ...
-
-       def configure_optimizers():
-           ...
-
-       def any_extra_hook():
-           ...
-   ```
-
-</details>
-
-<details>
-<summary><b>Version control your data and models with DVC</b></summary>
-
-Use [DVC](https://dvc.org) to version control big files, like your data or trained ML models.<br>
-To initialize the dvc repository:
-
-```bash
-dvc init
-```
-
-To start tracking a file or directory, use `dvc add`:
-
-```bash
-dvc add data/MNIST
-```
-
-DVC stores information about the added file (or a directory) in a special .dvc file named data/MNIST.dvc, a small text file with a human-readable format. This file can be easily versioned like source code with Git, as a placeholder for the original data:
-
-```bash
-git add data/MNIST.dvc data/.gitignore
-git commit -m "Add raw data"
-```
-
-</details>
-
-<details>
-<summary><b>Support installing project as a package</b></summary>
-
-It allows other people to easily use your modules in their own projects.
-Change name of the `src` folder to your project name and complete the `setup.py` file.
-
-Now your project can be installed from local files:
-
-```bash
-pip install -e .
-```
-
-Or directly from git repository:
-
-```bash
-pip install git+git://github.com/YourGithubName/your-repo-name.git --upgrade
-```
-
-So any file can be easily imported into any other file like so:
-
-```python
-from project_name.models.mnist_module import MNISTLitModule
-from project_name.data.mnist_datamodule import MNISTDataModule
-```
-
-</details>
-
-<details>
-<summary><b>Keep local configs out of code versioning</b></summary>
-
-Some configurations are user/machine/installation specific (e.g. configuration of local cluster, or harddrive paths on a specific machine). For such scenarios, a file [configs/local/default.yaml](configs/local/) can be created which is automatically loaded but not tracked by Git.
-
-For example, you can use it for a SLURM cluster config:
-
-```yaml
-# @package _global_
-
-defaults:
-  - override /hydra/launcher@_here_: submitit_slurm
-
-data_dir: /mnt/scratch/data/
-
-hydra:
-  launcher:
-    timeout_min: 1440
-    gpus_per_task: 1
-    gres: gpu:1
-  job:
-    env_set:
-      MY_VAR: /home/user/my/system/path
-      MY_KEY: asdgjhawi8y23ihsghsueity23ihwd
-```
-
-</details>
-
-<br>
-
-## Resources
-
-This template was inspired by:
-
-- [PyTorchLightning/deep-learning-project-template](https://github.com/PyTorchLightning/deep-learning-project-template)
-- [drivendata/cookiecutter-data-science](https://github.com/drivendata/cookiecutter-data-science)
-- [lucmos/nn-template](https://github.com/lucmos/nn-template)
-
-Other useful repositories:
-
-- [jxpress/lightning-hydra-template-vertex-ai](https://github.com/jxpress/lightning-hydra-template-vertex-ai) - lightning-hydra-template integration with Vertex AI hyperparameter tuning and custom training job
-
-</details>
-
-<br>
-
-## License
-
-Lightning-Hydra-Template is licensed under the MIT License.
-
-```
-MIT License
-
-Copyright (c) 2021 ashleve
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-<br>
-<br>
-<br>
-<br>
-
-**DELETE EVERYTHING ABOVE FOR YOUR PROJECT**
-
-______________________________________________________________________
-
-<div align="center">
-
-# Your Project Name
-
-<a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
-<a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white"></a>
-<a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd"></a>
-<a href="https://github.com/ashleve/lightning-hydra-template"><img alt="Template" src="https://img.shields.io/badge/-Lightning--Hydra--Template-017F2F?style=flat&logo=github&labelColor=gray"></a><br>
-[![Paper](http://img.shields.io/badge/paper-arxiv.1001.2234-B31B1B.svg)](https://www.nature.com/articles/nature14539)
-[![Conference](http://img.shields.io/badge/AnyConference-year-4b44ce.svg)](https://papers.nips.cc/paper/2020)
-
-</div>
-
-## Description
-
-What it does
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Training](#training)
+  - [Single GPU](#single-gpu)
+  - [Multi-GPU: DDP](#multi-gpu-ddp)
+  - [Multi-GPU: FSDP](#multi-gpu-fsdp)
+  - [Multi-GPU: FSDP2 / ModelParallel](#multi-gpu-fsdp2--modelparallel)
+  - [Multi-GPU: DeepSpeed](#multi-gpu-deepspeed)
+  - [Strategy Factory](#strategy-factory)
+  - [Apple Silicon (MPS)](#apple-silicon-mps)
+  - [CPU](#cpu)
+- [Evaluation](#evaluation)
+- [ASE Calculator](#ase-calculator)
+- [Fine-Tuning](#fine-tuning)
+- [Data Loading](#data-loading)
+  - [Supported Formats](#supported-formats)
+  - [Loading Modes](#loading-modes)
+  - [Merge Strategies](#merge-strategies)
+  - [Auto-Splitting](#auto-splitting)
+- [Models](#models)
+- [Heads](#heads)
+- [Loss Functions](#loss-functions)
+- [Benchmark Datasets](#benchmark-datasets)
+- [Foundation Model Adapters](#foundation-model-adapters)
+- [Feature Extraction](#feature-extraction)
+- [Performance Engineering](#performance-engineering)
+- [Hyperparameter Tuning](#hyperparameter-tuning)
+- [Callbacks](#callbacks)
+- [Logging](#logging)
+- [Configuration System](#configuration-system)
+- [CLI Reference](#cli-reference)
+- [Pixi Tasks](#pixi-tasks)
+
+---
+
+## Overview
+
+GMD is a framework for training machine-learning interatomic potentials (MLIPs) using equivariant and invariant graph neural networks. Built on PyTorch Lightning 2.6+ and Hydra, it provides:
+
+- 🔬 **Equivariant & invariant backbones** — HyperSpec (E(3)-equivariant) and SchNet-like invariant GNN
+- 🎯 **Multiple task heads** — energy, forces, stress, dipole, direct forces
+- 🧠 **Foundation model adapters** — MACE and FairChem (UMA) pre-trained models
+- 📂 **Flexible data loading** — XYZ, HDF5, LMDB, ASE trajectory; multi-file merge, directory-based loading, and auto-splitting
+- ⚡ **Distributed training** — DDP, FSDP, FSDP2 (ModelParallel), and DeepSpeed ZeRO (Stages 1/2/3 + CPU offload)
+- 🧮 **Configurable loss functions** — per-property loss type selection (MSE, MAE, Huber, Smooth L1) + arbitrary weights
+- 🔧 **Strategy factory** — unified `build_strategy(cfg)` entry point for all distributed strategies
+- 🚀 **Performance engineering** — TF32, cuDNN benchmark, `torch.compile`, gradient accumulation, EMA/SWA
+- 📊 **Experiment management** — Hydra config composition, W&B / TensorBoard / CSV / MLflow / Neptune / Aim / Comet loggers
+- 🖥️ **SLURM-aware** — automatic checkpoint resumption and completion sentinels
+- 🐍 **Python 3.14** — GIL-free interpreter with true multithreading for data loading
+
+---
 
 ## Installation
 
-#### Pip
+### With pip
 
 ```bash
-# clone project
-git clone https://github.com/YourGithubName/your-repo-name
-cd your-repo-name
-
-# [OPTIONAL] create conda environment
-conda create -n myenv python=3.9
-conda activate myenv
-
-# install pytorch according to instructions
-# https://pytorch.org/get-started/
-
-# install requirements
-pip install -r requirements.txt
+git clone https://github.com/user/gmd.git
+cd gmd
+pip install -e .
 ```
 
-#### Conda
+Optional extras:
 
 ```bash
-# clone project
-git clone https://github.com/YourGithubName/your-repo-name
-cd your-repo-name
-
-# create conda environment and install dependencies
-conda env create -f environment.yaml -n myenv
-
-# activate conda environment
-conda activate myenv
+pip install -e ".[mace]"       # MACE adapter
+pip install -e ".[fairchem]"   # FairChem/UMA adapter
+pip install -e ".[deepspeed]"  # DeepSpeed ZeRO strategies
+pip install -e ".[all]"        # All optional dependencies
+pip install -e ".[dev]"        # pytest, ruff, mypy
 ```
 
-## How to run
+### With pixi
 
-Train model with default configuration
+GMD ships a pixi workspace configuration in `pyproject.toml`. Pixi manages conda + pip dependencies and named environments:
 
 ```bash
-# train on CPU
-python src/train.py trainer=cpu
-
-# train on GPU
-python src/train.py trainer=gpu
+pixi install                    # default (CPU)
+pixi install -e cuda            # CUDA 12.6
+pixi install -e dev             # CPU + dev tools
+pixi install -e dev-cuda        # CUDA 12.6 + dev tools
+pixi install -e mace            # CUDA + MACE adapter
+pixi install -e fairchem        # CUDA + FairChem adapter
+pixi install -e cuda-deepspeed  # CUDA + DeepSpeed
 ```
 
-Train model with chosen experiment configuration from [configs/experiment/](configs/experiment/)
+> **Note:** Minimum CUDA version is **12.6**. Older CUDA versions are not supported.
+
+---
+
+## Project Structure
+
+<details>
+<summary>📁 Click to expand full project tree</summary>
+
+```
+├── configs/                    # Hydra configuration groups
+│   ├── train.yaml              # Training defaults composition
+│   ├── eval.yaml               # Evaluation defaults composition
+│   ├── callbacks/              # Callback configs (checkpoint, EMA, SWA, ...)
+│   ├── data/                   # Dataset configs (xyz, hdf5, lmdb, trajectory)
+│   ├── logger/                 # Logger configs (wandb, tensorboard, csv, ...)
+│   ├── model/                  # Model configs (hyperspec, invariant_gnn)
+│   ├── strategy/               # 🆕 Strategy configs (ddp, fsdp, fsdp2, deepspeed_*)
+│   ├── trainer/                # Trainer configs (gpu, ddp, fsdp, model_parallel, ...)
+│   ├── training/               # Training hyperparameters (optimizer, EMA, losses, ...)
+│   ├── paths/                  # Path definitions
+│   └── hydra/                  # Hydra runtime settings
+├── src/
+│   ├── gmd/                    # Main package
+│   │   ├── cli/                # Entry points: train, evaluate, finetune
+│   │   ├── data/               # DataModule, datasets (base, xyz, hdf5, lmdb, trajectory, concat)
+│   │   ├── nn/                 # Neural network components
+│   │   │   ├── models/         # Backbones: HyperSpec, invariant GNN
+│   │   │   ├── heads/          # Task heads: energy, forces, stress, dipole
+│   │   │   ├── blocks/         # Building blocks: embedding, interaction, readout
+│   │   │   └── primitives/     # Low-level ops: tensor products, radial basis, norms
+│   │   ├── adapters/           # Foundation model wrappers: MACE, FairChem
+│   │   ├── training/           # LightningModule, loss, EMA, callbacks
+│   │   │   └── strategies/     # 🆕 Strategy factory: DDP, FSDP, FSDP2, DeepSpeed
+│   │   ├── utils/              # Feature extraction, utilities
+│   │   └── registry.py         # Lazy component registry
+├── data/                       # Dataset storage
+├── logs/                       # Training outputs (checkpoints, metrics)
+├── tests/                      # Test suite
+└── pyproject.toml              # Package metadata + pixi workspace config
+```
+
+</details>
+
+---
+
+## Quick Start
+
+Train the default model (HyperSpec) on XYZ data:
 
 ```bash
-python src/train.py experiment=experiment_name.yaml
+gmd-train data.root=/path/to/dataset
 ```
 
-You can override any parameter from command line like this
+Or equivalently via module:
 
 ```bash
-python src/train.py trainer.max_epochs=20 data.batch_size=64
+python -m gmd.cli.train data.root=/path/to/dataset
 ```
+
+This loads `configs/train.yaml` which composes: `data=xyz`, `model=hyperspec`, `training=default`, `trainer=default`.
+
+---
+
+## Training
+
+### Single GPU
+
+```bash
+gmd-train trainer=gpu data.root=/path/to/dataset
+```
+
+The `gpu` trainer config sets `accelerator: gpu` and `devices: 1`.
+
+### Multi-GPU: DDP
+
+Distributed Data Parallel — replicates the full model on each GPU and synchronizes gradients. Use when the model fits in a single GPU's memory.
+
+```bash
+gmd-train trainer=ddp data.root=/path/to/dataset
+```
+
+Override the number of GPUs:
+
+```bash
+gmd-train trainer=ddp trainer.devices=8
+```
+
+Multi-node:
+
+```bash
+gmd-train trainer=ddp trainer.devices=4 trainer.num_nodes=2
+```
+
+DDP key settings (in `configs/trainer/ddp.yaml`):
+- `find_unused_parameters: false` — set `true` if you have frozen layers
+- `static_graph: false` — set `true` for models with fixed computation graphs (faster)
+- `gradient_as_bucket_view: true` — minor memory optimisation
+- `sync_batchnorm: true` — synchronize batch norm statistics across GPUs
+
+### Multi-GPU: FSDP
+
+Fully Sharded Data Parallel — shards model parameters, gradients, and optimizer states across GPUs. Use when the model doesn't fit in a single GPU's memory.
+
+```bash
+gmd-train trainer=fsdp data.root=/path/to/dataset
+```
+
+FSDP settings (in `configs/trainer/fsdp.yaml`):
+- `auto_wrap_policy` — controls how modules are wrapped for sharding
+- `activation_checkpointing_policy` — trade compute for memory by recomputing activations
+- `cpu_offload: false` — offload parameters to CPU (slower, saves GPU memory)
+- `precision: "bf16-mixed"` — recommended for FSDP on Ampere+ GPUs
+
+### Multi-GPU: FSDP2 / ModelParallel
+
+ModelParallelStrategy (Lightning 2.4+) — supports FSDP2, tensor parallelism, `torch.compile`, and FP8. Recommended for very large models (500M+ parameters).
+
+```bash
+gmd-train trainer=model_parallel data.root=/path/to/dataset
+```
+
+Or via the strategy factory:
+
+```bash
+gmd-train +strategy=fsdp2 data.root=/path/to/dataset
+```
+
+### Multi-GPU: DeepSpeed
+
+[DeepSpeed](https://www.deepspeed.ai/) ZeRO enables training of very large models by partitioning optimizer states, gradients, and parameters across GPUs. Requires `pip install -e ".[deepspeed]"`.
+
+**ZeRO Stage 1** — optimizer state partitioning only (lowest communication overhead):
+```bash
+gmd-train +strategy=deepspeed_zero1 data.root=/path/to/dataset
+```
+
+**ZeRO Stage 2** — optimizer state + gradient partitioning:
+```bash
+gmd-train +strategy=deepspeed_zero2 data.root=/path/to/dataset
+```
+
+**ZeRO Stage 3** — full parameter partitioning (maximum memory savings):
+```bash
+gmd-train +strategy=deepspeed_zero3 data.root=/path/to/dataset
+```
+
+**ZeRO Stage 3 + CPU offload** — offload parameters to CPU (for extremely large models):
+```bash
+gmd-train +strategy=deepspeed_zero3_offload data.root=/path/to/dataset
+```
+
+<details>
+<summary>📋 DeepSpeed configuration options</summary>
+
+```yaml
+# configs/strategy/deepspeed_zero3.yaml
+name: deepspeed_zero3
+stage: 3
+allgather_bucket_size: 200_000_000
+reduce_bucket_size: 200_000_000
+logging_level: WARNING
+```
+
+</details>
+
+### Strategy Factory
+
+GMD provides a unified **strategy factory** (`build_strategy()`) that maps config to Lightning strategies. When `cfg.strategy` is present, it takes priority over the trainer's built-in strategy.
+
+```yaml
+# Two ways to select a strategy:
+# 1. Via trainer config group (backward compatible):
+gmd-train trainer=ddp
+
+# 2. Via strategy config group (new, more options):
+gmd-train +strategy=fsdp2
+gmd-train +strategy=deepspeed_zero3_offload
+```
+
+| Strategy Config | Lightning Strategy | Use Case |
+|---|---|---|
+| `ddp` | `DDPStrategy` | Model fits on one GPU |
+| `fsdp` | `FSDPStrategy` | Model too large for one GPU |
+| `fsdp2` | `ModelParallelStrategy` | Very large models, torch.compile |
+| `deepspeed_zero1` | `DeepSpeedStrategy` (stage 1) | Optimizer state partitioning |
+| `deepspeed_zero2` | `DeepSpeedStrategy` (stage 2) | + gradient partitioning |
+| `deepspeed_zero3` | `DeepSpeedStrategy` (stage 3) | Full parameter partitioning |
+| `deepspeed_zero3_offload` | `DeepSpeedStrategy` (stage 3) | + CPU offload |
+
+### Apple Silicon (MPS)
+
+```bash
+gmd-train trainer=mps data.root=/path/to/dataset
+```
+
+### CPU
+
+```bash
+gmd-train trainer=cpu data.root=/path/to/dataset
+```
+
+---
+
+## Evaluation
+
+Evaluate a trained checkpoint on the test split:
+
+```bash
+gmd-eval ckpt_path=/path/to/checkpoint.ckpt data.root=/path/to/dataset
+```
+
+The evaluation entry point supports the same trainer configs for distributed evaluation:
+
+```bash
+gmd-eval trainer=ddp ckpt_path=/path/to/checkpoint.ckpt data.root=/path/to/dataset
+```
+
+---
+
+## ASE Calculator
+
+Any trained GMD model can be used as an [ASE Calculator](https://wiki.fysik.dtu.dk/ase/ase/calculators/calculators.html) for molecular dynamics, geometry optimisation, phonons, and more.
+
+### From a Checkpoint
+
+```python
+from gmd.utils.calculator import GMDCalculator
+
+calc = GMDCalculator(checkpoint_path="logs/train/runs/.../last.ckpt")
+```
+
+### From a Pre-loaded Module
+
+```python
+from gmd.utils.calculator import GMDCalculator
+
+calc = GMDCalculator(module=my_module, cutoff=5.0, device="cuda")
+```
+
+### Single-Point Calculation
+
+```python
+from ase.build import molecule
+
+atoms = molecule("H2O")
+atoms.calc = calc
+
+energy = atoms.get_potential_energy()   # eV
+forces = atoms.get_forces()             # eV/Å
+stress = atoms.get_stress()             # eV/ų (Voigt, 6-component)
+```
+
+### Geometry Optimisation
+
+```python
+from ase.optimize import BFGS
+
+opt = BFGS(atoms)
+opt.run(fmax=0.01)
+```
+
+### Molecular Dynamics
+
+```python
+from ase.md.langevin import Langevin
+from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
+from ase import units
+
+MaxwellBoltzmannDistribution(atoms, temperature_K=300)
+dyn = Langevin(atoms, 1.0 * units.fs, temperature_K=300, friction=0.01)
+dyn.run(1000)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `checkpoint_path` | — | Path to `.ckpt` file (mutually exclusive with `module`) |
+| `module` | — | Pre-loaded `GMDModule` instance |
+| `cutoff` | from config | Neighbour-list cutoff (Å). Auto-detected from checkpoint |
+| `device` | `"cpu"` | `"cpu"`, `"cuda"`, `"cuda:0"`, etc. |
+| `dtype` | `float64` | Precision for positions and cell |
+| `head` | `None` | Multi-head tag for multi-task models |
+
+---
+
+## Fine-Tuning
+
+Fine-tune a pre-trained foundation model on a downstream dataset:
+
+```bash
+gmd-finetune model.backbone.name=mace-large model.backbone.pretrained=true data.root=/path/to/dataset
+```
+
+### Backbone Loading Modes
+
+**1. Pre-trained hub model:**
+
+```bash
+gmd-finetune model.backbone.name=mace-large model.backbone.pretrained=true model.backbone.variant=large
+```
+
+**2. Local checkpoint:**
+
+```bash
+gmd-finetune model.backbone.name=mace-large model.backbone.local_checkpoint=/path/to/model.pt
+```
+
+**3. Fresh backbone (train from scratch):**
+
+```bash
+gmd-finetune model.backbone.name=mace-large
+```
+
+### Freeze Backbone (Linear Probing)
+
+```bash
+gmd-finetune training.freeze_backbone=true model.backbone.name=mace-large model.backbone.pretrained=true
+```
+
+### Gradual Unfreezing
+
+Use the backbone finetuning callback:
+
+```bash
+gmd-finetune callbacks=backbone_finetuning model.backbone.name=mace-large model.backbone.pretrained=true
+```
+
+This freezes the backbone initially, then unfreezes at epoch 10 with a reduced learning rate (10% of head LR).
+
+### Available Adapters
+
+| Adapter | Registry Names | Source |
+|---------|---------------|--------|
+| MACE | `mace-large`, `mace-medium`, `mace-small` | `mace-torch` |
+| FairChem/UMA | `uma-small` | `fairchem-core` |
+
+---
+
+## Data Loading
+
+### Supported Formats
+
+| Format | Config | File Types | Description |
+|--------|--------|-----------|-------------|
+| ExtXYZ | `data=xyz` | `.xyz`, `.extxyz` | ASE-readable extended XYZ files |
+| HDF5 | `data=hdf5` | `.h5`, `.hdf5` | Pre-processed atomic graphs with random access |
+| LMDB | `data=lmdb` | `data.mdb` | FairChem/OCP-compatible format |
+| Trajectory | `data=trajectory` | `.traj` | ASE trajectory files from MD simulations |
+
+### Loading Modes
+
+GMD supports four data loading modes, automatically detected from the config:
+
+#### Mode 1 — Single source, auto-split (default)
+
+Point to a single directory. GMD first looks for named split files (`train.xyz`, `val.xyz`, `test.xyz`). If those don't exist, it loads everything and splits by ratio.
+
+```bash
+gmd-train data.root=/path/to/dataset
+```
+
+```yaml
+# configs/data/xyz.yaml
+data:
+  dataset_type: xyz
+  root: ${paths.data_dir}
+  split_ratio: [0.8, 0.1, 0.1]
+  split_seed: 42
+```
+
+#### Mode 2 — Per-split paths
+
+Specify separate file lists for train, validation, and test. Each split can load from multiple files.
+
+```bash
+gmd-train data.train_paths='[/data/A/train.xyz,/data/B/train.xyz]' \
+          data.val_paths='[/data/A/val.xyz]' \
+          data.test_paths='[/data/A/test.xyz]'
+```
+
+Or in a config file:
+
+```yaml
+data:
+  dataset_type: xyz
+  train_paths:
+    - /data/dataset_A/train.xyz
+    - /data/dataset_B/train.xyz
+  val_paths:
+    - /data/dataset_A/val.xyz
+  test_paths:
+    - /data/dataset_A/test.xyz
+```
+
+#### Mode 3 — Merged multi-source, auto-split
+
+Provide a list of roots. All datasets are loaded, merged into one, then split by ratio.
+
+```yaml
+data:
+  dataset_type: xyz
+  root:
+    - /data/dataset_A
+    - /data/dataset_B
+    - /data/dataset_C
+  merge_strategy: random
+  split_ratio: [0.8, 0.1, 0.1]
+  split_seed: 42
+```
+
+#### Mode 4 — Directory-based per-split 🆕
+
+Point to directories containing data files. All matching files (`.xyz`, `.extxyz`, `.h5`, `.hdf5`, `.lmdb`, `.traj`, `.db`) inside each directory are automatically discovered and loaded.
+
+```bash
+gmd-train data.train_dir=/data/train/ \
+          data.val_dir=/data/val/ \
+          data.test_dir=/data/test/
+```
+
+```yaml
+data:
+  dataset_type: xyz
+  train_dir: /data/splits/train/
+  val_dir: /data/splits/val/
+  test_dir: /data/splits/test/     # optional
+```
+
+> **Tip:** Mode 4 is ideal when you have pre-organized split directories. Files are loaded in sorted order for reproducibility.
+
+### Merge Strategies
+
+When loading multiple files (Mode 2 or Mode 3), datasets are merged using one of two strategies:
+
+| Strategy | Behaviour |
+|----------|-----------|
+| `sequential` | Concatenate datasets in order (default) |
+| `random` | Shuffle all indices after concatenation (seed-controlled) |
+
+```bash
+gmd-train data.merge_strategy=random data.split_seed=123
+```
+
+### Auto-Splitting
+
+When splits aren't provided explicitly, GMD splits the dataset numerically:
+
+```yaml
+data:
+  split_ratio: [0.8, 0.1, 0.1]   # train / val / test
+  split_seed: 42                   # reproducible splits
+```
+
+A two-element ratio creates train/val only (no test split):
+
+```yaml
+data:
+  split_ratio: [0.9, 0.1]         # train / val only
+```
+
+### DataLoader Options
+
+All data configs support these performance options:
+
+```yaml
+data:
+  batch_size: 32
+  num_workers: 4              # parallel data loading workers
+  pin_memory: true            # pin tensors in CPU memory for faster GPU transfer
+  persistent_workers: true    # keep workers alive between epochs
+  prefetch_factor: 2          # batches prefetched per worker
+```
+
+---
+
+## Models
+
+### HyperSpec (equivariant)
+
+E(3)-equivariant graph neural network using spherical harmonics and tensor products.
+
+```bash
+gmd-train model=hyperspec
+```
+
+Key parameters:
+- `hidden_channels: 128` — feature dimension
+- `num_interactions: 3` — message passing layers
+- `lmax: 2` — maximum spherical harmonics order
+- `cutoff: 5.0` — interaction radius (Å)
+- `num_radial_basis: 8` — radial basis functions
+
+Output irreps: `128x0e+128x1o+128x2e` (scalars + vectors + rank-2 tensors)
+
+### Invariant GNN
+
+SchNet-like invariant backbone using only scalar features. Faster than equivariant models; use for baselines or when equivariance isn't needed.
+
+```bash
+gmd-train model=invariant_gnn
+```
+
+Output irreps: `128x0e` (scalars only)
+
+---
+
+## Heads
+
+Task-specific output heads registered via the head registry:
+
+| Head | Description | Config key |
+|------|-------------|-----------|
+| `energy_forces` | Energy prediction + force via autograd | `head.name: energy_forces` |
+| `energy` | Energy prediction only | `head.name: energy` |
+| `direct_forces` | Direct force prediction (no autograd) | `head.name: direct_forces` |
+| `stress` | Stress tensor prediction | `head.name: stress` |
+| `dipole` | Dipole moment prediction | `head.name: dipole` |
+
+Override the head:
+
+```bash
+gmd-train model.head.name=stress model.head.compute_stress=true
+```
+
+---
+
+## Loss Functions
+
+Each property loss supports a configurable loss function via the `fn` parameter:
+
+| Key | Function | Notes |
+|-----|----------|-------|
+| `mse` | Mean Squared Error | Default — good for smooth regression |
+| `mae` / `l1` | Mean Absolute Error | Robust to outliers |
+| `rmse` | Root Mean Squared Error | Penalises large errors more than MAE |
+| `huber` | Huber Loss | Combines MSE + MAE (delta = 1.0) |
+| `smooth_l1` | Smooth L1 | Like Huber with beta = 1.0 |
+
+Configure per-property in `configs/training/default.yaml`:
+
+```yaml
+losses:
+  - name: energy
+    weight: 4.0
+    fn: mse          # ← loss function
+  - name: forces
+    weight: 1.0
+    fn: huber         # ← robust to noisy forces
+  - name: stress
+    weight: 0.01
+    fn: mae
+```
+
+### Composite Loss per Property
+
+Use **multiple loss functions simultaneously** for the same property, each with its own weight and separate logging panel:
+
+```yaml
+losses:
+  - name: energy
+    weight: 4.0
+    fn: mse
+  - name: forces
+    fn:                    # ← list of sub-losses
+      - name: mse
+        weight: 4.0
+      - name: rmse
+        weight: 8.0
+```
+
+This produces **five** logged metrics in W&B / TensorBoard:
+
+| Logged metric | Description |
+|---------------|-------------|
+| `train/energy` | Energy MSE × 4.0 |
+| `train/forces_mse` | Forces MSE × 4.0 |
+| `train/forces_rmse` | Forces RMSE × 8.0 |
+| `train/forces` | Sum of forces sub-losses |
+| `train/total` | Grand total |
+
+Each sub-loss gets its own chart in W&B automatically.
+
+### Custom / torchmetrics Loss Functions
+
+Use any callable via a dotted import path:
+
+```yaml
+losses:
+  - name: forces
+    fn:
+      - name: mse
+        weight: 4.0
+      - name: torchmetrics.functional.mean_squared_error
+        weight: 2.0
+```
+
+Install torchmetrics first: `pip install -e ".[torchmetrics]"`
+
+Override from the CLI:
+
+```bash
+# Switch forces loss to MAE
+gmd-train 'training.losses=[{name: energy, weight: 4.0, fn: mse}, {name: forces, weight: 1.0, fn: mae}]'
+```
+
+> **Tip:** Use `huber` or `mae` for forces when your dataset has noisy DFT reference forces — they're more robust to outliers than MSE.
+
+---
+
+## Benchmark Datasets
+
+Ready-to-use benchmark datasets for training and evaluating MLIPs. **Completely optional** — the core framework works without them.
+
+| Dataset | Structures | Elements | Properties | Size | Config |
+|---------|-----------|----------|------------|------|--------|
+| **MD17** | ~10k/mol | H, C, N, O | energy, forces | ~100 MB | `data=md17_aspirin` |
+| **rMD17** | ~10k/mol | H, C, N, O | energy, forces | ~100 MB | `data=rmd17_aspirin` |
+| **ANI-1** | ~20M | H, C, N, O | energy, forces | ~30 GB | `data=ani1` |
+| **ANI-1x** | ~5M | H, C, N, O | energy, forces | ~7 GB | `data=ani1x` |
+| **QM9** | 134k | H, C, N, O, F | 19 properties | ~1 GB | `data=qm9` |
+| **SPICE** | ~1.1M | 10 elements | energy, forces | ~15 GB | — |
+
+```bash
+# Train on MD17 aspirin
+gmd-train data=md17_aspirin
+
+# Train on ANI-1x, subsample 50k for quick experiment
+gmd-train data=ani1x data.max_structures=50000
+
+# Train on QM9 predicting HOMO-LUMO gap
+gmd-train data=qm9 data.target=gap
+
+# Override cutoff
+gmd-train data=md17_aspirin data.cutoff=6.0
+```
+
+Install optional dependencies for SPICE (HDF5):
+
+```bash
+pip install -e ".[examples]"
+```
+
+See [examples/datasets/README.md](examples/datasets/README.md) for full documentation, citations, and unit conversion details.
+
+---
+
+## Foundation Model Adapters
+
+Adapters wrap pre-trained foundation models (MACE, FairChem/UMA) as GMD backbones. They translate between the foundation model's interface and GMD's backbone protocol.
+
+```bash
+# Fine-tune MACE-large
+gmd-finetune model.backbone.name=mace-large model.backbone.pretrained=true
+
+# Fine-tune UMA-small
+gmd-finetune model.backbone.name=uma-small model.backbone.pretrained=true
+```
+
+Install adapter dependencies:
+
+```bash
+pip install -e ".[mace]"       # for MACE adapters
+pip install -e ".[fairchem]"   # for FairChem/UMA adapters
+```
+
+---
+
+## Feature Extraction
+
+Extract intermediate node features from any backbone for downstream analysis, transfer learning, or custom heads.
+
+### HookBasedExtractor
+
+Attach forward hooks to interaction blocks — works with any model whose layers are a `nn.ModuleList`:
+
+```python
+from gmd.utils.extraction import HookBasedExtractor
+
+with HookBasedExtractor(model, blocks_attr="interactions", output_index=0) as ext:
+    output = model(batch)
+    features = ext.captured  # {"layer_0": Tensor, "layer_1": Tensor, ...}
+```
+
+### Composable Backbone Wrappers
+
+| Wrapper | Description |
+|---------|-------------|
+| `LayerBackbone` | Returns features from a single interaction layer |
+| `MultiScaleBackbone` | Concatenates features from multiple layers |
+| `FrozenBackbone` | Freezes all backbone parameters for feature extraction |
+
+### Irrep Helpers
+
+```python
+from gmd.utils.extraction import extract_scalars, extract_irrep_channels, pool_nodes
+
+scalars = extract_scalars(node_feats, irreps)           # l=0 channels only
+channels = extract_irrep_channels(node_feats, irreps)   # dict by irrep type
+graph_feats = pool_nodes(node_feats, batch_idx)          # per-graph pooling
+```
+
+### Pre-built Extractors
+
+Registered as Hydra targets for zero-code feature extraction:
+
+```yaml
+backbone:
+  _target_: gmd.utils.extraction._build_mace_large_final       # last layer
+  # or: gmd.utils.extraction._build_mace_large_multiscale      # all layers
+  # or: gmd.utils.extraction._build_mace_large_frozen           # frozen weights
+```
+
+---
+
+## Performance Engineering
+
+### TF32 Matmul Precision
+
+On Ampere+ GPUs (A100, H100, RTX 30xx/40xx), TF32 tensor cores provide ~3× speedup for float32 operations with negligible precision loss:
+
+```yaml
+# configs/training/default.yaml
+training:
+  performance:
+    float32_matmul_precision: high  # "highest" = fp32, "high" = TF32+fp32, "medium" = TF32
+```
+
+### cuDNN Benchmark
+
+Auto-tunes convolution algorithms for fixed input sizes:
+
+```yaml
+training:
+  performance:
+    cudnn_benchmark: true
+    cudnn_deterministic: false  # set true only for debugging
+```
+
+### torch.compile
+
+Compile the backbone with `torch.compile` for faster training (PyTorch 2.0+):
+
+```bash
+gmd-train training.compile_model=true
+```
+
+Configure compilation mode:
+
+```yaml
+training:
+  compile_model: true
+  compile:
+    mode: default           # 'default', 'reduce-overhead', 'max-autotune'
+    fullgraph: false        # true = compile the entire graph (faster, stricter)
+    dynamic: null           # null, true, false — dynamic shape support
+```
+
+### Mixed Precision
+
+```bash
+gmd-train trainer.precision=bf16-mixed    # bfloat16 (Ampere+, recommended)
+gmd-train trainer.precision=16-mixed       # float16
+gmd-train trainer.precision=64-true        # double precision
+```
+
+### Gradient Accumulation
+
+Simulate larger batch sizes without increasing GPU memory:
+
+```bash
+gmd-train trainer.accumulate_grad_batches=4   # effective batch = batch_size × 4
+```
+
+Or use the dynamic scheduler callback:
+
+```bash
+gmd-train callbacks=grad_accumulation
+```
+
+### Exponential Moving Average (EMA)
+
+Maintains a shadow copy of weights for more stable evaluation:
+
+```yaml
+training:
+  ema:
+    enabled: true
+    decay: 0.999
+```
+
+### Stochastic Weight Averaging (SWA)
+
+Alternative to EMA — averages weights during the last portion of training:
+
+```bash
+gmd-train callbacks=swa
+```
+
+### Sanity Validation Check
+
+Before the first training epoch, Lightning runs a short validation sanity check to catch data loading, metric computation, or model errors early. This is enabled by default:
+
+```yaml
+# configs/trainer/default.yaml
+num_sanity_val_steps: 2   # run 2 val batches before training
+                          # 0 = skip, -1 = full validation set
+```
+
+Override from the command line:
+
+```bash
+# Skip sanity check (faster startup)
+gmd-train trainer.num_sanity_val_steps=0
+
+# Full validation run before training (thorough check)
+gmd-train trainer.num_sanity_val_steps=-1
+```
+
+---
+
+## Hyperparameter Tuning
+
+GMD provides two levels of hyperparameter optimisation, both fully config-driven.
+
+### Basic: Lightning Tuner
+
+Built-in learning rate and batch size auto-discovery. **Zero extra dependencies.**
+
+```bash
+gmd-tune hparams_search=basic
+```
+
+```yaml
+# configs/hparams_search/basic.yaml
+hparams_search:
+  method: tuner
+  tuner:
+    lr_find: true             # find optimal learning rate
+    scale_batch_size: true    # find max batch size that fits in memory
+```
+
+### Advanced: Ray Tune
+
+Full hyperparameter search with ASHA early stopping, Optuna Bayesian optimisation, or Population-Based Training. **Requires optional dependencies.**
+
+```bash
+pip install -e ".[tune]"   # installs ray[tune] + optuna
+
+gmd-tune hparams_search=ray_tune
+```
+
+<details>
+<summary>Example Ray Tune config</summary>
+
+```yaml
+# configs/hparams_search/ray_tune.yaml
+hparams_search:
+  method: ray
+  num_samples: 20
+  max_epochs: 100
+  metric: val/total
+  mode: min
+  scheduler: asha
+  search_algorithm: optuna
+
+  search_space:
+    training.optimizer.lr:
+      type: loguniform
+      lower: 1.0e-5
+      upper: 1.0e-2
+    training.optimizer.weight_decay:
+      type: loguniform
+      lower: 1.0e-8
+      upper: 1.0e-3
+    training.ema.decay:
+      type: uniform
+      lower: 0.99
+      upper: 0.9999
+```
+
+</details>
+
+| Scheduler | Description |
+|-----------|-------------|
+| `asha` | Asynchronous Successive Halving — prunes bad trials early (recommended) |
+| `pbt` | Population-Based Training — mutates hyperparams during training |
+
+| Search algorithm | Description |
+|-----------------|-------------|
+| `null` | Random search (no extra deps) |
+| `optuna` | Bayesian optimisation via [Optuna](https://optuna.org/) |
+| `hyperopt` | Tree-structured Parzen Estimators |
+
+### Advanced: W&B Sweeps
+
+Cloud-managed hyperparameter search via [Weights & Biases](https://wandb.ai/). Supports Bayesian, grid, and random search with Hyperband early termination. **Requires W&B (already a core dependency).**
+
+```bash
+gmd-tune hparams_search=wandb_sweep
+```
+
+<details>
+<summary>Example W&B Sweep config</summary>
+
+```yaml
+# configs/hparams_search/wandb_sweep.yaml
+hparams_search:
+  method: wandb
+  project: gmd
+  sweep_method: bayes          # 'bayes', 'grid', 'random'
+  metric: val/total
+  mode: min
+  count: 20
+
+  early_terminate:
+    type: hyperband
+    min_iter: 10
+    eta: 3
+
+  parameters:
+    training.optimizer.lr:
+      distribution: log_uniform_values
+      min: 1.0e-5
+      max: 1.0e-2
+    training.optimizer.weight_decay:
+      distribution: log_uniform_values
+      min: 1.0e-8
+      max: 1.0e-3
+```
+
+</details>
+
+Resume an existing sweep:
+
+```bash
+gmd-tune hparams_search=wandb_sweep hparams_search.sweep_id=<SWEEP_ID>
+```
+
+| Sweep method | Description |
+|-------------|-------------|
+| `bayes` | Bayesian optimisation (Gaussian process) — recommended |
+| `grid` | Exhaustive grid search |
+| `random` | Random search |
+
+---
+
+## Callbacks
+
+### Default Callbacks
+
+The default callback group (`callbacks=default`) includes:
+- **ModelCheckpoint** — save top-k checkpoints by validation loss, plus `last.ckpt`
+- **EarlyStopping** — stop training after 100 epochs with no improvement
+- **RichModelSummary** — rich-formatted model summary
+- **RichProgressBar** — rich-formatted training progress
+
+### Additional Callbacks
+
+| Callback | Config | Description |
+|----------|--------|-------------|
+| Stochastic Weight Averaging | `callbacks=swa` | Average weights during late training |
+| Backbone Finetuning | `callbacks=backbone_finetuning` | Gradual unfreezing for fine-tuning |
+| Gradient Accumulation Scheduler | `callbacks=grad_accumulation` | Dynamic accumulation steps |
+
+Override callback parameters:
+
+```bash
+gmd-train callbacks.model_checkpoint.save_top_k=5
+gmd-train callbacks.early_stopping.patience=200
+```
+
+---
+
+## Logging
+
+GMD supports all Lightning loggers. Enable via the `logger` config group:
+
+```bash
+gmd-train logger=wandb
+gmd-train logger=tensorboard
+gmd-train logger=csv
+```
+
+| Logger | Config | Notes |
+|--------|--------|-------|
+| Weights & Biases | `logger=wandb` | Project: `gmd`, requires `wandb` login |
+| TensorBoard | `logger=tensorboard` | Saves to `output_dir/tensorboard/` |
+| CSV | `logger=csv` | Simple CSV file logging |
+| MLflow | `logger=mlflow` | MLflow tracking server |
+| Neptune | `logger=neptune` | Requires `NEPTUNE_API_TOKEN` |
+| Aim | `logger=aim` | Local `.aim` repo, open with `aim up` |
+| Comet | `logger=comet` | Comet.ml experiment tracking |
+
+Use multiple loggers:
+
+```bash
+gmd-train logger=wandb,csv
+```
+
+---
+
+## Configuration System
+
+GMD uses [Hydra](https://hydra.cc/) for composable configuration. Every aspect of training is controlled by YAML config files that can be overridden from the command line.
+
+### Config Groups
+
+| Group | Path | Options |
+|-------|------|---------|
+| Data | `configs/data/` | `xyz`, `hdf5`, `lmdb`, `trajectory`, `md17_aspirin`, `md17_ethanol`, `rmd17_aspirin`, `ani1`, `ani1x`, `qm9` |
+| Model | `configs/model/` | `hyperspec`, `invariant_gnn` |
+| Trainer | `configs/trainer/` | `default`, `gpu`, `ddp`, `fsdp`, `model_parallel`, `cpu`, `mps`, `ddp_sim` |
+| Training | `configs/training/` | `default` |
+| Strategy | `configs/strategy/` | `ddp`, `fsdp`, `fsdp2`, `deepspeed_zero1`, `deepspeed_zero2`, `deepspeed_zero3` |
+| Callbacks | `configs/callbacks/` | `default`, `none`, `swa`, `backbone_finetuning`, `grad_accumulation` |
+| Logger | `configs/logger/` | `wandb`, `tensorboard`, `csv`, `mlflow`, `neptune`, `aim`, `comet` |
+| Hparams Search | `configs/hparams_search/` | `basic`, `ray_tune`, `wandb_sweep` |
+
+### Override Examples
+
+```bash
+# Change model and data format
+gmd-train model=invariant_gnn data=hdf5
+
+# Override nested parameters
+gmd-train training.optimizer.lr=0.0005 training.ema.decay=0.9999
+
+# Change loss weights
+gmd-train training.losses.0.weight=1.0 training.losses.1.weight=50.0
+
+# Multi-run sweep
+gmd-train -m training.optimizer.lr=0.001,0.0005,0.0001
+
+# Disable callbacks
+gmd-train callbacks=none
+```
+
+### Output Directory
+
+Each run creates a timestamped output directory:
+
+```
+logs/train/runs/2026-01-24_04-45-12/
+├── checkpoints/
+│   ├── epoch_001.ckpt
+│   └── last.ckpt
+├── train.log
+└── .hydra/
+    ├── config.yaml          # resolved config
+    ├── hydra.yaml
+    └── overrides.yaml       # command-line overrides
+```
+
+---
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `gmd-train` | Train a model |
+| `gmd-eval` | Evaluate a checkpoint on test data |
+| `gmd-finetune` | Fine-tune a pre-trained model |
+| `gmd-tune` | Hyperparameter search (LR finder, Ray Tune) |
+
+All commands accept Hydra overrides:
+
+```bash
+gmd-train trainer=ddp data=hdf5 model=invariant_gnn logger=wandb seed=42
+```
+
+Module-based invocation (equivalent):
+
+```bash
+python -m gmd.cli.train trainer=ddp data=hdf5
+python -m gmd.cli.evaluate ckpt_path=/path/to/ckpt
+python -m gmd.cli.finetune model.backbone.pretrained=true
+python -m gmd.cli.tune hparams_search=basic
+```
+
+---
+
+## Pixi Tasks
+
+If using pixi as your environment manager, these tasks are available:
+
+| Task | Command | Description |
+|------|---------|-------------|
+| `pixi run train` | `python -m gmd.cli.train` | Train a model |
+| `pixi run eval` | `python -m gmd.cli.evaluate` | Evaluate a checkpoint |
+| `pixi run finetune` | `python -m gmd.cli.finetune` | Fine-tune a model |
+| `pixi run tune` | `python -m gmd.cli.tune` | Hyperparameter search |
+| `pixi run test` | `pytest -k 'not slow'` | Run fast tests |
+| `pixi run test-full` | `pytest` | Run all tests |
+| `pixi run lint` | `ruff check src/ tests/` | Lint code |
+| `pixi run format` | `ruff format src/ tests/` | Format code |
+| `pixi run typecheck` | `mypy src/gmd/` | Type check |
+| `pixi run clean` | — | Remove build artifacts |
+| `pixi run clean-logs` | `rm -rf logs/**` | Remove training logs |
+
+Pass Hydra overrides through pixi:
+
+```bash
+pixi run train trainer=ddp data.root=/path/to/data
+```
+
+Use the `cuda-deepspeed` environment for DeepSpeed training:
+
+```bash
+pixi run -e cuda-deepspeed train strategy=deepspeed_zero2
+```
+
+Use the `tune` environment for hyperparameter search:
+
+```bash
+pixi run -e tune tune hparams_search=ray_tune
+```
+
+---
+
+## License
+
+This project is licensed under the MIT License.

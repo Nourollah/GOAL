@@ -1,0 +1,26 @@
+# FSDP (Fully Sharded Data Parallel) trainer configuration
+# Use when model parameters exceed single-GPU memory
+# Lightning 2.6+ wraps PyTorch's native FSDP
+#
+# Usage: python train.py trainer=fsdp
+
+defaults:
+  - default
+
+accelerator: gpu
+devices: auto
+num_nodes: 1
+strategy:
+  _target_: lightning.pytorch.strategies.FSDPStrategy
+  # auto_wrap_policy wraps individual modules for sharding
+  # Set to module class names or use size-based wrapping
+  auto_wrap_policy: null
+  # Enable activation checkpointing for memory savings
+  activation_checkpointing_policy: null
+  # Offload parameters to CPU to save GPU memory (slower)
+  cpu_offload: false
+  # Mixed precision handled by trainer.precision, not FSDP
+  # Use trainer precision="bf16-mixed" for best FSDP performance
+
+precision: "bf16-mixed"
+sync_batchnorm: true

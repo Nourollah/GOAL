@@ -1,0 +1,23 @@
+# DeepSpeed ZeRO Stage 3 — shards parameters + gradients + optimiser states.
+#
+# Equivalent to FSDP — maximum memory reduction.  Use when the model
+# does not fit on a single GPU even with Stage 2.
+#
+# Usage:
+#   gmd-train strategy=deepspeed_zero3
+
+name: deepspeed_zero3
+
+stage: 3
+
+offload_optimizer: false
+offload_parameters: false
+
+overlap_comm: true
+contiguous_gradients: true
+
+allgather_bucket_size: 200_000_000
+reduce_bucket_size: 200_000_000
+
+# logging.WARNING = 30
+logging_level: 30

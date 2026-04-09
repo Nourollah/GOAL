@@ -1,0 +1,23 @@
+# DeepSpeed ZeRO Stage 3 + CPU Offload — extreme memory pressure.
+#
+# Moves parameters and optimiser states to CPU RAM.  Enables training
+# models larger than total GPU VRAM.  Very slow due to PCIe transfers.
+#
+# Usage:
+#   gmd-train strategy=deepspeed_zero3_offload
+
+name: deepspeed_zero3_offload
+
+stage: 3
+
+offload_optimizer: true
+offload_parameters: true
+
+overlap_comm: true
+contiguous_gradients: true
+
+allgather_bucket_size: 200_000_000
+reduce_bucket_size: 200_000_000
+
+# logging.WARNING = 30
+logging_level: 30

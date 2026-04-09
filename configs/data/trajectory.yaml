@@ -1,0 +1,19 @@
+# GMD Data Configuration — ASE Trajectory dataset
+# Reads .traj files produced by ASE MD simulations
+
+data:
+  dataset_type: trajectory
+  root: ${paths.data_dir}
+  cutoff: 5.0
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  energy_key: energy
+  forces_key: forces
+
+  # --- Multi-file / splitting options ---
+  merge_strategy: sequential
+  split_ratio: [0.8, 0.1, 0.1]
+  split_seed: 42

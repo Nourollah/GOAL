@@ -1,0 +1,28 @@
+# FSDP (Fully Sharded Data Parallel) strategy config.
+#
+# Shards parameters, gradients, and optimiser states across all GPUs.
+# Use when the model does not fit in a single GPU's memory.
+#
+# Usage:
+#   gmd-train strategy=fsdp
+#   gmd-train strategy=fsdp strategy.cpu_offload=true
+
+name: fsdp
+
+# Auto-wrap policy: 'size', 'transformer', or null (whole model)
+auto_wrap_policy: size
+
+# Minimum parameter count for size-based wrapping
+size_based_min_params: 1_000_000
+
+# Re-compute activations during backward — saves ~40% activation memory
+activation_checkpointing: true
+
+# Offload parameters to CPU — very slow, last resort only
+cpu_offload: false
+
+# 'full_shard' | 'shard_grad_op' | 'no_shard'
+sharding_strategy: full_shard
+
+# 'full' | 'sharded' | 'local' — use 'full' for MACE checkpoint compat
+state_dict_type: full

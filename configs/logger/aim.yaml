@@ -12,7 +12,7 @@ aim:
   # repo: "aim://ip_address:port" # can instead provide IP address pointing to Aim remote tracking server which manages the repo, see https://aimstack.readthedocs.io/en/latest/using/remote_tracking.html#
 
   # aim allows to group runs under experiment name
-  experiment: null # any string, set to "default" if not specified
+  experiment: "${run_name}"
 
   train_metric_prefix: "train/"
   val_metric_prefix: "val/"

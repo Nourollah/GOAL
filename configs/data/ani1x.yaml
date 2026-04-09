@@ -1,0 +1,18 @@
+# ANI-1x dataset (extended, higher quality)
+# Usage: gmd-train data=ani1x
+
+data:
+  _target_: examples.datasets.ani1.ANI1Dataset
+  root: ${hydra:runtime.cwd}/data/ani1x
+  version: "1x"
+  cutoff: 5.0
+  train_fraction: 0.8
+  val_fraction: 0.1
+  max_structures: null    # null = use full dataset (~5M structures)
+  elements: null          # null = all elements
+  seed: 42
+
+  batch_size: 64
+  valid_batch_size: 128
+  num_workers: 8
+  pin_memory: true

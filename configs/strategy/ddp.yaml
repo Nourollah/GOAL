@@ -1,0 +1,25 @@
+# DDP (Distributed Data Parallel) strategy config.
+#
+# Replicates the full model on each GPU and synchronises gradients.
+# Use when the model fits in a single GPU's memory.
+#
+# Usage:
+#   gmd-train strategy=ddp
+#   gmd-train strategy=ddp strategy.bucket_cap_mb=10
+
+name: ddp
+
+# Set True only if model has unused parameters (e.g. frozen backbone)
+find_unused_parameters: false
+
+# Set True for models with fixed computation graphs (better perf)
+static_graph: false
+
+# Reduces peak memory by sharing gradient storage with DDP buckets
+gradient_as_bucket_view: true
+
+# Gradient bucket size in MB — reduce to 10 if hitting OOM during sync
+bucket_cap_mb: 25
+
+# Communication backend: 'nccl' for GPU, 'gloo' for CPU
+process_group_backend: nccl

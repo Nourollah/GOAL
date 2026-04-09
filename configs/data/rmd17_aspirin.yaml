@@ -1,0 +1,8 @@
+# rMD17 — aspirin (revised MD17, explicit)
+# Usage: gmd-train data=rmd17_aspirin
+
+defaults:
+  - md17_aspirin
+
+data:
+  revised: true
