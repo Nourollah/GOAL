@@ -125,11 +125,16 @@ def _build_loss(cfg: DictConfig) -> CompositeLoss:
         loss_cls: typing.Any = LOSS_REGISTRY.get(loss_cfg.name)
         fn_spec: typing.Any = loss_cfg.get("fn", "mse")
 
+        # Forward extra kwargs (e.g. property_name, per_atom) to the loss
+        loss_kwargs: dict[str, typing.Any] = {
+            k: v for k, v in loss_cfg.items() if k not in ("name", "weight", "fn")
+        }
+
         if isinstance(fn_spec, str):
             # Single loss function — backward compatible
             losses.append(
                 WeightedLoss(
-                    loss_cls(loss_fn=fn_spec),
+                    loss_cls(loss_fn=fn_spec, **loss_kwargs),
                     weight=loss_cfg.weight,
                     label=loss_cfg.name,
                 )

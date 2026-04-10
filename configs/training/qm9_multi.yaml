@@ -1,0 +1,33 @@
+# GOAL Training Configuration — QM9 Multi-Property
+#
+# Loss weights for simultaneous prediction of HOMO, LUMO, gap, and dipole.
+# Uses ScalarPropertyLoss for the scalar properties (keyed by property_name)
+# and the built-in DipoleLoss for dipole.
+#
+# Usage:
+#   goal-train model=invariant_gnn_qm9 data=qm9 data.target=null training=qm9_multi
+
+defaults:
+  - default
+  - _self_
+
+training:
+  losses:
+    - name: scalar_property
+      property_name: homo
+      weight: 1.0
+      fn: mse
+
+    - name: scalar_property
+      property_name: lumo
+      weight: 1.0
+      fn: mse
+
+    - name: scalar_property
+      property_name: gap
+      weight: 1.0
+      fn: mse
+
+    - name: dipole
+      weight: 1.0
+      fn: mse

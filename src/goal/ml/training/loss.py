@@ -291,3 +291,48 @@ class ChargeLoss(nn.Module):
             torch.zeros_like(pred["total_charge"]),
         )
         return self.loss_fn(pred["total_charge"], target_charge)
+
+
+@LOSS_REGISTRY.register("scalar_property")
+class ScalarPropertyLoss(nn.Module):
+    """Generic loss on any named scalar property.
+
+    Unlike the hard-coded ``EnergyLoss`` or ``ForcesLoss``, this loss
+    reads a configurable key from the predictions and targets dicts.
+    Use it for arbitrary properties (HOMO, LUMO, band gap, etc.)
+    without writing a custom loss class for each.
+
+    Parameters
+    ----------
+    property_name : str
+        Key to look up in both ``pred`` and ``target`` dicts.
+    loss_fn : str
+        Loss function name — ``"mse"``, ``"mae"``, ``"huber"``, etc.
+    per_atom : bool
+        If ``True``, normalise by number of atoms before computing loss
+        (like ``EnergyLoss`` does for energy).
+    """
+
+    def __init__(
+        self,
+        property_name: str,
+        loss_fn: str = "mse",
+        per_atom: bool = False,
+    ) -> None:
+        super().__init__()
+        self.property_name: str = property_name
+        self.per_atom: bool = per_atom
+        self.loss_fn: typing.Callable[..., torch.Tensor] = resolve_loss_fn(loss_fn)
+
+    def forward(
+        self,
+        pred: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        p: torch.Tensor = pred[self.property_name]
+        t: torch.Tensor = target[self.property_name]
+        if self.per_atom:
+            n_atoms: torch.Tensor = pred["num_atoms"]
+            p = p / n_atoms
+            t = t / n_atoms
+        return self.loss_fn(p, t)

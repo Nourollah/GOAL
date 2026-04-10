@@ -131,10 +131,16 @@ class QM9Dataset(BenchmarkDataset):
 
             # Target property/properties
             energy: torch.Tensor | None = None
+            extra_props: dict[str, torch.Tensor] = {}
+
             if self.target_idx is not None:
+                # Single-property mode — store as energy for backward compat
                 energy = data.y[:, self.target_idx : self.target_idx + 1].to(self.dtype)
             else:
-                energy = data.y.to(self.dtype)
+                # Multi-property mode — store each property under its own key
+                # so MultiHead + ScalarPropertyLoss can consume them by name
+                for idx, prop_name in QM9_TARGETS.items():
+                    extra_props[prop_name] = data.y[:, idx : idx + 1].to(self.dtype).squeeze(0)
 
             graph: AtomicGraph = AtomicGraph(
                 positions=positions,
@@ -145,6 +151,7 @@ class QM9Dataset(BenchmarkDataset):
                 edge_vectors=edge_vecs,
                 edge_lengths=edge_lens,
                 energy=energy,
+                **extra_props,
             )
             graphs.append(graph)
         return graphs

@@ -70,7 +70,20 @@ def _build_goal_module(cfg: DictConfig) -> GOALModule:
     losses = []
     for loss_cfg in cfg.training.losses:
         loss_cls = LOSS_REGISTRY.get(loss_cfg.name)
-        losses.append(WeightedLoss(loss_cls(), weight=loss_cfg.weight))
+        # Forward extra kwargs (e.g. property_name, fn, per_atom) to the loss
+        loss_kwargs: dict[str, Any] = {
+            k: v for k, v in loss_cfg.items() if k not in ("name", "weight", "fn")
+        }
+        fn_spec = loss_cfg.get("fn", "mse")
+        if isinstance(fn_spec, str):
+            loss_kwargs["loss_fn"] = fn_spec
+        losses.append(
+            WeightedLoss(
+                loss_cls(**loss_kwargs),
+                weight=loss_cfg.weight,
+                label=loss_cfg.name,
+            )
+        )
     loss = CompositeLoss(losses)
 
     return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)

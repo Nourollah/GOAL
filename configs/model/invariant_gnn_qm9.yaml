@@ -1,0 +1,49 @@
+# GOAL Model Configuration — Invariant GNN with Multi-Head for QM9
+#
+# Simultaneously predicts multiple QM9 properties using the multi-head
+# system.  Each sub-head has its own readout MLP but shares the backbone.
+#
+# Usage:
+#   goal-train model=invariant_gnn_qm9 data=qm9 data.target=null
+#
+# The data.target=null tells the QM9 dataset to load ALL 19 properties.
+# Each property is stored as a separate attribute on AtomicGraph.
+
+model:
+  backbone:
+    name: invariant_gnn
+    num_elements: 120
+    embedding_dim: 64
+    hidden_channels: 128
+    num_interactions: 3
+    cutoff: 5.0
+    num_radial_basis: 20
+
+  head:
+    name: multi
+    heads:
+      # HOMO energy (intensive → mean pooling)
+      - name: scalar
+        irreps_in: "128x0e"
+        hidden_dim: 64
+        property_name: homo
+        reduction: mean
+
+      # LUMO energy (intensive → mean pooling)
+      - name: scalar
+        irreps_in: "128x0e"
+        hidden_dim: 64
+        property_name: lumo
+        reduction: mean
+
+      # HOMO-LUMO gap (intensive → mean pooling)
+      - name: scalar
+        irreps_in: "128x0e"
+        hidden_dim: 64
+        property_name: gap
+        reduction: mean
+
+      # Dipole moment (uses the specialised DipoleHead)
+      - name: dipole
+        irreps_in: "128x0e"
+        hidden_dim: 64

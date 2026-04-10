@@ -60,7 +60,7 @@ A modular, open-source framework for building, training, and deploying machine-l
 |---|---|---|
 | 🔬 | **Equivariant & invariant backbones** | HyperSpec (E(3)-equivariant) and SchNet-like invariant GNN |
 | 🧱 | **Modular & monolithic models** | Backbone→head pipeline (HyperSpec, InvariantGNN, DeepSet, HyperSet, LucidSet) or self-contained monolithic models for external architectures |
-| 🎯 | **Multiple task heads** | Energy, forces, stress, dipole, direct forces |
+| 🎯 | **Multiple task heads** | Energy, forces, stress, dipole, direct forces, generic scalar, **multi-head** |
 | 🧠 | **Foundation model adapters** | MACE and FairChem (UMA) pre-trained models |
 | 📂 | **Flexible data loading** | XYZ, HDF5, LMDB, ASE trajectory; multi-file merge, directory-based loading, auto-splitting |
 | ⚡ | **Distributed training** | DDP, FSDP, FSDP2 (ModelParallel), DeepSpeed ZeRO (Stages 1/2/3 + CPU offload) |
@@ -176,7 +176,7 @@ pixi install -e cuda-deepspeed  # CUDA + DeepSpeed
 │           ├── data/               #     DataModule, datasets (xyz, hdf5, lmdb, trajectory, concat)
 │           ├── nn/                 #     Neural network components
 │           │   ├── models/         #       Backbones: HyperSpec, InvariantGNN, DeepSet, HyperSet, LucidSet; MonolithicExample
-│           │   ├── heads/          #       Task heads: energy, forces, stress, dipole
+│           │   ├── heads/          #       Task heads: energy, forces, stress, dipole, scalar, multi
 │           │   ├── blocks/         #       Building blocks: embedding, interaction, readout
 │           │   └── primitives/     #       Low-level ops: tensor products, radial basis, norms
 │           ├── adapters/           #     Foundation model wrappers: MACE, FairChem
@@ -855,12 +855,75 @@ Task-specific output heads registered via the head registry. Used with **modular
 | `direct_forces` | Direct force prediction (no autograd) | `head.name: direct_forces` |
 | `stress` | Stress tensor prediction | `head.name: stress` |
 | `dipole` | Dipole moment prediction | `head.name: dipole` |
+| `scalar` | Generic scalar property (any name) | `head.name: scalar` |
+| `multi` | Compose multiple heads | `head.name: multi` |
 
 Override the head:
 
 ```bash
 goal-train model.head.name=stress model.head.compute_stress=true
 ```
+
+### Generic Scalar Head
+
+The `scalar` head predicts any per-structure scalar property. The `property_name` parameter sets the output key (and must match the target key on the graph):
+
+```yaml
+head:
+  name: scalar
+  irreps_in: "128x0e"
+  hidden_dim: 64
+  property_name: band_gap   # ← becomes the key in predictions dict
+  reduction: mean            # "mean" (intensive) or "sum" (extensive)
+```
+
+### Multi-Head — Multiple Properties at Once
+
+The `multi` head composes several sub-heads that share the same backbone features. Each sub-head independently produces its output keys, which are merged into a single dictionary:
+
+```yaml
+model:
+  backbone:
+    name: invariant_gnn
+    hidden_channels: 128
+    # ...
+
+  head:
+    name: multi
+    heads:
+      - name: energy_forces
+        irreps_in: "128x0e"
+        hidden_dim: 64
+      - name: scalar
+        irreps_in: "128x0e"
+        hidden_dim: 64
+        property_name: homo
+        reduction: mean
+      - name: scalar
+        irreps_in: "128x0e"
+        hidden_dim: 64
+        property_name: lumo
+        reduction: mean
+```
+
+Each sub-head has its own readout MLP, so they learn separate representations for each property. The corresponding losses reference the property names:
+
+```yaml
+training:
+  losses:
+    - name: energy
+      weight: 4.0
+    - name: forces
+      weight: 100.0
+    - name: scalar_property
+      property_name: homo
+      weight: 1.0
+    - name: scalar_property
+      property_name: lumo
+      weight: 1.0
+```
+
+See `configs/model/invariant_gnn_qm9.yaml` for a complete QM9 multi-property example.
 
 ---
 
