@@ -35,7 +35,7 @@ dependencies = [
 mace = ["mace-torch>=0.3"]
 fairchem = ["fairchem-core>=1.0"]
 deepspeed = ["deepspeed>=0.14"]
-tune = ["ray[tune]>=2.9", "optuna>=3.0"]
+tune = ["ray[tune]>=2.54.1", "optuna>=3.0"]
 torchmetrics = ["torchmetrics>=1.0"]
 examples = ["h5py>=3.10", "requests>=2.31"]
 dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
