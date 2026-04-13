@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
   "torch>=2.4",
-  "torch-geometric>=2",
+  "torch-geometric>=2.7.0",
   "e3nn>=0.5",
   "lightning>=2.6",
   "hydra-core>=1.3",
