@@ -54,8 +54,10 @@ class LMDBDataset(BaseAtomicDataset):
         forces_key: str = "forces",
         stress_key: str = "stress",
         dtype: torch.dtype = torch.float64,
+        neighbor_list_backend: str = "ase",
     ) -> None:
-        super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype)
+        super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype,
+                         neighbor_list_backend=neighbor_list_backend)
         self.energy_key: str = energy_key
         self.forces_key: str = forces_key
         self.stress_key: str = stress_key
@@ -121,15 +123,27 @@ class LMDBDataset(BaseAtomicDataset):
             edge_index: torch.Tensor | None = _to_tensor(data["edge_index"], dtype=torch.long)
             edge_vectors: torch.Tensor | None = _to_tensor(data.get("edge_vectors"))
             edge_lengths: torch.Tensor | None = _to_tensor(data.get("edge_lengths"))
+            unit_shifts: torch.Tensor | None = (
+                _to_tensor(data["unit_shifts"], dtype=torch.long)
+                if "unit_shifts" in data
+                else None
+            )
         else:
-            from torch_geometric.nn import radius_graph
+            from goal.ml.data.neighbor_list import build_neighbor_list_from_tensors
 
-            edge_index = radius_graph(positions, r=self.cutoff, loop=False)
-            row: torch.Tensor
-            col: torch.Tensor
-            row, col = edge_index
-            edge_vectors = positions[col] - positions[row]
-            edge_lengths = edge_vectors.norm(dim=-1)
+            nl = build_neighbor_list_from_tensors(
+                positions=positions,
+                atomic_numbers=atomic_numbers,
+                cell=cell,
+                pbc=pbc,
+                cutoff=self.cutoff,
+                backend=self.neighbor_list_backend,
+                dtype=self.dtype,
+            )
+            edge_index = nl.edge_index
+            edge_vectors = nl.edge_vectors
+            edge_lengths = nl.edge_lengths
+            unit_shifts = nl.unit_shifts
 
         return AtomicGraph(
             positions=positions,
@@ -139,6 +153,7 @@ class LMDBDataset(BaseAtomicDataset):
             edge_index=edge_index,
             edge_vectors=edge_vectors,
             edge_lengths=edge_lengths,
+            unit_shifts=unit_shifts,
             energy=_to_tensor(data.get(self.energy_key)),
             forces=_to_tensor(data.get(self.forces_key)),
             stress=_to_tensor(data.get(self.stress_key)),

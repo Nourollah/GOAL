@@ -107,11 +107,10 @@ class HookBasedExtractor:
         return hook_fn
 
     def remove(self) -> None:
-        """Remove all registered hooks and clear captured data."""
+        """Remove all registered hooks. Captured data is preserved."""
         for hook in self._hooks:
             hook.remove()
         self._hooks.clear()
-        self.captured.clear()
 
     def extract(self, *args: typing.Any, **kwargs: typing.Any) -> dict[str, torch.Tensor]:
         """Run the model forward pass and return captured features.

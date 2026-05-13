@@ -1,6 +1,6 @@
+import importlib.metadata
 import platform
 
-import pkg_resources
 from lightning.fabric.accelerators import TPUAccelerator
 
 
@@ -12,8 +12,9 @@ def _package_available(package_name: str) -> bool:
     :return: `True` if the package is available. `False` otherwise.
     """
     try:
-        return pkg_resources.require(package_name) is not None
-    except pkg_resources.DistributionNotFound:
+        importlib.metadata.metadata(package_name)
+        return True
+    except importlib.metadata.PackageNotFoundError:
         return False
 
 

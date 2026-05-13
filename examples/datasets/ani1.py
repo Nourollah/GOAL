@@ -18,6 +18,13 @@ import torch
 
 from examples.datasets.base import BenchmarkDataset
 
+try:
+    from torch_geometric.datasets import ANI1
+    from torch_geometric.datasets import ANI1x
+except ImportError:
+    ANI1 = None  # type: ignore[assignment,misc]
+    ANI1x = None  # type: ignore[assignment,misc]
+
 # Hartree → eV
 HARTREE_TO_EV: float = 27.211396
 # Bohr → Ångström
@@ -98,15 +105,15 @@ class ANI1Dataset(BenchmarkDataset):
         from goal.ml.data.graph import AtomicGraph
 
         if self.version == "1x":
-            from torch_geometric.datasets import ANI1x as PyGDataset
-
-            pyg_dataset = PyGDataset(root=str(self.root / "raw"))
+            if ANI1x is None:
+                raise ImportError("torch_geometric is required: pip install torch_geometric")
+            pyg_dataset = ANI1x(root=str(self.root / "raw"))
         else:
-            from torch_geometric.datasets import ANI1 as PyGDataset
+            if ANI1 is None:
+                raise ImportError("torch_geometric is required: pip install torch_geometric")
+            pyg_dataset = ANI1(root=str(self.root / "raw"))
 
-            pyg_dataset = PyGDataset(root=str(self.root / "raw"))
-
-        from torch_geometric.nn import radius_graph
+        from goal.ml.data.neighbor_list import build_neighbor_list_from_tensors
 
         graphs: list[AtomicGraph] = []
         for data in pyg_dataset:
@@ -130,16 +137,26 @@ class ANI1Dataset(BenchmarkDataset):
             if hasattr(data, "force") and data.force is not None:
                 forces_ev = data.force.to(self.dtype) * (HARTREE_TO_EV / BOHR_TO_ANGSTROM)
 
-            edge_index: torch.Tensor = radius_graph(positions, r=self.cutoff, loop=False)
-            row, col = edge_index
-            edge_vecs: torch.Tensor = positions[col] - positions[row]
-            edge_lens: torch.Tensor = edge_vecs.norm(dim=-1)
+            cell = torch.zeros(3, 3, dtype=self.dtype)
+            pbc = torch.zeros(3, dtype=torch.bool)
+            nl = build_neighbor_list_from_tensors(
+                positions=positions,
+                atomic_numbers=atomic_numbers,
+                cell=cell,
+                pbc=pbc,
+                cutoff=self.cutoff,
+                backend="ase",
+                dtype=self.dtype,
+            )
+            edge_index: torch.Tensor = nl.edge_index
+            edge_vecs: torch.Tensor = nl.edge_vectors
+            edge_lens: torch.Tensor = nl.edge_lengths
 
             graph: AtomicGraph = AtomicGraph(
                 positions=positions,
                 atomic_numbers=atomic_numbers,
-                cell=torch.zeros(3, 3, dtype=self.dtype),
-                pbc=torch.zeros(3, dtype=torch.bool),
+                cell=cell,
+                pbc=pbc,
                 edge_index=edge_index,
                 edge_vectors=edge_vecs,
                 edge_lengths=edge_lens,

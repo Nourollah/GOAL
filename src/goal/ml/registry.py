@@ -103,7 +103,7 @@ class Registry:
                     ) from e
                 self._registry[name] = getattr(module, cls_name)
             else:
-                available: list[str] = sorted(list(self._registry) | set(self._lazy))
+                available: list[str] = sorted(set(self._registry) | set(self._lazy))
                 raise KeyError(
                     f"'{name}' not found in {self.name} registry.\n"
                     f"Available: {available}\n"

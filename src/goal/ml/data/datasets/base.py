@@ -25,12 +25,14 @@ class BaseAtomicDataset(Dataset, ABC):
         cutoff: float,
         split: str = "train",
         dtype: torch.dtype = torch.float64,
+        neighbor_list_backend: str = "ase",
     ) -> None:
         super().__init__()
         self.root: Path = Path(root)
         self.cutoff: float = cutoff
         self.split: str = split
         self.dtype: torch.dtype = dtype
+        self.neighbor_list_backend: str = neighbor_list_backend
 
     @abstractmethod
     def __len__(self) -> int: ...

@@ -9,7 +9,11 @@ from typing import Any, Dict, Optional
 import pytest
 import torch
 from packaging.version import Version
-from pkg_resources import get_distribution
+import importlib.metadata
+
+
+def get_distribution(name: str) -> importlib.metadata.Distribution:
+    return importlib.metadata.distribution(name)
 from pytest import MarkDecorator
 
 from tests.helpers.package_available import (

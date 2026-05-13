@@ -18,6 +18,11 @@ import torch
 
 from examples.datasets.base import BenchmarkDataset
 
+try:
+    from torch_geometric.datasets import QM9 as PyGQM9
+except ImportError:
+    PyGQM9 = None  # type: ignore[assignment,misc]
+
 # QM9 target properties — all 19 properties in the dataset
 QM9_TARGETS: dict[int, str] = {
     0: "mu",  # Dipole moment [D]
@@ -111,8 +116,10 @@ class QM9Dataset(BenchmarkDataset):
 
     def _download_and_process(self) -> list[typing.Any]:
         """Download via PyG and convert to AtomicGraph list."""
-        from torch_geometric.datasets import QM9 as PyGQM9
-        from torch_geometric.nn import radius_graph
+        if PyGQM9 is None:
+            raise ImportError("torch_geometric is required: pip install torch_geometric")
+
+        from goal.ml.data.neighbor_list import build_neighbor_list_from_tensors
 
         from goal.ml.data.graph import AtomicGraph
 
@@ -124,10 +131,20 @@ class QM9Dataset(BenchmarkDataset):
             atomic_numbers: torch.Tensor = data.z.long()
 
             # Build graph
-            edge_index: torch.Tensor = radius_graph(positions, r=self.cutoff, loop=False)
-            row, col = edge_index
-            edge_vecs: torch.Tensor = positions[col] - positions[row]
-            edge_lens: torch.Tensor = edge_vecs.norm(dim=-1)
+            cell = torch.zeros(3, 3, dtype=self.dtype)
+            pbc = torch.zeros(3, dtype=torch.bool)
+            nl = build_neighbor_list_from_tensors(
+                positions=positions,
+                atomic_numbers=atomic_numbers,
+                cell=cell,
+                pbc=pbc,
+                cutoff=self.cutoff,
+                backend="ase",
+                dtype=self.dtype,
+            )
+            edge_index: torch.Tensor = nl.edge_index
+            edge_vecs: torch.Tensor = nl.edge_vectors
+            edge_lens: torch.Tensor = nl.edge_lengths
 
             # Target property/properties
             energy: torch.Tensor | None = None
@@ -138,15 +155,17 @@ class QM9Dataset(BenchmarkDataset):
                 energy = data.y[:, self.target_idx : self.target_idx + 1].to(self.dtype)
             else:
                 # Multi-property mode — store each property under its own key
-                # so MultiHead + ScalarPropertyLoss can consume them by name
+                # so MultiHead + ScalarPropertyLoss can consume them by name.
+                # Also store u0 as energy so graph.energy is always accessible.
                 for idx, prop_name in QM9_TARGETS.items():
                     extra_props[prop_name] = data.y[:, idx : idx + 1].to(self.dtype).squeeze(0)
+                energy = extra_props.get("u0", None)
 
             graph: AtomicGraph = AtomicGraph(
                 positions=positions,
                 atomic_numbers=atomic_numbers,
-                cell=torch.zeros(3, 3, dtype=self.dtype),
-                pbc=torch.zeros(3, dtype=torch.bool),
+                cell=cell,
+                pbc=pbc,
                 edge_index=edge_index,
                 edge_vectors=edge_vecs,
                 edge_lengths=edge_lens,

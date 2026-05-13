@@ -34,12 +34,14 @@ dependencies = [
 [project.optional-dependencies]
 mace = ["mace-torch>=0.3"]
 fairchem = ["fairchem-core>=1.0"]
+matscipy = ["matscipy"]
+nvalchemiops = ["nvalchemi-toolkit-ops[torch]"]
 deepspeed = ["deepspeed>=0.14"]
 tune = ["ray[tune]>=2.9", "optuna>=3.0"]
 torchmetrics = ["torchmetrics>=1.0"]
 examples = ["h5py>=3.10", "requests>=2.31"]
 dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
-all = ["goal[mace,fairchem,deepspeed,tune,torchmetrics,examples]"]
+all = ["goal[mace,fairchem,matscipy,nvalchemiops,deepspeed,tune,torchmetrics,examples]"]
 
 [project.urls]
 Repository = "https://github.com/Nourollah/MC-GLOW"
@@ -125,10 +127,11 @@ pytest-cov = "*"
 # --- Optional adapter features ---
 # Some optional deps have Python version or e3nn version conflicts with
 # the core environment.  They are available as pip extras — install via:
-#   pip install -e ".[mace]"       # MACE adapter (pins e3nn==0.4.4)
-#   pip install -e ".[fairchem]"   # FairChem adapter
-#   pip install -e ".[tune]"       # Ray Tune + Optuna (needs Python ≤3.13)
-#   pip install -e ".[all]"        # everything
+#   pip install -e ".[mace]"           # MACE adapter (pins e3nn==0.4.4)
+#   pip install -e ".[fairchem]"       # FairChem adapter
+#   pip install -e ".[nvalchemiops]"   # NVIDIA GPU neighbour list (CUDA-only)
+#   pip install -e ".[tune]"           # Ray Tune + Optuna (needs Python ≤3.13)
+#   pip install -e ".[all]"            # everything
 #
 # Pixi features are provided where compatible.  Features that cannot be
 # resolved in the pixi environment (e3nn conflict, missing cp314 wheels)
@@ -142,6 +145,12 @@ fairchem-core = ">=1.0"
 
 [tool.pixi.feature.deepspeed.pypi-dependencies]
 deepspeed = ">=0.14"
+
+# nvalchemi-toolkit-ops: GPU-accelerated neighbour lists (CUDA-only).
+# Requires the cuda pixi feature.  No cp314 wheels on PyPI yet — check
+# https://github.com/nvidia/nvalchemi-toolkit-ops for availability.
+# [tool.pixi.feature.nvalchemiops.pypi-dependencies]
+# nvalchemi-toolkit-ops = { version = "*", extras = ["torch"] }   # no cp314 wheels yet
 
 # [tool.pixi.feature.tune.pypi-dependencies]
 # ray = { version = ">=2.9", extras = ["tune"] }  # no cp314 wheels yet
@@ -162,6 +171,7 @@ examples = ["cuda", "examples"]
 # mace = ["cuda", "mace"]          # pip install -e ".[mace]" instead
 # tune = ["cpu", "tune"]            # pip install -e ".[tune]" instead
 # cuda-tune = ["cuda", "tune"]
+# cuda-nvalchemiops = ["cuda", "nvalchemiops"]  # uncomment when cp314 wheels land
 
 # --- Tasks ---
 

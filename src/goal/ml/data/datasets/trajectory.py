@@ -49,8 +49,10 @@ class TrajectoryDataset(BaseAtomicDataset):
         energy_key: str = "energy",
         forces_key: str = "forces",
         dtype: torch.dtype = torch.float64,
+        neighbor_list_backend: str = "ase",
     ) -> None:
-        super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype)
+        super().__init__(root=root, cutoff=cutoff, split=split, dtype=dtype,
+                         neighbor_list_backend=neighbor_list_backend)
         self.energy_key: str = energy_key
         self.forces_key: str = forces_key
         self._graphs: list[AtomicGraph] = []
@@ -100,6 +102,7 @@ class TrajectoryDataset(BaseAtomicDataset):
                 forces=forces,
                 stress=stress,
                 dtype=self.dtype,
+                neighbor_list_backend=self.neighbor_list_backend,
             )
             self._graphs.append(graph)
 

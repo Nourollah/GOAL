@@ -33,8 +33,10 @@ class EMAWrapper:
         decay: float = 0.999,
     ) -> None:
         self.decay: float = decay
-        self._shadow: list[torch.Tensor] = [p.clone().detach() for p in parameters]
-        self._parameters: list[nn.Parameter] = list(parameters)
+        # Consume the iterator once; iterating it twice would yield nothing the second time.
+        params: list[nn.Parameter] = list(parameters)
+        self._shadow: list[torch.Tensor] = [p.clone().detach() for p in params]
+        self._parameters: list[nn.Parameter] = params
 
     @torch.no_grad()
     def update(self) -> None:

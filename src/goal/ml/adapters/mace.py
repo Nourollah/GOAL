@@ -126,12 +126,20 @@ class MACEAdapter:
 
     def _to_mace_batch(self, graph: AtomicGraph) -> dict[str, typing.Any]:
         """Convert GOAL AtomicGraph to MACE's expected input format."""
+        unit_shifts = graph.unit_shifts
+        if unit_shifts is None:
+            unit_shifts = torch.zeros(
+                graph.edge_index.shape[1],
+                3,
+                dtype=torch.long,
+                device=graph.positions.device,
+            )
         return {
             "positions": graph.positions,
             "node_attrs": graph.atomic_numbers,
             "edge_index": graph.edge_index,
             "shifts": graph.edge_vectors,
-            "unit_shifts": torch.zeros_like(graph.edge_vectors),
+            "unit_shifts": unit_shifts,
             "cell": graph.cell,
             "batch": graph.batch,
             "ptr": graph.ptr,

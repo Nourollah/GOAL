@@ -39,6 +39,8 @@ class AtomicGraph(Data):
         edge_index: torch.Tensor,  # (2, E) int64
         edge_vectors: torch.Tensor,  # (E, 3) float64, r_j - r_i
         edge_lengths: torch.Tensor,  # (E,)   float64
+        # PBC shifts — integer cell-shift vectors per edge (needed by MACE/MLIPs)
+        unit_shifts: torch.Tensor | None = None,  # (E, 3) int64
         # Training targets — optional, None for inference
         energy: torch.Tensor | None = None,  # (1,)   float64
         forces: torch.Tensor | None = None,  # (N, 3) float64
@@ -51,11 +53,12 @@ class AtomicGraph(Data):
         super().__init__(
             pos=positions,
             z=atomic_numbers,
-            cell=cell.unsqueeze(0),  # PyG expects (1, 3, 3) for cell
+            cell=cell.unsqueeze(0) if cell is not None else None,  # PyG expects (1, 3, 3) for cell
             pbc=pbc,
             edge_index=edge_index,
             edge_attr=edge_vectors,
             edge_weight=edge_lengths,
+            unit_shifts=unit_shifts,
             energy=energy,
             forces=forces,
             stress=stress,
@@ -89,6 +92,21 @@ class AtomicGraph(Data):
         return self.edge_weight
 
     @property
+    def energy(self) -> torch.Tensor | None:
+        """Potential energy (1,) float64, or None for inference structures."""
+        return self.get("energy", None)
+
+    @property
+    def forces(self) -> torch.Tensor | None:
+        """Atomic forces (N, 3) float64, or None."""
+        return self.get("forces", None)
+
+    @property
+    def stress(self) -> torch.Tensor | None:
+        """Stress tensor (3, 3) float64, or None."""
+        return self.get("stress", None)
+
+    @property
     def num_atoms(self) -> int:
         """Total number of atoms in this graph (or batch of graphs)."""
         return self.pos.shape[0]
@@ -108,41 +126,41 @@ class AtomicGraph(Data):
         weight: float = 1.0,
         head: str | None = None,
         dtype: torch.dtype = torch.float64,
+        neighbor_list_backend: str = "ase",
     ) -> AtomicGraph:
         """Convert ASE ``Atoms`` to ``AtomicGraph``.
 
         This is the *only* place ASE appears in the entire framework.
         Called once per structure during dataset preprocessing.
+
+        Parameters
+        ----------
+        neighbor_list_backend : str
+            Neighbour-list backend — ``"ase"`` (default, correct PBC),
+            ``"matscipy"`` (faster, optional dep), or ``"radius_graph"``
+            (legacy, no PBC support).  See
+            :mod:`goal.ml.data.neighbor_list` for details.
         """
         import numpy as np
-        from torch_geometric.nn import radius_graph
+
+        from goal.ml.data.neighbor_list import build_neighbor_list
 
         positions: torch.Tensor = torch.tensor(atoms.positions, dtype=dtype)
         atomic_numbers: torch.Tensor = torch.tensor(atoms.numbers, dtype=torch.long)
         cell: torch.Tensor = torch.tensor(np.array(atoms.cell), dtype=dtype)
         pbc_tensor: torch.Tensor = torch.tensor(atoms.pbc, dtype=torch.bool)
 
-        # Build neighbour list — pure PyTorch, works on GPU
-        edge_index: torch.Tensor = radius_graph(positions, r=cutoff, loop=False)
-        row: torch.Tensor
-        col: torch.Tensor
-        row, col = edge_index
-        edge_vecs: torch.Tensor = positions[col] - positions[row]
-
-        # Apply minimum image convention for PBC
-        if pbc_tensor.any():
-            edge_vecs = _apply_mic(edge_vecs, cell, pbc_tensor)
-
-        edge_lens: torch.Tensor = edge_vecs.norm(dim=-1)
+        nl = build_neighbor_list(atoms, cutoff, backend=neighbor_list_backend, dtype=dtype)
 
         return cls(
             positions=positions,
             atomic_numbers=atomic_numbers,
             cell=cell,
             pbc=pbc_tensor,
-            edge_index=edge_index,
-            edge_vectors=edge_vecs,
-            edge_lengths=edge_lens,
+            edge_index=nl.edge_index,
+            edge_vectors=nl.edge_vectors,
+            edge_lengths=nl.edge_lengths,
+            unit_shifts=nl.unit_shifts,
             energy=(torch.tensor([energy], dtype=dtype) if energy is not None else None),
             forces=(torch.tensor(forces, dtype=dtype) if forces is not None else None),
             stress=(torch.tensor(stress, dtype=dtype) if stress is not None else None),
@@ -151,36 +169,41 @@ class AtomicGraph(Data):
         )
 
     @classmethod
-    def from_dict(cls, d: dict[str, typing.Any], cutoff: float) -> AtomicGraph:
+    def from_dict(
+        cls,
+        d: dict[str, typing.Any],
+        cutoff: float,
+        neighbor_list_backend: str = "ase",
+    ) -> AtomicGraph:
         """Build from raw dict — used in adapters to translate
         MACE / fairchem dict conventions into ``AtomicGraph``.
         """
+        from goal.ml.data.neighbor_list import build_neighbor_list_from_tensors
+
         positions: torch.Tensor = d["positions"]
         atomic_numbers: torch.Tensor = d["atomic_numbers"]
         cell: torch.Tensor = d.get("cell", torch.zeros(3, 3, dtype=positions.dtype))
         pbc: torch.Tensor = d.get("pbc", torch.zeros(3, dtype=torch.bool))
 
-        from torch_geometric.nn import radius_graph
-
-        edge_index: torch.Tensor = radius_graph(positions, r=cutoff, loop=False)
-        row: torch.Tensor
-        col: torch.Tensor
-        row, col = edge_index
-        edge_vecs: torch.Tensor = positions[col] - positions[row]
-
-        if pbc.any():
-            edge_vecs = _apply_mic(edge_vecs, cell, pbc)
-
-        edge_lens: torch.Tensor = edge_vecs.norm(dim=-1)
+        nl = build_neighbor_list_from_tensors(
+            positions=positions,
+            atomic_numbers=atomic_numbers,
+            cell=cell,
+            pbc=pbc,
+            cutoff=cutoff,
+            backend=neighbor_list_backend,
+            dtype=positions.dtype,
+        )
 
         return cls(
             positions=positions,
             atomic_numbers=atomic_numbers,
             cell=cell,
             pbc=pbc,
-            edge_index=edge_index,
-            edge_vectors=edge_vecs,
-            edge_lengths=edge_lens,
+            edge_index=nl.edge_index,
+            edge_vectors=nl.edge_vectors,
+            edge_lengths=nl.edge_lengths,
+            unit_shifts=nl.unit_shifts,
             energy=d.get("energy"),
             forces=d.get("forces"),
             stress=d.get("stress"),
