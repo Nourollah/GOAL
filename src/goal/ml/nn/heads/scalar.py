@@ -84,7 +84,10 @@ class ScalarHead(nn.Module):
         )
 
         value: torch.Tensor = scatter(
-            node_contrib, batch, dim=0, reduce=self.reduction,
+            node_contrib,
+            batch,
+            dim=0,
+            reduce=self.reduction,
         )  # (B,)
 
         return {self.property_name: value}

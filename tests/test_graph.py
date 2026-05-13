@@ -168,9 +168,7 @@ class TestPeriodicNeighborList:
         assert graph.edge_index.shape[1] > 0, "No edges found in periodic structure"
 
         # All reported edge lengths must respect the cutoff
-        assert (graph.edge_lengths <= cutoff + 1e-6).all(), (
-            "Some edge lengths exceed the cutoff"
-        )
+        assert (graph.edge_lengths <= cutoff + 1e-6).all(), "Some edge lengths exceed the cutoff"
 
         # The cross-boundary pair must be present in both directions
         src, dst = graph.edge_index
@@ -250,18 +248,17 @@ class TestNvalchemiopsBackend:
             pbc=True,
         )
         cutoff = 4.0
-        graph = AtomicGraph.from_ase(
-            atoms, cutoff=cutoff, neighbor_list_backend="nvalchemiops"
-        )
+        graph = AtomicGraph.from_ase(atoms, cutoff=cutoff, neighbor_list_backend="nvalchemiops")
 
         assert graph.edge_index.shape[1] > 0, "No edges found"
         assert (graph.edge_lengths <= cutoff + 1e-6).all(), "Edge exceeds cutoff"
 
         src, dst = graph.edge_index
         pairs = set(zip(src.tolist(), dst.tolist()))
-        assert (0, 1) in pairs or (1, 0) in pairs, (
-            "Cross-boundary pair (MIC distance 0.3 Å) not found by nvalchemiops backend"
-        )
+        assert (0, 1) in pairs or (
+            1,
+            0,
+        ) in pairs, "Cross-boundary pair (MIC distance 0.3 Å) not found by nvalchemiops backend"
 
     def test_unit_shifts_stored_gpu(self):
         """unit_shifts must have shape (E, 3) and dtype torch.long."""
@@ -275,9 +272,7 @@ class TestNvalchemiopsBackend:
             cell=[[3.0, 0, 0], [0, 3.0, 0], [0, 0, 3.0]],
             pbc=True,
         )
-        graph = AtomicGraph.from_ase(
-            atoms, cutoff=2.5, neighbor_list_backend="nvalchemiops"
-        )
+        graph = AtomicGraph.from_ase(atoms, cutoff=2.5, neighbor_list_backend="nvalchemiops")
 
         assert graph.unit_shifts is not None
         assert graph.unit_shifts.shape == (graph.edge_index.shape[1], 3)
@@ -307,9 +302,9 @@ class TestNvalchemiopsBackend:
         # Sorted lengths must agree within float32 precision
         ase_lengths = nl_ase.edge_lengths.sort().values
         gpu_lengths = nl_gpu.edge_lengths.sort().values
-        assert torch.allclose(ase_lengths.float(), gpu_lengths.float(), atol=1e-4), (
-            "Edge lengths differ between ASE and nvalchemiops backends"
-        )
+        assert torch.allclose(
+            ase_lengths.float(), gpu_lengths.float(), atol=1e-4
+        ), "Edge lengths differ between ASE and nvalchemiops backends"
 
     def test_no_pbc_non_periodic(self):
         """nvalchemiops backend must work for non-periodic (molecule) systems."""

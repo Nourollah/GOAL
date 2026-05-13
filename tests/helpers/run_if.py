@@ -3,17 +3,19 @@
 https://github.com/PyTorchLightning/pytorch-lightning/blob/master/tests/helpers/runif.py
 """
 
+import importlib.metadata
 import sys
 from typing import Any, Dict, Optional
 
 import pytest
 import torch
 from packaging.version import Version
-import importlib.metadata
 
 
 def get_distribution(name: str) -> importlib.metadata.Distribution:
     return importlib.metadata.distribution(name)
+
+
 from pytest import MarkDecorator
 
 from tests.helpers.package_available import (

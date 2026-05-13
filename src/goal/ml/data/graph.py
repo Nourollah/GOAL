@@ -139,7 +139,7 @@ class AtomicGraph(Data):
             Neighbour-list backend — ``"ase"`` (default, correct PBC),
             ``"matscipy"`` (faster, optional dep), or ``"radius_graph"``
             (legacy, no PBC support).  See
-            :mod:`goal.ml.data.neighbor_list` for details.
+            ``goal.ml.data.neighbor_list`` for details.
         """
         import numpy as np
 

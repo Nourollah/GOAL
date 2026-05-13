@@ -119,9 +119,8 @@ class QM9Dataset(BenchmarkDataset):
         if PyGQM9 is None:
             raise ImportError("torch_geometric is required: pip install torch_geometric")
 
-        from goal.ml.data.neighbor_list import build_neighbor_list_from_tensors
-
         from goal.ml.data.graph import AtomicGraph
+        from goal.ml.data.neighbor_list import build_neighbor_list_from_tensors
 
         pyg_dataset = PyGQM9(root=str(self.root / "raw"))
 

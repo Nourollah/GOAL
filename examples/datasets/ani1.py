@@ -19,8 +19,7 @@ import torch
 from examples.datasets.base import BenchmarkDataset
 
 try:
-    from torch_geometric.datasets import ANI1
-    from torch_geometric.datasets import ANI1x
+    from torch_geometric.datasets import ANI1, ANI1x
 except ImportError:
     ANI1 = None  # type: ignore[assignment,misc]
     ANI1x = None  # type: ignore[assignment,misc]

@@ -27,7 +27,7 @@ class RadiusGraphTransform:
     backend : str
         Neighbour-list backend.  ``"ase"`` (default, correct PBC),
         ``"matscipy"`` (faster, optional dep), or ``"radius_graph"``
-        (legacy, no PBC).  See :mod:`goal.ml.data.neighbor_list`.
+        (legacy, no PBC).  See ``goal.ml.data.neighbor_list``.
     """
 
     def __init__(self, cutoff: float, backend: str = "ase") -> None:

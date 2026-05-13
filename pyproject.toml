@@ -28,7 +28,7 @@ dependencies = [
   "rich>=13",
   "rootutils",
   "hydra-colorlog",
-  "lmdb",
+  "lmdb", "pytest>=9.0.3,<10",
 ]
 
 [project.optional-dependencies]

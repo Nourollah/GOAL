@@ -1,15 +1,15 @@
 """Backend-agnostic neighbour-list construction for periodic and non-periodic systems.
 
-Provides a single entry point :func:`build_neighbor_list` that dispatches to
+Provides a single entry point ``build_neighbor_list`` that dispatches to
 one of several implementations:
 
-* ``"ase"``            — :func:`ase.neighborlist.neighbor_list` (default).
+* ``"ase"``            — ``ase.neighborlist.neighbor_list`` (default).
                          Correct PBC via minimum-image convention, zero extra
                          dependencies (ASE is already a core GOAL dependency).
-* ``"matscipy"``       — :func:`matscipy.neighbours.neighbour_list`.
+* ``"matscipy"``       — ``matscipy.neighbours.neighbour_list``.
                          10–100× faster than ASE for large cells; optional dep.
                          Falls back to ``"ase"`` with a warning if not installed.
-* ``"nvalchemiops"``   — :func:`nvalchemiops.torch.neighbors.neighbor_list`.
+* ``"nvalchemiops"``   — ``nvalchemiops.torch.neighbors.neighbor_list``.
                          GPU-accelerated O(N) cell-list kernels via NVIDIA Warp.
                          Requires CUDA and ``nvalchemi-toolkit-ops[torch]``.
                          Falls back to ``"ase"`` if CUDA is unavailable or the
@@ -123,8 +123,8 @@ def build_neighbor_list_from_tensors(
 ) -> NeighborListResult:
     """Build a neighbour list from raw tensors (no pre-existing ``Atoms``).
 
-    Constructs a temporary :class:`ase.Atoms` object from the supplied
-    tensors and delegates to :func:`build_neighbor_list`.
+    Constructs a temporary ``ase.Atoms`` object from the supplied
+    tensors and delegates to ``build_neighbor_list``.
 
     Parameters
     ----------
@@ -139,7 +139,7 @@ def build_neighbor_list_from_tensors(
     cutoff : float
         Neighbour cutoff radius in Ångströms.
     backend : str
-        Neighbour-list backend (see :func:`build_neighbor_list`).
+        Neighbour-list backend (see ``build_neighbor_list``).
     dtype : torch.dtype
         Floating-point dtype for returned tensors.
 
@@ -174,10 +174,12 @@ def _ase_neighbor_list(
 
     i, j, d, D, S = ase_nl("ijdDS", atoms, cutoff)
 
-    edge_index = torch.stack([
-        torch.tensor(i, dtype=torch.long),
-        torch.tensor(j, dtype=torch.long),
-    ])
+    edge_index = torch.stack(
+        [
+            torch.tensor(i, dtype=torch.long),
+            torch.tensor(j, dtype=torch.long),
+        ]
+    )
     edge_vectors = torch.tensor(D, dtype=dtype)
     edge_lengths = torch.tensor(d, dtype=dtype)
     unit_shifts = torch.tensor(S, dtype=torch.long)
@@ -208,10 +210,12 @@ def _matscipy_neighbor_list(
 
     i, j, d, D, S = msc_nl("ijdDS", atoms, cutoff)
 
-    edge_index = torch.stack([
-        torch.tensor(i, dtype=torch.long),
-        torch.tensor(j, dtype=torch.long),
-    ])
+    edge_index = torch.stack(
+        [
+            torch.tensor(i, dtype=torch.long),
+            torch.tensor(j, dtype=torch.long),
+        ]
+    )
     edge_vectors = torch.tensor(D, dtype=dtype)
     edge_lengths = torch.tensor(d, dtype=dtype)
     unit_shifts = torch.tensor(S, dtype=torch.long)
@@ -234,7 +238,7 @@ def _nvalchemiops_neighbor_list(
     Requires ``nvalchemi-toolkit-ops[torch]`` and a CUDA-capable GPU.
     Falls back to the ASE backend with a warning when either is absent.
 
-    The high-level :func:`nvalchemiops.torch.neighbors.neighbor_list` entry
+    The high-level ``nvalchemiops.torch.neighbors.neighbor_list`` entry
     point is used with ``return_neighbor_list=True`` to get COO-format output
     directly compatible with GOAL's ``edge_index`` convention.
     """
@@ -276,7 +280,7 @@ def _nvalchemiops_neighbor_list(
             pbc=pbc_cuda,
             return_neighbor_list=True,
         )
-        # nl_out: (2, E) int32 COO  →  int64 on CPU
+        # nl_out: (2, E) int32 COOP  →  int64 on CPU
         edge_index = nl_out.to(torch.long).cpu()
         # shifts_out: (E, 3) int32  →  int64 on CPU
         unit_shifts = shifts_out.to(torch.long).cpu()
@@ -296,10 +300,7 @@ def _nvalchemiops_neighbor_list(
     positions_cpu = torch.tensor(atoms.positions, dtype=dtype)
     cell_cpu = torch.tensor(cell_np, dtype=dtype)
     row, col = edge_index
-    edge_vectors = (
-        positions_cpu[col] - positions_cpu[row]
-        + unit_shifts.to(dtype) @ cell_cpu
-    )
+    edge_vectors = positions_cpu[col] - positions_cpu[row] + unit_shifts.to(dtype) @ cell_cpu
     edge_lengths = edge_vectors.norm(dim=-1)
 
     return NeighborListResult(
