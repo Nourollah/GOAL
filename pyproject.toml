@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mace = ["mace-torch>=0.3"]
+mace = ["mace-torch>=0.3.16"]
 fairchem = ["fairchem-core>=1.0"]
 matscipy = ["matscipy"]
 nvalchemiops = ["nvalchemi-toolkit-ops[torch]"]
