@@ -107,7 +107,7 @@ class LangevinASEBuilder(DynamicsBuilder):
     def build(
         self,
         atoms: Atoms,
-        timestep: float = 1.0 * units.fs,
+        timestep: float = 1.0,
         temperature_K: float = 300.0,
         friction: float = 0.5,
         fixcm: bool = True,
@@ -137,9 +137,9 @@ class LangevinASEBuilder(DynamicsBuilder):
         """
         dyn = Langevin(
             atoms,
-            timestep=timestep,
+            timestep=timestep * units.fs,
             temperature_K=temperature_K,
-            friction=friction,
+            friction=friction / units.fs,
             fixcm=fixcm,
             **kwargs,
         )

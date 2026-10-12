@@ -2,7 +2,7 @@
 defaults:
   - molecule: ethanol
   - calculator: goal_model
-  - dynamics: langevin
+  - dynamics: langevin_ase
 
 # MD simulation parameters
 steps: 1000

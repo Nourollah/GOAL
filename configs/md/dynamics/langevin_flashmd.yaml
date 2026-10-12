@@ -1,4 +1,4 @@
-# Langevin NVT thermostat
+# Langevin FlashMD NVT thermostat
 
 # Hydra instantiation metadata. These are commented out because this
 # example uses GOAL's DynamicsFactory directly rather than
@@ -6,8 +6,9 @@
 #  _target_: goal.md.core.md_factory.DynamicsFactory.create
 #  _convert_: none
 
-method: langevin_ase
-timestep_fs: 1.0 # fs
+method: langevin_flashmd
+timestep: 16 # fs
 temperature_K: 300.0
-friction: 0.5
-fixcm: true
+time_constant: 100.0
+model_name: pet-omatpes-v2
+device: null

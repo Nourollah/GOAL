@@ -1,0 +1,13 @@
+# Langevin ASE NVT thermostat
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's DynamicsFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.md_factory.DynamicsFactory.create
+#  _convert_: none
+
+method: langevin_ase
+timestep: 1.0 # fs
+temperature_K: 300.0
+friction: 0.5
+fixcm: true
