@@ -1,0 +1,11 @@
+# Use pretrained FlashMD model
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
+key: flashmd
+model_name: pet-omatpes-v2
+device: null # auto-detect

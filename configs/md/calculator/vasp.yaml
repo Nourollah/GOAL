@@ -2,8 +2,13 @@
 # Set $VASP_PP_PATH (or pp_path) to the POTCAR root and $ASE_VASP_COMMAND
 # (or command) to the launch string. Degrades gracefully (GOALCalculatorNotFound)
 # when VASP/POTCARs are absent.
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
 key: vasp
 
 command: null            # null -> $ASE_VASP_COMMAND

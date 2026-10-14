@@ -28,7 +28,7 @@ If CP2K cannot be imported/found you get a clear
 
 ## Configuration
 
-`configs/md/calculators/cp2k.yaml`:
+`configs/md/calculator/cp2k.yaml`:
 
 ```yaml
 _target_: goal.md.core.calculator_factory.CalculatorFactory.create
@@ -122,7 +122,7 @@ What changes vs GPW:
   recognised by SIRIUS.
 
 Requires a **SIRIUS-enabled** CP2K build (`cp2k --version` lists `sirius`). The
-official `cp2k/cp2k` container qualifies. Config: `configs/md/calculators/cp2k_pw.yaml`.
+official `cp2k/cp2k` container qualifies. Config: `configs/md/calculator/cp2k_pw.yaml`.
 
 ### Dispersion (DFT-D3(BJ)) — `dispersion="d3bj"`
 

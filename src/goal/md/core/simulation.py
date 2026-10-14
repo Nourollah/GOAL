@@ -16,7 +16,7 @@ Usage patterns
 
     atoms = MoleculeFactory.create("from_smiles", smiles="CCO")
     calc  = CalculatorFactory.create("goal_model", checkpoint="model.ckpt")
-    sim   = Simulation(atoms, calc, steps=5000, temperature_K=300.0)
+    sim   = Simulation(atoms, calc, dynamics_method="langevin_ase", steps=5000, temperature_K=300.0, friction=1.0)
     result = sim.run()
 
 **Config-first (Hydra)**::
@@ -25,11 +25,12 @@ Usage patterns
     from goal.md.core.simulation import simulate_from_config
 
     with initialize_config_dir(config_dir="configs/"):
-        cfg = compose("md/simulations/langevin_with_model")
+        cfg = compose("md/langevin_with_model_sim")
     result = simulate_from_config(cfg)
 """
 
 from __future__ import annotations
+import warnings
 
 import dataclasses
 import typing
@@ -43,20 +44,18 @@ from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from goal.md.core.observers import setup_observers
 from goal.md.core.runner import RunResult, run_dynamics
 
+from goal.md.core import ASE_DYNAMICS_PARAMS, FLASHMD_DYNAMICS_PARAMS
+
+SUPPORTED_DYNAMICS_PARAMS = {
+	"langevin_ase": ASE_DYNAMICS_PARAMS,
+	"langevin_flashmd": FLASHMD_DYNAMICS_PARAMS
+}
 
 @dataclasses.dataclass
 class SimulationConfig:
-    """Flat configuration for a single MD run.
-
-    All time-related parameters use ASE/physical units:
-    - temperature in Kelvin
-    - timestep in femtoseconds
-    """
+    """Flat configuration for a single MD run."""
 
     steps: int = 1000
-    temperature_K: float = 300.0
-    timestep_fs: float = 1.0
-    friction: float = 0.5
     chunk_size: int = 100
     restart_thermostat: bool = False
     log_interval: int = 10
@@ -70,20 +69,25 @@ class SimulationConfig:
 class Simulation:
     """A complete MD simulation: molecule + calculator + dynamics + observers.
 
+    All time-related parameters use ASE/physical units:
+    - temperature in Kelvin
+    - timestep in femtoseconds
+    - time constant in femtoseconds
+
     Parameters
     ----------
     atoms : ase.Atoms
         The molecular system to simulate.
     calculator : ase.calculators.calculator.Calculator
         Force/energy calculator.
+    dynamics_method : str
+        The dynamics method to be used for the simulation ("langevin_ase" or "langevin_flashmd")
+    dynamics_cfg : dict
+        The configuration parameters used to create a dynamics object.
     steps : int
         Number of MD steps.
     temperature_K : float
         Target temperature in Kelvin.
-    timestep_fs : float
-        Integration timestep in femtoseconds.
-    friction : float
-        Langevin friction coefficient (1/fs).
     chunk_size : int
         Steps per ``dynamics.run()`` call (for progress and restarts).
     restart_thermostat : bool
@@ -101,16 +105,30 @@ class Simulation:
         Show Rich progress bar during ``run()``.
     initialise_velocities : bool
         Draw initial velocities from Maxwell–Boltzmann before running.
+    timestep : float
+        Integration timestep in femtoseconds.
+    fixcm : bool
+        Fix Centre of Mass. Passed to `DynamicsFactory.create`.
+    friction : float
+        Langevin friction coefficient (1/fs) - for 'langevin_ase' dynamics method.
+    time_constant: float
+        Thermostat time constant in fs - for 'langevin_flashmd' dynamics method.
+    model_name : str
+        FlashMD model name - for 'langevin_flashmd' dynamics method.
+    device : str
+        Torch device ("cuda" or "cpu") - for 'langevin_flashmd' dynamics method.
+    **kwargs:
+        Additional arguments for building the dynamics object
     """
 
     def __init__(
         self,
         atoms: Atoms,
         calculator: Calculator,
+        dynamics_method: str | None = None,
+        dynamics_cfg: dict = dict(),
         steps: int = 1000,
         temperature_K: float = 300.0,
-        timestep_fs: float = 1.0,
-        friction: float = 0.5,
         chunk_size: int = 100,
         restart_thermostat: bool = False,
         log_interval: int = 10,
@@ -119,26 +137,57 @@ class Simulation:
         output_dir: str = "outputs/md",
         show_progress: bool = True,
         initialise_velocities: bool = True,
+        timestep: float | None = None,
+        fixcm: bool | None = None,
+        friction: float | None = None,
+        time_constant: float | None = None,
+        model_name: str | None = None,
+        device: str | None = None,
+        **kwargs: typing.Any
     ) -> None:
         self.atoms = atoms
         self.atoms.calc = calculator
         self.calculator = calculator
+        self.dynamics_method = dynamics_method or "langevin_ase" # Set 'langevin_ase' if no value is provided.
+        self.dynamics_cfg = dict(dynamics_cfg) # Create another dictionary instance to keep the original configurations intact.
         self.steps = steps
         self.temperature_K = temperature_K
-        self.timestep_fs = timestep_fs
-        self.friction = friction
         self.chunk_size = chunk_size
         self.restart_thermostat = restart_thermostat
         self.log_interval = log_interval
         self.output_dir = Path(output_dir)
         self.show_progress = show_progress
         self.initialise_velocities = initialise_velocities
+        self.dyn_kwargs = kwargs
 
         self._traj_file = self._resolve_path(trajectory_file)
         self._log_file = self._resolve_path(log_file)
 
-        self._dynamics: Langevin | None = None
+        self._dynamics: Object | None = None
         self._observers: dict[str, typing.Any] = {}
+        
+        assert self.dynamics_method in SUPPORTED_DYNAMICS_PARAMS.keys(), f"`dynamics_method` must be either 'langevin_ase' or 'langevin_flashmd'. Got '{self.dynamics_method}'"
+
+        self.dynamics_cfg |= self.dyn_kwargs
+
+        # Override the dynamics configuration values when they are provided by a library call.
+        overrides = {
+		# Values common for both 'langevin_ase' and 'langevin_flashmd':
+                "timestep": timestep,
+                "fixcm": fixcm,
+                # Values for 'langevin_ase' dynamics method:
+                "friction": friction,
+                # Values for 'langevin_flashmd' dynamics method:
+                "time_constant": time_constant,
+                "model_name": model_name,
+                "device": device
+                }
+
+        for key, value in overrides.items():
+            if value is not None:
+                self.dynamics_cfg[key] = value
+        
+        self._validate_dynamics_params()
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -152,13 +201,16 @@ class Simulation:
             return str(self.output_dir / p)
         return str(p)
 
-    def _build_dynamics(self) -> Langevin:
-        dyn = Langevin(
-            self.atoms,
-            timestep=self.timestep_fs * units.fs,
-            temperature_K=self.temperature_K,
-            friction=self.friction / units.fs,
-        )
+    def _build_dynamics(self) -> Object:
+        from goal.md.core.md_factory import DynamicsFactory
+
+        dyn = DynamicsFactory.create(
+                self.dynamics_method,
+                self.atoms,
+                temperature_K=self.temperature_K,
+                **self.dynamics_cfg
+       )
+        
         return dyn
 
     def _setup(self) -> None:
@@ -181,6 +233,26 @@ class Simulation:
             collect_energies=True,
         )
 
+    def _validate_dynamics_params(self) -> None:
+        """Checks if the input dynamics parameters are supported by the relevant method. Otherwise, raises ValueError"""
+
+        # Change the paramter name 'model', used by `flashmd.ase.langevin.Langevin`, to 'model_name' as it is handled by `goal.md.core.md_factory.DynamicsFactory`.
+        if self.dynamics_method == 'langevin_flashmd' and 'model' in self.dynamics_cfg.keys():
+            self.dynamics_cfg['model_name'] = self.dynamics_cfg.pop('model')
+		
+            warning_msg = f"Use 'model_name' instead of 'model' as `goal.md.core.md_factory.DynamicsFactory` internally handles it. Refer to FlashMD part of `goal.md.core.md_factory.DynamicsFactory` for more information."
+            warnings.warn(warning_msg)
+        
+        supported = SUPPORTED_DYNAMICS_PARAMS[self.dynamics_method]
+        unsupported = set(self.dynamics_cfg.keys()) - supported
+
+        if unsupported:
+            names = ', '.join(sorted(unsupported))
+            raise ValueError(
+                f"Unsupported parameter{'' if len(unsupported) == 1 else 's'} for '{self.dynamics_method!r}': {names}"
+		    )
+
+        
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -224,7 +296,7 @@ class Simulation:
 
         - ``molecule`` — passed to :meth:`MoleculeFactory.create`
         - ``calculator`` — passed to :meth:`CalculatorFactory.create`
-        - ``dynamics`` — mapping with ``type`` key and dynamics parameters
+        - ``dynamics`` — passed to :meth: `DynamicsFactory.create` in `_build_dynamics` method
         - All optional fields of :class:`SimulationConfig`
 
         Parameters
@@ -237,7 +309,6 @@ class Simulation:
         Simulation
         """
         from goal.md.core.calculator_factory import CalculatorFactory
-        from goal.md.core.md_factory import DynamicsFactory
         from goal.md.core.molecule_factory import MoleculeFactory
 
         # Build molecule
@@ -250,12 +321,24 @@ class Simulation:
         calc_key = calc_cfg.pop("type", calc_cfg.pop("key", "goal_model"))
         calculator = CalculatorFactory.create(calc_key, **calc_cfg)
 
+        # Dynamics Parameters
+        dyn_cfg = dict(cfg.get("dynamics", {}))
+        dyn_cfg = dict(dyn_cfg) # To prevent changing the original configuraiton file.
+        temperature_K = dyn_cfg.pop('temperature_K', 300.0)
+        dynamics_method = dyn_cfg.pop('method', 'langevin_ase')
+
         # Simulation parameters
         sim_keys = {f.name for f in dataclasses.fields(SimulationConfig)}
         sim_params = {k: v for k, v in cfg.items() if k in sim_keys}
 
-        return cls(atoms=atoms, calculator=calculator, **sim_params)
-
+        return cls(
+                atoms=atoms,
+                calculator=calculator,
+                dynamics_method=dynamics_method,
+                dynamics_cfg=dyn_cfg,
+                temperature_K=temperature_K,
+                **sim_params
+                   )
 
 def simulate_from_config(cfg: typing.Any) -> RunResult:
     """Hydra-compatible entrypoint: build and run a simulation from config.

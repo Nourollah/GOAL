@@ -1,0 +1,10 @@
+# Example: Load molecule from file
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's MoleculeFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.molecule_factory.MoleculeFactory.create
+#  _convert_: none
+
+method: from_file
+path: ??? # Set via command line

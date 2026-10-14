@@ -6,8 +6,13 @@
 # Requires a SIRIUS-enabled CP2K build; the official `cp2k/cp2k` container is one
 # (drive it with the podman wrapper at $HOME/bin/cp2k_shell — see
 # docs/calculators/cp2k.md).
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
 key: cp2k
 
 method: sirius           # pure plane-wave via SIRIUS  (vs "quickstep" = GPW)

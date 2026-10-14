@@ -1,6 +1,6 @@
 # Complete workflow: ORCA (base) + ML learner
 defaults:
-  - /md/molecules/ethanol
+  - /md/molecule/ethanol
   - /md/mts/base_calculators/orca_reference
   - /md/mts/ml_models/learner
   - /md/mts/dynamics/langevin_mts

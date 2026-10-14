@@ -1,0 +1,15 @@
+# xTB semi-empirical calculator
+# Requires: pip install xtb-python  or  conda install -c conda-forge xtb-python
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
+key: xtb
+method: GFN2-xTB # GFN1-xTB or GFN2-xTB
+charge: 0
+uhf: 0
+accuracy: 1.0
+electronic_temperature: 300.0

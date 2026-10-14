@@ -12,7 +12,7 @@ Override molecule and output directory::
 
 Run a pre-configured MTS simulation::
 
-    goal-simulate --config-name md/simulations/mts_respa
+    goal-simulate --config-name mts/simulations/mts_respa
 
 With a trained goal.ml model::
 
@@ -28,11 +28,13 @@ from omegaconf import DictConfig
 
 log = logging.getLogger(__name__)
 
+from goal.md.cli import CONFIGS_MD_DIR
+
 
 @hydra.main(
     version_base="1.3",
-    config_path="../../../../configs",
-    config_name="md/simulations/langevin_with_model",
+    config_path=CONFIGS_MD_DIR,
+    config_name="langevin_with_model_sim",
 )
 def simulate(cfg: DictConfig) -> None:
     """Hydra entrypoint for running MD simulations.
@@ -50,6 +52,7 @@ def simulate(cfg: DictConfig) -> None:
     log.info("Starting MD simulation")
     log.info("Molecule config: %s", dict(cfg.get("molecule", {})))
     log.info("Calculator config: %s", dict(cfg.get("calculator", {})))
+    log.info("Dynamics config: %s", dict(cfg.get("dynamics", {})))
 
     result = simulate_from_config(cfg)
 
@@ -63,8 +66,8 @@ def simulate(cfg: DictConfig) -> None:
 
 @hydra.main(
     version_base="1.3",
-    config_path="../../../../configs",
-    config_name="md/mts/simulations/mts_respa",
+    config_path=CONFIGS_MD_DIR,
+    config_name="mts/simulations/mts_respa",
 )
 def simulate_mts(cfg: DictConfig) -> None:
     """Hydra entrypoint for multi-timescale MD simulations.

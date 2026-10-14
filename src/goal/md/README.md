@@ -185,18 +185,18 @@ with initialize_config_dir(
     version_base="1.3"
 ):
     # Compose config
-    cfg = compose(config_name="simulations/langevin_with_model")
+    cfg = compose(config_name="langevin_with_model_sim")
 
     # Instantiate everything from config
-    molecule = MoleculeFactory.create(**cfg.molecules)
-    calculator = CalculatorFactory.create(**cfg.calculators)
+    molecule = MoleculeFactory.create(**cfg.molecule)
+    calculator = CalculatorFactory.create(**cfg.calculator)
     dynamics = DynamicsFactory.create(atoms=molecule, **cfg.dynamics)
 
     # Run
     dynamics.run(cfg.num_steps)
 ```
 
-See `configs/md/simulations/langevin_with_model.yaml` for a complete example.
+See `configs/md/langevin_with_model_sim.yaml` for a complete example.
 
 ### Pattern 4: Data Conversion Workflows
 
@@ -338,54 +338,57 @@ Configs are organized hierarchically:
 
 ```
 configs/md/
-├── molecules/           # Molecule source configs
+├── molecule/           # Molecule source configs
 │   ├── ethanol.yaml    # From SMILES
 │   └── from_file.yaml  # From file
-├── calculators/        # Calculator configs
+├── calculator/         # Calculator configs
 │   ├── goal_model.yaml # Trained ML models
+│   ├── cp2k.yaml       # 
+│   ├── cp2k_pw.yaml    # 
+│   ├── espresso.yaml   # 
+│   ├── mace.yaml       # 
+│   ├── tblite.yaml     # 
+│   ├── upet.yaml       # 
+│   ├── vasp.yaml       # 
+│   ├── xtb.yaml        # 
 │   ├── flashmd.yaml    # FlashMD pretrained
 │   └── orca.yaml       # Quantum chemistry
 ├── dynamics/           # Dynamics configs
 │   └── langevin.yaml   # Langevin thermostat
-└── simulations/        # Full workflow configs
-    └── langevin_with_model.yaml  # Complete example
+└── langevin_with_model_sim.yaml    # Complete example
 ```
 
 ### Example: Complete Simulation Config
 
-`configs/md/simulations/langevin_with_model.yaml`:
+`configs/md/langevin_with_model_sim.yaml`:
 
 ```yaml
 defaults:
-  - /md/molecules/ethanol
-  - /md/calculators/goal_model
-  - /md/dynamics/langevin
+  - molecule: ethanol
+  - calculator: goal_model
+  - dynamics: langevin
 
 # Simulation parameters
-num_steps: 1000
-output_file: trajectory.traj
+steps: 1000
+trajectory_file: trajectory.traj
 log_file: md.log
 log_interval: 10
-
-# Model checkpoint (override via CLI)
-calculators:
-  checkpoint: ???
 ```
 
 ### Using Configs from Command Line
 
 ```bash
 # Run with defaults
-python script.py
+python simulation.py
 
 # Override model checkpoint
-python script.py calculators.checkpoint=path/to/model.ckpt
+python simulation.py calculator.checkpoint=path/to/model.ckpt
 
 # Change molecule
-python script.py molecules.smiles="CC(=O)O"
+python simulation.py molecule.smiles="CC(=O)O"
 
 # Run with different config
-python script.py --config-name=simulations/langevin_with_flashmd
+python simulation.py --config-name=langevin_with_flashmd
 ```
 
 ---
@@ -509,10 +512,10 @@ for model_path in models:
 See `notebooks/md_introduction.py` for introduction and usage patterns.
 
 Example configs:
-- `configs/md/molecules/ethanol.yaml` - Create ethanol from SMILES
-- `configs/md/calculators/goal_model.yaml` - Load trained model
+- `configs/md/molecule/ethanol.yaml` - Create ethanol from SMILES
+- `configs/md/calculator/goal_model.yaml` - Load trained model
 - `configs/md/dynamics/langevin.yaml` - Langevin thermostat
-- `configs/md/simulations/langevin_with_model.yaml` - Complete workflow
+- `configs/md/langevin_with_model_sim.yaml` - Complete workflow
 
 ---
 
@@ -547,12 +550,15 @@ MD module dependencies are optional:
 ```toml
 [project.optional-dependencies]
 md = [
-    "flashmd>=0.2.5,<0.3",
-    "ase>=3.25.0,<4",
-    "xtb-python>=22.1,<23",
-    "rdkit>=2025.9.3,<2026",
-    "typer>=0.16.0,<0.17",
-    "pandas>=2.3.0,<3",
+  "flashmd>=0.2.5,<0.3",
+  "ase>=3.25.0,<4",
+  "xtb-python>=22.1,<23",
+  "tblite>=0.7.0,<0.8",
+  "upet>=0.1.2,<0.3",
+  "rdkit>=2025.9.3,<2026",
+  "typer>=0.16.0,<0.17",
+  "pandas>=2.3.0,<3",
+  "ipi>=3.0",
 ]
 ```
 Install with: `pip install goal[md]`

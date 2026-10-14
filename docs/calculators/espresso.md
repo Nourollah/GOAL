@@ -20,7 +20,7 @@ element(s).
 
 ## Configuration
 
-`configs/md/calculators/espresso.yaml`:
+`configs/md/calculator/espresso.yaml`:
 
 ```yaml
 _target_: goal.md.core.calculator_factory.CalculatorFactory.create

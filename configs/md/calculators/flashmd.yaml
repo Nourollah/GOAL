@@ -1,7 +1,0 @@
-# Use pretrained FlashMD model
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
-
-method: flashmd
-model_name: pet-omatpes-v2
-device: null # auto-detect

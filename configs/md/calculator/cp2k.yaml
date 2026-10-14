@@ -5,8 +5,13 @@
 # an MPI+OpenMP build). set_pos_file=true sends positions via a temp file
 # instead of stdin — the fix for stalls when streaming large structures to
 # MPI builds.
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
 key: cp2k
 
 command: null            # null -> $ASE_CP2K_COMMAND, then "cp2k_shell.psmp"

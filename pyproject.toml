@@ -44,6 +44,8 @@ md = [
   "flashmd>=0.2.5,<0.3",
   "ase>=3.25.0,<4",
   "xtb-python>=22.1,<23",
+  "tblite>=0.7.0,<0.8",
+  "upet>=0.1.2,<0.3",
   "rdkit>=2025.9.3,<2026",
   "typer>=0.16.0,<0.17",
   "pandas>=2.3.0,<3",
@@ -111,6 +113,7 @@ platforms = ["linux-64", "linux-aarch64"]
 [tool.pixi.dependencies]
 python = "3.14.*"
 dftd3-python = ">=1.4.0,<2"
+warp-lang = ">=1.11.1,<2"
 
 [tool.pixi.pypi-dependencies]
 goal = { path = ".", editable = true }

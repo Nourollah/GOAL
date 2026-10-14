@@ -1,0 +1,13 @@
+# Use a trained ML model from goal.ml
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
+key: goal_model
+checkpoint: ??? # Path to model checkpoint
+cutoff: null # Read from checkpoint if null
+device: cpu
+head: null

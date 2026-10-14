@@ -22,7 +22,7 @@ unset.
 
 ## Configuration
 
-`configs/md/calculators/vasp.yaml`:
+`configs/md/calculator/vasp.yaml`:
 
 ```yaml
 _target_: goal.md.core.calculator_factory.CalculatorFactory.create

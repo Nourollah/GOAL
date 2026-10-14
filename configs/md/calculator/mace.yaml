@@ -1,0 +1,12 @@
+# MACE universal potential calculator
+# Requires: pip install mace-torch
+# Available model sizes: small, medium, large
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
+key: mace
+model_name_or_path: small # or: medium, large, path/to/model.pt

@@ -7,6 +7,8 @@ Usage:
     python -m goal.md.cli.main --help
 """
 
+import os as _os
+
 import typer
 
 app = typer.Typer(
@@ -35,11 +37,15 @@ def simulate(
     """Run MD simulation from Hydra config.
 
     Example:
-        goal-md simulate -c configs/md/simulations/langevin.yaml
+        goal-md simulate -c configs/md/langevin_with_model_sim.yaml
     """
     typer.echo(f"Running simulation from config: {config}")
     typer.echo("Not yet implemented - use notebooks for now")
 
+
+CONFIGS_MD_DIR = _os.path.abspath(
+    _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", "configs", "md")
+)
 
 if __name__ == "__main__":
     app()

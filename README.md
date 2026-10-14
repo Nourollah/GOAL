@@ -452,7 +452,7 @@ calc = CalculatorFactory.create("cp2k", preset="molecular", n_mpi=4)
 | `upet` | UPET / PET-MAD | pretrained PET (`pet-mad`/`pet-omat`/`pet-oam`/`pet-spice`); `pip install upet` |
 | `xtb`, `mace`, `flashmd`, `nequip` | semi-empirical / pretrained ML | drop-in ASE calculators |
 
-Calculator configs live in `configs/md/calculators/`. See [`docs/calculators/`](docs/calculators/cp2k.md).
+Calculator configs live in `configs/md/calculator/`. See [`docs/calculators/`](docs/calculators/cp2k.md).
 
 ---
 

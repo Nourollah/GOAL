@@ -1,0 +1,12 @@
+# Full simulation: molecule + trained model + MD
+defaults:
+  - molecule: ethanol
+  - calculator: goal_model
+  - dynamics: langevin_ase
+
+# MD simulation parameters
+steps: 1000
+# output_dir: ??? # The directory to contain `trajectory_file` and `log_file`. The default value is "outputs/md".
+trajectory_file: trajectory.traj
+log_file: md.log
+log_interval: 10

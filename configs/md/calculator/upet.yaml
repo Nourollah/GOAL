@@ -2,8 +2,13 @@
 # Requires: pip install upet
 # Models (upet._version.UPET_AVAILABLE_MODELS): pet-mad-{xs,s}, pet-omat-{xs,s,m,l,xl},
 #   pet-oam-{l,xl}, pet-omad-{xs,s,l}, pet-omatpes-l, pet-spice-{s,l}
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
 key: upet
 
 model: pet-mad-s

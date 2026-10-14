@@ -2,8 +2,13 @@
 # Requires: ASE >= 3.23 (EspressoProfile) and a pw.x build.
 # Pseudopotentials: download an SSSP library and point `pseudo_dir` at it;
 # list one UPF file per element in `pseudopotentials` (REQUIRED).
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
+
+# Hydra instantiation metadata. These are commented out because this
+# example uses GOAL's CalculatorFactory directly rather than
+# hydra.utils.instantiate().
+#  _target_: goal.md.core.calculator_factory.CalculatorFactory.create
+#  _convert_: none
+
 key: espresso
 
 command: null            # null -> $ASE_ESPRESSO_COMMAND

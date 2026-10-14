@@ -28,7 +28,7 @@ The released set is **not** a family × size cross-product — there is no
 
 ## Configuration
 
-`configs/md/calculators/upet.yaml`:
+`configs/md/calculator/upet.yaml`:
 
 ```yaml
 _target_: goal.md.core.calculator_factory.CalculatorFactory.create
