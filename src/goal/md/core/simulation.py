@@ -44,6 +44,12 @@ from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from goal.md.core.observers import setup_observers
 from goal.md.core.runner import RunResult, run_dynamics
 
+from goal.md.core import ASE_DYNAMICS_PARAMS, FLASHMD_DYNAMICS_PARAMS
+
+SUPPORTED_DYNAMICS_PARAMS = {
+	"langevin_ase": ASE_DYNAMICS_PARAMS,
+	"langevin_flashmd": FLASHMD_DYNAMICS_PARAMS
+}
 
 @dataclasses.dataclass
 class SimulationConfig:
@@ -101,10 +107,10 @@ class Simulation:
         Draw initial velocities from Maxwell–Boltzmann before running.
     timestep : float
         Integration timestep in femtoseconds.
+    fixcm : bool
+        Fix Centre of Mass. Passed to `DynamicsFactory.create`.
     friction : float
         Langevin friction coefficient (1/fs) - for 'langevin_ase' dynamics method.
-    fixcm : bool
-        Fix Centre of Mass. Passed to `DynamicsFactory.create` - for 'langevin_ase' dynamics method.
     time_constant: float
         Thermostat time constant in fs - for 'langevin_flashmd' dynamics method.
     model_name : str
@@ -112,7 +118,7 @@ class Simulation:
     device : str
         Torch device ("cuda" or "cpu") - for 'langevin_flashmd' dynamics method.
     **kwargs:
-        Additional arguments for FlashMD Langevin
+        Additional arguments for building the dynamics object
     """
 
     def __init__(
@@ -132,8 +138,8 @@ class Simulation:
         show_progress: bool = True,
         initialise_velocities: bool = True,
         timestep: float | None = None,
-        friction: float | None = None,
         fixcm: bool | None = None,
+        friction: float | None = None,
         time_constant: float | None = None,
         model_name: str | None = None,
         device: str | None = None,
@@ -152,7 +158,7 @@ class Simulation:
         self.output_dir = Path(output_dir)
         self.show_progress = show_progress
         self.initialise_velocities = initialise_velocities
-        self.flashmd_kwargs = kwargs
+        self.dyn_kwargs = kwargs
 
         self._traj_file = self._resolve_path(trajectory_file)
         self._log_file = self._resolve_path(log_file)
@@ -160,14 +166,17 @@ class Simulation:
         self._dynamics: Object | None = None
         self._observers: dict[str, typing.Any] = {}
         
-	assert self.dynamics_method in ("langevin_ase", "langevin_flashmd"), f"`dynamics_method` must be either 'langevin_ase' or 'langevin_flashmd'. Got {self.dynamics_method}"
+        assert self.dynamics_method in SUPPORTED_DYNAMICS_PARAMS.keys(), f"`dynamics_method` must be either 'langevin_ase' or 'langevin_flashmd'. Got '{self.dynamics_method}'"
+
+        self.dynamics_cfg |= self.dyn_kwargs
 
         # Override the dynamics configuration values when they are provided by a library call.
         overrides = {
+		# Values common for both 'langevin_ase' and 'langevin_flashmd':
                 "timestep": timestep,
+                "fixcm": fixcm,
                 # Values for 'langevin_ase' dynamics method:
                 "friction": friction,
-                "fixcm": fixcm,
                 # Values for 'langevin_flashmd' dynamics method:
                 "time_constant": time_constant,
                 "model_name": model_name,
@@ -178,8 +187,7 @@ class Simulation:
             if value is not None:
                 self.dynamics_cfg[key] = value
         
-        self._remove_redundant_dyn_params()
-
+        self._validate_dynamics_params()
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -225,29 +233,26 @@ class Simulation:
             collect_energies=True,
         )
 
-    def _remove_redundant_dyn_params(self) -> None:
-        """Remove any redundant parameter for the specified dynamics method and raise relevant warnings."""
+    def _validate_dynamics_params(self) -> None:
+        """Checks if the input dynamics parameters are supported by the relevant method. Otherwise, raises ValueError"""
 
-        redundant_params = []
-        langevin_flashmd_params = ("time_constant", "model_name", "device", *self.flashmd_kwargs.keys())
-        langevin_ase_params = ("friction", "fixcm")
-
-        for param in self.dynamics_cfg.keys():
-            if self.dynamics_method == "langevin_ase" and param in langevin_flashmd_params:
-                redundant_params.append(param)
-
-            elif self.dynamics_method == "langevin_flashmd" and param in langevin_ase_params:
-                redundant_params.append(param)
+        # Change the paramter name 'model', used by `flashmd.ase.langevin.Langevin`, to 'model_name' as it is handled by `goal.md.core.md_factory.DynamicsFactory`.
+        if self.dynamics_method == 'langevin_flashmd' and 'model' in self.dynamics_cfg.keys():
+            self.dynamics_cfg['model_name'] = self.dynamics_cfg.pop('model')
+		
+            warning_msg = f"Use 'model_name' instead of 'model' as `goal.md.core.md_factory.DynamicsFactory` internally handles it. Refer to FlashMD part of `goal.md.core.md_factory.DynamicsFactory` for more information."
+            warnings.warn(warning_msg)
         
-        if not redundant_params:
-            return
+        supported = SUPPORTED_DYNAMICS_PARAMS[self.dynamics_method]
+        unsupported = set(self.dynamics_cfg.keys()) - supported
 
-        warning_msg = f"Parameter{'' if len(redundant_params) == 1 else 's'} '{', '.join(str(param) for param in redundant_params)}' {'is' if len(redundant_params) == 1 else 'are'} redundant for the chosen dynamics method: '{self.dynamics_method}' and will not be used for the simulation. Refer to `src/goal/md/core/md_factory.py` for more information about the parameters used by each method."
-        warnings.warn(warning_msg, stacklevel=2)
+        if unsupported:
+            names = ', '.join(sorted(unsupported))
+            raise ValueError(
+                f"Unsupported parameter{'' if len(unsupported) == 1 else 's'} for '{self.dynamics_method!r}': {names}"
+		    )
 
-        for r_param in redundant_params:
-            self.dynamics_cfg.pop(r_param)
-
+        
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
