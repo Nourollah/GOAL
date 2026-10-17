@@ -257,7 +257,7 @@ Jobs run one after another in the same process, each in `${paths.log_dir}/${task
 ### A working job script
 
 > [!NOTE]
-> [`scripts/slurm_train.sh`](https://github.com/Nourollah/GOAL/blob/main/scripts/slurm_train.sh) is a ready multi-node script (`EXPERIMENT=<name> sbatch scripts/slurm_train.sh`; devices and nodes come from the `#SBATCH` lines), and [`scripts/schedule.sh`](https://github.com/Nourollah/GOAL/blob/main/scripts/schedule.sh) runs a list of `goal-train` invocations back to back. Both were rewritten in October 2026; earlier versions used config-group overrides (`model=…`, `data=…`) that no longer exist. The template below shows the same pattern step by step.
+> [`scripts/slurm_train.sh`](https://github.com/Nourollah/GOAL/blob/main/scripts/slurm_train.sh) is a ready multi-node script (`EXPERIMENT=<name> sbatch scripts/slurm_train.sh`; devices and nodes come from the `#SBATCH` lines). It was rewritten in October 2026; earlier versions used config-group overrides (`model=…`, `data=…`) that no longer exist. The template below shows the same pattern step by step.
 
 ```bash
 #!/bin/bash

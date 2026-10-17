@@ -125,3 +125,6 @@ repos:
     rev: 0.7.1
     hooks:
       - id: nbstripout
+        # Keep the notebooks' own cell ids ("title", "sec0", …) instead of
+        # renumbering them 0, 1, 2… — renumbering rewrites every cell header.
+        args: ["--keep-id"]

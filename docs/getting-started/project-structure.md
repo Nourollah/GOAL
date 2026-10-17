@@ -137,7 +137,6 @@ src/goal/
 src/goal/md/
 ├── __init__.py                 # public API (CalculatorFactory, Simulation, …)
 ├── README.md                   # module-level notes
-├── MTS_DUAL_CALCULATOR_DESIGN.md  # design notes for the dual-calculator MTS system
 ├── cli/
 │   ├── main.py                 # typer app (placeholder `goal-md simulate`; python -m goal.md.cli.main)
 │   ├── simulate.py             # goal-simulate / goal-simulate-mts (Hydra)
@@ -252,11 +251,9 @@ Seventeen notebooks plus three support folders: `data/` (the bundled CPO-27-Mn C
 | Script | Purpose |
 |---|---|
 | `omol25_prepare.py` | Index an OMol25 (or any FairChem `.aselmdb`) split, build the per-shard catalogue caches, and report training statistics. Example: `python scripts/omol25_prepare.py --root data/OMol25/train_4M --workers 8` |
-| `gen_tutorial_notebook.py` | Regenerates `notebooks/custom_dataset_training_tutorial.ipynb` |
 | `slurm_train.sh` | Multi-node SBATCH script: `EXPERIMENT=<name> sbatch scripts/slurm_train.sh` (DDP over the `#SBATCH` nodes and GPUs) |
-| `schedule.sh` | Runs a list of `goal-train --config-name … ` invocations back to back |
 
-Both scripts use the self-contained config system (`--config-name <experiment>` plus dotted overrides); `pixi run lint-configs` fails if a script, README or doc page reintroduces the removed config-group syntax. See [Distributed training](../ml/training/distributed.md).
+`slurm_train.sh` uses the self-contained config system (`--config-name <experiment>` plus dotted overrides); `pixi run lint-configs` fails if a script, README or doc page reintroduces the removed config-group syntax. See [Distributed training](../ml/training/distributed.md).
 
 ## `tests/`
 
@@ -284,6 +281,5 @@ docs/
 ├── assets/                     # logo, banner
 ├── getting-started/            # installation, project structure, notebooks
 ├── ml/                         # goal.ml: training, data, models, fine-tuning, features, deployment, reference
-├── md/                         # goal.md: guide, calculators, MTS, reference
-└── slides/                     # LaTeX talk sources + PDFs (excluded from the site)
+└── md/                         # goal.md: guide, calculators, MTS, reference
 ```
