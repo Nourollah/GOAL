@@ -87,6 +87,12 @@ class ThresholdPolicy:
     return_threshold_scale: float = 2.0
 
     def should_switch_to_ml(self, state: DualCalculatorState) -> bool:
+        """Return True when the ML model is accurate enough to take over.
+
+        Requires ``state.step >= min_steps`` and both ``state.force_rmse``
+        and ``state.energy_mae`` to be set and strictly below
+        ``force_rmse`` and ``energy_mae`` respectively.
+        """
         if state.step < self.min_steps:
             return False
         if state.force_rmse is None or state.energy_mae is None:
@@ -94,6 +100,13 @@ class ThresholdPolicy:
         return state.force_rmse < self.force_rmse and state.energy_mae < self.energy_mae
 
     def should_return_to_base(self, state: DualCalculatorState) -> bool:
+        """Return True when the base (QM) calculator should resume control.
+
+        True if either error estimate is still ``None``, or if
+        ``state.force_rmse > force_rmse * return_threshold_scale`` or
+        ``state.energy_mae > energy_mae * return_threshold_scale``.
+        ``min_steps`` is not checked here.
+        """
         if state.force_rmse is None or state.energy_mae is None:
             return True
         scale = self.return_threshold_scale
@@ -108,9 +121,11 @@ class AlwaysBasePolicy:
     """Never switch to ML — use base (QM) throughout."""
 
     def should_switch_to_ml(self, state: DualCalculatorState) -> bool:
+        """Always return False: the ML model is never used."""
         return False
 
     def should_return_to_base(self, state: DualCalculatorState) -> bool:
+        """Always return False (the base calculator is never left)."""
         return False
 
 
@@ -131,12 +146,15 @@ class StepFractionPolicy:
 
     @property
     def switch_step(self) -> int:
+        """Absolute step of the switch, ``int(switch_fraction * total_steps)``."""
         return int(self.switch_fraction * self.total_steps)
 
     def should_switch_to_ml(self, state: DualCalculatorState) -> bool:
+        """Return True once ``state.step >= switch_step``, regardless of accuracy."""
         return state.step >= self.switch_step
 
     def should_return_to_base(self, state: DualCalculatorState) -> bool:
+        """Always return False: once switched, the ML model stays in control."""
         return False
 
 
@@ -201,8 +219,10 @@ class GOALOnlineFinetuner:
         Number of structures per gradient step inside each epoch.
     min_buffer_size : int
         Minimum buffer frames required before fine-tuning starts.
-    device : str
-        Torch device (``"cpu"``, ``"cuda"``, etc.).
+    device : str or None
+        Torch device (``"cpu"``, ``"cuda"``, etc.).  ``None`` (default)
+        uses the calculator's own device, so fine-tuning never moves the
+        model away from where inference runs.
     grad_clip : float or None
         Maximum gradient norm for clipping. ``None`` disables.
     energy_weight : float
@@ -219,7 +239,7 @@ class GOALOnlineFinetuner:
         epochs_per_update: int = 3,
         batch_size: int = 8,
         min_buffer_size: int = 20,
-        device: str = "cpu",
+        device: str | None = None,
         grad_clip: float | None = 1.0,
         energy_weight: float = 1.0,
         forces_weight: float = 10.0,
@@ -230,6 +250,8 @@ class GOALOnlineFinetuner:
         self.epochs_per_update = epochs_per_update
         self.batch_size = batch_size
         self.min_buffer_size = min_buffer_size
+        if device is None:
+            device = str(getattr(calculator, "device", "cpu"))
         self.device = device
         self.grad_clip = grad_clip
         self.energy_weight = energy_weight
@@ -241,6 +263,31 @@ class GOALOnlineFinetuner:
     @property
     def is_ready(self) -> bool:
         return True
+
+    @property
+    def model(self) -> typing.Any:
+        """The ``nn.Module`` being fine-tuned (shared with the calculator)."""
+        for attr in ("module", "_module"):
+            module = getattr(self._calc, attr, None)
+            if module is not None:
+                return module
+        raise AttributeError(
+            f"{type(self._calc).__name__} exposes no model to fine-tune; "
+            f"GOALOnlineFinetuner needs a GOALCalculator (attribute 'module')."
+        )
+
+    def _graph(self, atoms: Atoms, forces: np.ndarray, energy: float) -> typing.Any:
+        """A training graph built exactly like the calculator's inference graphs."""
+        build = getattr(self._calc, "build_graph", None)
+        if callable(build):
+            return build(atoms, energy=float(energy), forces=forces)
+
+        from goal.md.adapters.ase_converter import atomic_graph_from_ase
+
+        dtype = next(self.model.parameters()).dtype
+        return atomic_graph_from_ase(
+            atoms, cutoff=self.cutoff, energy=float(energy), forces=forces, dtype=dtype
+        )
 
     def _ensure_trainer(self) -> None:
         """Create the MiniTrainer on first use (lazy — avoids import at module level)."""
@@ -257,7 +304,7 @@ class GOALOnlineFinetuner:
         )
         from goal.ml.utils.mini_trainer import MiniTrainer, graph_step
 
-        module = self._calc.module
+        module = self.model
         loss_fn = WeightedLoss(EnergyLoss(), weight=self.energy_weight) + WeightedLoss(
             ForcesLoss(), weight=self.forces_weight
         )
@@ -304,25 +351,24 @@ class GOALOnlineFinetuner:
 
         from torch_geometric.loader import DataLoader as PyGDataLoader
 
-        from goal.md.adapters.ase_converter import atomic_graph_from_ase
-
         self._ensure_trainer()
 
-        # Build AtomicGraph dataset from the buffer
-        graphs = []
-        for atoms_snap, forces_ref, energy_ref in buffer:
-            graph = atomic_graph_from_ase(
-                atoms_snap,
-                cutoff=self.cutoff,
-                energy=float(energy_ref),
-                forces=forces_ref.tolist(),
-            )
-            graphs.append(graph)
+        # Build AtomicGraph dataset from the buffer — same cutoff, dtype and
+        # fragment labels as the calculator uses for inference.
+        graphs = [
+            self._graph(atoms_snap, forces_ref, energy_ref)
+            for atoms_snap, forces_ref, energy_ref in buffer
+        ]
 
         loader = PyGDataLoader(graphs, batch_size=self.batch_size, shuffle=True)
 
         # Delegate to MiniTrainer — uses graph_step + CompositeLoss internally
-        history = self._trainer.fit(loader, epochs=self.epochs_per_update, verbose=False)
+        try:
+            history = self._trainer.fit(loader, epochs=self.epochs_per_update, verbose=False)
+        finally:
+            # Back to inference mode: the calculator shares this module, and
+            # train mode would make every MD step build a double-backward graph.
+            self.model.eval()
 
         self._update_count += 1
         last_loss = history.train_loss[-1] if history.train_loss else float("nan")
@@ -428,6 +474,17 @@ class QMLearnerCalculator(DualCalculator):
                 "energy": float("nan"),
                 "forces": np.full((n, 3), float("nan")),
             }
+
+    def reference_needed(self, active: str) -> bool:
+        """Run QM on an ML step only when an evaluation happened this step.
+
+        While the ML model is active the QM calculator is otherwise
+        skipped.  Every ``eval_interval`` steps one QM reference of the
+        *current* geometry is computed: it refreshes the training buffer
+        and gives :meth:`should_return_to_base` a fresh error estimate on
+        the region the trajectory is actually exploring.
+        """
+        return active == "ml" and self._last_eval_step == self.state.step
 
     def decide_calculator(self, atoms: Atoms) -> str:
         """Return ``"base"`` or ``"ml"`` based on the switch policy."""

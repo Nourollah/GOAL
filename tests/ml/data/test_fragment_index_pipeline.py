@@ -73,11 +73,17 @@ class TestDatasetAttachesFragmentLabels:
         # atom apart.  Both are wrong for chemistry — the point is that the
         # knob reaches the algorithm.
         joined = ExtXYZDataset(
-            root=tmp_path, cutoff=5.0, split="train", compute_fragment_index=True,
+            root=tmp_path,
+            cutoff=5.0,
+            split="train",
+            compute_fragment_index=True,
             fragment_covalent_cutoff=5.0,
         )[0]
         shattered = ExtXYZDataset(
-            root=tmp_path, cutoff=5.0, split="train", compute_fragment_index=True,
+            root=tmp_path,
+            cutoff=5.0,
+            split="train",
+            compute_fragment_index=True,
             fragment_covalent_cutoff=0.5,
         )[0]
 
@@ -86,7 +92,7 @@ class TestDatasetAttachesFragmentLabels:
 
 
 class TestUnsupportedDatasetHandling:
-    """``examples.datasets`` loaders are a separate hierarchy that never
+    """``goal.ml.data.benchmarks`` loaders are a separate hierarchy that never
     learned about fragment labels — the keys must not break them when the
     feature is off, and must fail loudly when it is on."""
 
@@ -112,9 +118,7 @@ class TestUnsupportedDatasetHandling:
         from goal.ml.data.datamodule import _resolve_fragment_keys
 
         with pytest.raises(ValueError, match="does not support fragment labels"):
-            _resolve_fragment_keys(
-                self._fake_dataset_cls(), {"compute_fragment_index": True}
-            )
+            _resolve_fragment_keys(self._fake_dataset_cls(), {"compute_fragment_index": True})
 
     def test_supporting_datasets_keep_the_keys(self) -> None:
         from goal.ml.data.datamodule import _resolve_fragment_keys

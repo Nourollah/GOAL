@@ -1,0 +1,22 @@
+# VASP calculator (COMMERCIAL — requires a licensed build + POTCAR library)
+# Set $VASP_PP_PATH (or pp_path) to the POTCAR root and $ASE_VASP_COMMAND
+# (or command) to the launch string. Degrades gracefully (GOALCalculatorNotFound)
+# when VASP/POTCARs are absent.
+_target_: goal.md.core.calculator_factory.CalculatorFactory.create
+_convert_: none
+key: vasp
+
+command: null # null -> $ASE_VASP_COMMAND
+pp_path: null # null -> $VASP_PP_PATH (POTCAR library root)
+preset: molecular # "molecular" (kpts [1,1,1], ismear 0, sigma 0.01) or "bulk"
+n_mpi: null
+omp_threads: null
+
+parameters:
+  xc: PBE
+  encut: 520 # eV
+  ediff: 1.0e-6
+  nsw: 0
+  ibrion: -1
+  lwave: false
+  lcharg: false

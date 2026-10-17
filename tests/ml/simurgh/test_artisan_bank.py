@@ -29,9 +29,9 @@ from e3nn.o3 import Irreps
 
 from goal.ml.nn.blocks.artisans import (
     ArtisanConfig,
-    SimurghArtisanBank,
     PotentialArtisan,
     RarePotentialArtisan,
+    SimurghArtisanBank,
     cosine_cutoff,
     enumerate_element_pairs,
     pair_label,
@@ -151,7 +151,9 @@ class TestSimurghArtisanBank:
 
     def test_every_pair_has_a_gate(self) -> None:
         artisan_bank = self._make_bank()
-        gate_names: list[str] = [n for n, _ in artisan_bank.named_parameters() if n.endswith(".gate")]
+        gate_names: list[str] = [
+            n for n, _ in artisan_bank.named_parameters() if n.endswith(".gate")
+        ]
         # 10 unordered pairs in HCNO
         assert len(gate_names) == 10
         # Pair keys use ``z{lo}_z{hi}``
@@ -304,7 +306,9 @@ class TestZeroMaskCCOnly:
         static-shape schedule keeps every expert in the autograd graph."""
         artisan_bank = self._make_bank()
         n_atoms = carbon_dimer_batch.num_atoms
-        feats = torch.randn(n_atoms, artisan_bank._irreps_in.dim, dtype=torch.float64, requires_grad=True)
+        feats = torch.randn(
+            n_atoms, artisan_bank._irreps_in.dim, dtype=torch.float64, requires_grad=True
+        )
 
         energies: torch.Tensor = artisan_bank(
             atom_features=feats,
@@ -376,7 +380,7 @@ class TestRarePairRouting:
             key = SimurghArtisanBank._key(a, b)
             assert (
                 key in artisan_bank.artisans
-            ), f"Common pair {(a,b)} should have a dedicated PotentialArtisan."
+            ), f"Common pair {(a, b)} should have a dedicated PotentialArtisan."
 
     def test_rare_pairs_go_to_rare_artisan(self) -> None:
         artisan_bank = self._make_bank_with_routing()
@@ -430,7 +434,9 @@ class TestRarePairRouting:
         assert artisan_bank.rare_artisan_module is not None
         # The shared backbone parameters must have gotten gradients
         backbone_grads = [
-            p.grad for name, p in artisan_bank.rare_artisan_module.named_parameters() if p.grad is not None
+            p.grad
+            for name, p in artisan_bank.rare_artisan_module.named_parameters()
+            if p.grad is not None
         ]
         assert backbone_grads, (
             "RarePotentialArtisan parameters received no gradient — "

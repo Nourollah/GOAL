@@ -1,6 +1,0 @@
-# Example: Create ethanol from SMILES
-_target_: goal.md.core.molecule_factory.MoleculeFactory.create
-_convert_: none
-
-method: from_smiles
-smiles: CCO

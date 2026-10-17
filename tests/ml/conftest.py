@@ -22,7 +22,7 @@ sys.path.insert(0, str(_root / "src"))
 @pytest.fixture(scope="package")
 def cfg_train_global() -> DictConfig:
     """Default training config for ML tests."""
-    with initialize(version_base="1.3", config_path="../../configs"):
+    with initialize(version_base="1.3", config_path="../../src/goal/configs"):
         cfg = compose(config_name="train.yaml", return_hydra_config=True, overrides=[])
         with open_dict(cfg):
             cfg.paths.root_dir = str(_root)
@@ -43,7 +43,7 @@ def cfg_train_global() -> DictConfig:
 @pytest.fixture(scope="package")
 def cfg_eval_global() -> DictConfig:
     """Default eval config for ML tests."""
-    with initialize(version_base="1.3", config_path="../../configs"):
+    with initialize(version_base="1.3", config_path="../../src/goal/configs"):
         cfg = compose(
             config_name="eval.yaml",
             return_hydra_config=True,

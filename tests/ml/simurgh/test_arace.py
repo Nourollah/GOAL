@@ -131,14 +131,11 @@ class TestLayerContributions:
         per_layer = layer_e.abs().sum(dim=1)  # (L,)
         for layer_idx, contribution in enumerate(per_layer.tolist()):
             assert contribution > 1e-12, (
-                f"Artisan layer {layer_idx} contributes no energy "
-                f"(|E_L| = {contribution:.3e})"
+                f"Artisan layer {layer_idx} contributes no energy " f"(|E_L| = {contribution:.3e})"
             )
         # Not all energy from a single layer.
         total = per_layer.sum().item()
-        assert per_layer.max().item() < total, (
-            "All energy comes from a single artisan layer"
-        )
+        assert per_layer.max().item() < total, "All energy comes from a single artisan layer"
 
 
 # ----------------------------------------------------------------------

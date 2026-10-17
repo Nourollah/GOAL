@@ -81,7 +81,18 @@ class Backbone(typing.Protocol):
     and invariant models.
     """
 
-    def forward(self, graph: AtomicGraph) -> NodeFeatures: ...
+    def forward(self, graph: AtomicGraph) -> NodeFeatures:
+        """Map an atomic graph to per-node features.
+
+        Implementations read whatever ``AtomicGraph`` fields they need
+        (typically ``pos`` ``(N, 3)``, ``atomic_numbers`` ``(N,)``, ``edge_index``
+        ``(2, E)`` and ``batch`` ``(N,)``) and return a ``NodeFeatures``
+        whose ``node_feats`` has one row per atom and whose ``irreps``
+        string describes its layout (``"Nx0e"`` for invariant models).
+        ``node_energies`` / ``node_forces`` may be filled when the model
+        computes them, and heads will honour them.
+        """
+        ...
 
     @property
     def num_interactions(self) -> int: ...
@@ -103,7 +114,14 @@ class FeatureExtractorBackbone(typing.Protocol):
     and layer-specific downstream heads.
     """
 
-    def forward(self, graph: AtomicGraph) -> NodeFeatures: ...
+    def forward(self, graph: AtomicGraph) -> NodeFeatures:
+        """Map an atomic graph to final-layer equivariant node features.
+
+        The returned ``NodeFeatures.node_feats`` is ``(N, irreps_out.dim)``
+        and ``NodeFeatures.irreps`` should equal ``str(irreps_out)``, i.e.
+        the same features as ``extract_features(graph, layer=-1)``.
+        """
+        ...
 
     def extract_features(
         self,
@@ -196,7 +214,19 @@ class LossFunction(typing.Protocol):
         self,
         predictions: dict[str, torch.Tensor],
         targets: dict[str, torch.Tensor],
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        """Compare predictions with targets and return a scalar loss.
+
+        Args:
+            predictions: Model/head output dict (e.g. ``'energy'``,
+                ``'forces'``, ``'num_atoms'``).
+            targets: Reference labels keyed like ``predictions``
+                (typically the PyG batch).
+
+        Returns:
+            A 0-d tensor, differentiable w.r.t. the predictions.
+        """
+        ...
 
     @property
     def weight(self) -> float: ...

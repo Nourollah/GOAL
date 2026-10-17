@@ -55,13 +55,18 @@ def test_mace_head_only_one_epoch(tmp_path) -> None:
     except Exception:  # noqa: BLE001
         pass
 
+    from omegaconf import OmegaConf
     from torch_geometric.loader import DataLoader
 
     from goal.ml.nn.models.foundation.mace import MACEFinetune
     from goal.ml.training.callbacks.checkpoint_manager import GOALCheckpointManager
-    from goal.ml.training.loss import CompositeLoss, EnergyLoss, ForcesLoss, WeightedLoss
+    from goal.ml.training.loss import (
+        CompositeLoss,
+        EnergyLoss,
+        ForcesLoss,
+        WeightedLoss,
+    )
     from goal.ml.training.module import GOALModule
-    from omegaconf import OmegaConf
 
     torch.manual_seed(0)
     train = _methane_dataset(10)

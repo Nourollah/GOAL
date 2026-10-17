@@ -1,0 +1,39 @@
+# @package _global_
+########################################################
+# Default config of `goal-eval` — evaluate a trained checkpoint.
+#
+#   goal-eval ckpt_path=logs/<task>/runs/<run>/checkpoints          # best weights
+#   goal-eval ckpt_path=logs/<task>/runs/<run>/checkpoints checkpoint=last
+#   goal-eval ckpt_path=models/simurgh_gmd26.simurgh trainer.accelerator=gpu
+#   goal-eval ckpt_path=<ckpt> '+data.test_paths=[data/other_test.xyz]'
+#   goal-eval --config-name simurgh_gmd26 ckpt_path=<ckpt>      # an experiment's data section
+#
+# The MODEL always comes from the checkpoint: frozen source (archive or
+# checkpoint directory), the saved config with its dataset-derived values,
+# and the EMA weights when present.  This file only chooses what to test
+# it on and with which hardware.
+########################################################
+
+# Required: .simurgh archive, GOALCheckpointManager directory, or .ckpt
+ckpt_path: ???
+checkpoint: best # selector inside a directory: best | last | epoch=N | <name>.ckpt
+use_ema: true # evaluate the EMA weights when the checkpoint has them
+seed: 42
+
+# Merged onto the checkpoint's own `data:` section.  Empty = the test split
+# the run was configured with.  The key set is open-ended, so add keys with
+# `+`, e.g. '+data.test_paths=[a.xyz,b.xyz]' or +data.batch_size=8.
+data: {}
+
+trainer:
+  accelerator: auto
+  devices: 1
+  precision: null # null = the checkpoint's trainer.precision
+  inference_mode: false # forces are autograd derivatives
+
+# Optional JSON file for the test metrics
+output_file: null
+
+hydra:
+  run:
+    dir: logs/eval/${now:%Y-%m-%d_%H-%M-%S}

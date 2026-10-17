@@ -3,7 +3,9 @@
 This is the main training command for GOAL. It:
 1. Builds components via the registry system
 2. Automatically resumes from ``last.ckpt`` if it exists
-3. Writes a ``TRAINING_COMPLETE`` sentinel to prevent SLURM requeue loops
+3. Continues a *finished* run when ``trainer.max_epochs`` is raised, and
+   otherwise refuses to start — which is what keeps SLURM from requeuing
+   a completed job (see :mod:`goal.ml.training.resume`)
 4. Supports DDP, FSDP, ModelParallel strategies via trainer configs
 5. Compatible with Lightning 2.6+ features (EMAWeightAveraging, torch.compile)
 6. Performance-tuned: TF32 matmul, cuDNN benchmark, gradient accumulation
@@ -20,15 +22,14 @@ import torch
 from lightning import Callback
 from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, open_dict
 
 from goal.ml.cli import CONFIGS_ML_DIR
+from goal.ml.cli.builders import build_head as _build_head
+from goal.ml.cli.builders import build_loss as _build_loss
+from goal.ml.cli.builders import instantiate_callbacks as _instantiate_callbacks
+from goal.ml.cli.builders import instantiate_loggers as _instantiate_loggers
 from goal.ml.data.datamodule import GOALDataModule
-
-try:
-    import examples.datasets  # noqa: F401 — registers md17, qm9, ani1, spice, etc.
-except ImportError:
-    pass
 from goal.ml.data.statistics import (
     ATOMIC_SYMBOLS,
     compute_atomic_references,
@@ -37,35 +38,20 @@ from goal.ml.data.statistics import (
     compute_pair_counts,
     compute_unique_elements,
 )
-from goal.ml.nn.models.base import MonolithicModel
-from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
+from goal.ml.nn.blocks.artisans import encode_pair_counts
+from goal.ml.registry import BACKBONE_REGISTRY
+from goal.ml.training import dataset_stats
 from goal.ml.training.callbacks.checkpoint_manager import GOALCheckpointManager
 from goal.ml.training.callbacks.logging import RichLoggingCallback
-from goal.ml.training.loss import CompositeLoss, WeightedLoss
+from goal.ml.training.loss import CompositeLoss
 from goal.ml.training.module import GOALModule
+from goal.ml.training.resume import (
+    SENTINEL_NAME,
+    LRScheduleRetarget,
+    ResumeDecision,
+    resolve_resume,
+)
 from goal.ml.training.strategies.factory import build_strategy
-
-
-def _instantiate_callbacks(cfg: DictConfig | None) -> list[Callback]:
-    """Instantiate Lightning callbacks from Hydra config."""
-    if not cfg:
-        return []
-    callbacks: list[Callback] = []
-    for _, cb_conf in cfg.items():
-        if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
-            callbacks.append(hydra.utils.instantiate(cb_conf))
-    return callbacks
-
-
-def _instantiate_loggers(cfg: DictConfig | None) -> list[Logger]:
-    """Instantiate Lightning loggers from Hydra config."""
-    if not cfg:
-        return []
-    loggers: list[Logger] = []
-    for _, lg_conf in cfg.items():
-        if isinstance(lg_conf, DictConfig) and "_target_" in lg_conf:
-            loggers.append(hydra.utils.instantiate(lg_conf))
-    return loggers
 
 
 def _gpu_supports_tf32() -> bool:
@@ -109,119 +95,121 @@ def _setup_performance(cfg: DictConfig) -> None:
         torch.backends.cudnn.deterministic = perf.get("cudnn_deterministic", False)
 
 
-def _build_loss(cfg: DictConfig) -> CompositeLoss:
-    """Construct the composite loss from config.
+#: Backbone arguments ``_run_training`` may derive from the training set.
+_DERIVED_BACKBONE_KEYS: tuple[str, ...] = (
+    "elements",
+    "atomic_energies",
+    "scale",
+    "avg_num_neighbors",
+    "dressing_kwargs",
+)
 
-    Each loss entry may specify ``fn`` as either:
 
-    - A **string** (default ``"mse"``) — single loss function.
-    - A **list** of ``{name, weight}`` dicts — multiple loss functions
-      for the same property, each logged and weighted independently.
+def _persist_derived_backbone_args(
+    cfg: DictConfig,
+    backbone_kwargs: dict[str, typing.Any],
+) -> None:
+    """Write dataset-derived backbone kwargs back into ``cfg.model.backbone``.
 
-    Examples::
-
-        # Single fn (backward compatible)
-        losses:
-          - name: energy
-            weight: 4.0
-            fn: mse
-
-        # Composite fn per property
-        losses:
-          - name: forces
-            fn:
-              - name: mse
-                weight: 4.0
-              - name: rmse
-                weight: 8.0
+    Only keys whose value differs from the config's are written, so a
+    config that already pins them is left byte-for-byte unchanged.
     """
-    import inspect
+    from omegaconf import OmegaConf
 
-    losses: list[WeightedLoss] = []
-    for loss_cfg in cfg.training.losses:
-        loss_cls: typing.Any = LOSS_REGISTRY.get(loss_cfg.name)
-        fn_spec: typing.Any = loss_cfg.get("fn", "mse")
+    backbone_cfg: typing.Any = cfg.model.backbone
+    with open_dict(cfg):
+        for key in _DERIVED_BACKBONE_KEYS:
+            if key not in backbone_kwargs:
+                continue
+            value: typing.Any = backbone_kwargs[key]
+            if OmegaConf.is_config(value):
+                value = OmegaConf.to_container(value, resolve=True)
+            current: typing.Any = backbone_cfg.get(key, None)
+            if OmegaConf.is_config(current):
+                current = OmegaConf.to_container(current, resolve=True)
+            if current != value:
+                backbone_cfg[key] = value
 
-        # Forward only the kwargs that the loss class actually accepts.
-        # This lets the config uniformly annotate entries (e.g. normalize_by_n_atoms)
-        # without every loss class needing to declare it.
-        sig = inspect.signature(loss_cls.__init__)
-        has_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+
+def _check_reused_stats(
+    reused: list[str],
+    stored_fingerprint: dict[str, typing.Any],
+    current_fingerprint: dict[str, typing.Any],
+    backbone_kwargs: dict[str, typing.Any],
+    datamodule: GOALDataModule,
+) -> None:
+    """Report a changed training set; refuse elements the model cannot represent.
+
+    Reused statistics describe the data the checkpoint was trained on.  When
+    the current ``data:`` block or training-set size differs, the change is
+    printed with the way to recompute.  The one hard failure is a dataset
+    with elements outside the reused ``elements``: the model has no
+    parameters for them, so training cannot continue on it.
+    """
+    if not stored_fingerprint:
+        print(
+            "[stats] the checkpoint's config predates dataset fingerprints — cannot check "
+            "whether the training data changed since the statistics were computed."
         )
-        accepted: set[str] = set(sig.parameters) - {"self"}
-        loss_kwargs: dict[str, typing.Any] = {
-            k: v
-            for k, v in loss_cfg.items()
-            if k not in ("name", "weight", "fn") and (has_var_keyword or k in accepted)
-        }
-
-        if isinstance(fn_spec, str):
-            # Single loss function — backward compatible
-            losses.append(
-                WeightedLoss(
-                    loss_cls(loss_fn=fn_spec, **loss_kwargs),
-                    weight=loss_cfg.weight,
-                    label=loss_cfg.name,
-                )
-            )
-        else:
-            # Composite: list of {name, weight} sub-fns
-            for sub in fn_spec:
-                sub_name: str = sub["name"] if isinstance(sub, dict) else sub.name
-                sub_weight: float = float(sub["weight"] if isinstance(sub, dict) else sub.weight)
-                fn_label: str = sub_name.rsplit(".", 1)[-1]
-                losses.append(
-                    WeightedLoss(
-                        loss_cls(loss_fn=sub_name),
-                        weight=sub_weight,
-                        label=f"{loss_cfg.name}_{fn_label}",
-                        group=loss_cfg.name,
-                    )
-                )
-    return CompositeLoss(losses)
-
-
-def _build_head(cfg: DictConfig, backbone: typing.Any) -> typing.Any:
-    """Build the task head from config, or ``None`` for monolithic backbones.
-
-    The pairing rule is enforced from the backbone's protocol:
-
-    * A backbone satisfying the :class:`MonolithicModel` protocol
-      *must* have ``head: null`` — it already returns the property
-      dict directly, so a head would be silently ignored.
-    * Any other backbone *must* declare a ``head:`` block — without one
-      the backbone's ``NodeFeatures`` would have no consumer and the
-      loss would see no predictions.
-
-    Either mismatch raises ``ValueError`` here rather than failing
-    deep inside the training loop.
-    """
-    head_cfg = cfg.model.get("head", None)
-    is_monolithic: bool = isinstance(backbone, MonolithicModel)
-    backbone_name: str = cfg.model.backbone.name
-
-    if is_monolithic:
-        if head_cfg is not None:
+        return
+    changes = dataset_stats.fingerprint_changes(stored_fingerprint, current_fingerprint)
+    if not changes:
+        return
+    lines: str = "\n".join(f"    {k}: {old!r} -> {new!r}" for k, (old, new) in changes.items())
+    print(
+        "[stats] WARNING: the training data differs from the data the reused statistics "
+        f"were computed on:\n{lines}\n"
+        "  The model keeps the checkpoint's values, so it stays consistent with its "
+        "weights.  If they do not suit the new data, recompute the ones you want, e.g.\n"
+        "    'dataset_stats.recompute=[scale,avg_num_neighbors]'   (or dataset_stats.recompute=all)"
+    )
+    if "elements" in reused:
+        missing: list[int] = dataset_stats.uncovered_elements(
+            backbone_kwargs.get("elements"), datamodule.data_train
+        )
+        if missing:
+            symbols: str = ", ".join(f"{ATOMIC_SYMBOLS.get(z, '?')}(Z={z})" for z in missing)
             raise ValueError(
-                f"Backbone '{backbone_name}' is monolithic (returns a "
-                f"property dict directly) and is incompatible with a "
-                f"task head.  Set 'head: null' in the model config."
+                f"The training data contains {symbols}, which the resumed model has no "
+                f"parameters for (its elements: {list(backbone_kwargs.get('elements') or [])}). "
+                f"Continuing this checkpoint on that data is not possible. Either remove "
+                f"those structures, or start a new model without resume.from "
+                f"(dataset_stats.recompute=[elements] rebuilds the element tables, so the "
+                f"checkpoint's weights would no longer fit)."
             )
-        return None
 
-    if head_cfg is None:
-        raise ValueError(
-            f"Backbone '{backbone_name}' is modular (produces "
-            f"NodeFeatures) and requires a task head.  Declare a "
-            f"'head:' block in the model config, or switch to a "
-            f"monolithic backbone (e.g. 'simurgh_monolithic', "
-            f"'monolithic_example')."
+
+def _prepare_resumed_module(
+    module: GOALModule, resume: ResumeDecision, recompute: set[str]
+) -> None:
+    """Make recomputed statistics take effect on a resumed module.
+
+    * Buffer statistics (``scale``, ``atomic_energies``) are restored from the
+      checkpoint by Lightning; ``keep_fresh_buffers`` keeps the recomputed
+      values instead.
+    * Structural statistics (``elements``, ``pair_counts``) change parameter
+      shapes; a mismatch is reported here, in plain terms, before Lightning
+      fails on it.
+    """
+    module.keep_fresh_buffers = set(recompute & dataset_stats.BUFFER_STATS)
+    if module.keep_fresh_buffers:
+        print(
+            f"[stats] {', '.join(sorted(module.keep_fresh_buffers))}: training with the "
+            f"recomputed values instead of the checkpoint's."
         )
-
-    head_cls: typing.Any = HEAD_REGISTRY.get(head_cfg.name)
-    head_kwargs: dict[str, typing.Any] = {k: v for k, v in head_cfg.items() if k != "name"}
-    return head_cls(**head_kwargs)
+    if not recompute & dataset_stats.STRUCTURAL_STATS or resume.ckpt_path is None:
+        return
+    problems: list[str] = dataset_stats.structural_mismatches(module, resume.ckpt_path)
+    if problems:
+        shown: str = "\n".join(f"    {p}" for p in problems[:10])
+        more: str = f"\n    … and {len(problems) - 10} more" if len(problems) > 10 else ""
+        raise ValueError(
+            f"Recomputing {', '.join(sorted(recompute & dataset_stats.STRUCTURAL_STATS))} "
+            f"changes the model's structure, so the weights in {resume.ckpt_path} no longer "
+            f"fit:\n{shown}{more}\n"
+            f"Keep the stored values (remove them from dataset_stats.recompute), or train a "
+            f"new model without resume.from."
+        )
 
 
 def _run_training(cfg: DictConfig) -> None:
@@ -233,11 +221,20 @@ def _run_training(cfg: DictConfig) -> None:
     # Apply global PyTorch performance settings
     _setup_performance(cfg)
 
-    # Check for completion sentinel — stops SLURM requeue loop
+    # Resume / extension is resolved before the datamodule so a launch
+    # with nothing left to train exits without paying for dataset setup.
     checkpoint_dir: Path = Path(cfg.training.checkpoint_dir)
-    if (checkpoint_dir / "TRAINING_COMPLETE").exists():
-        print("Training already complete. Exiting.")
+    resume: ResumeDecision = resolve_resume(cfg)
+    if not resume.should_train:
+        print(resume.stop_reason)
         return
+    if resume.is_resume:
+        verb: str = "Extending finished run" if resume.is_extension else "Resuming"
+        print(
+            f"[ckpt/resume] {verb} from {resume.ckpt_path} — "
+            f"{resume.epochs_completed} epochs done, continuing to "
+            f"{cfg.trainer.max_epochs}."
+        )
 
     # Build datamodule first and prime it so we can compute
     # dataset-derived buffers (per-element atomic energies, scale/shift,
@@ -254,17 +251,46 @@ def _run_training(cfg: DictConfig) -> None:
         k: v for k, v in cfg.model.backbone.items() if k != "name"
     }
 
+    # Dataset statistics recorded with the checkpoint being resumed.  They
+    # are applied before anything is computed, so a resumed / extended run
+    # rebuilds the model exactly as it was trained (and skips the scans).
+    # ``dataset_stats.recompute`` names statistics to derive again anyway.
+    stats_policy: typing.Any = cfg.get("dataset_stats") or {}
+    recompute: set[str] = dataset_stats.normalise_recompute(stats_policy.get("recompute"))
+    reused: list[str] = []
+    stored_fingerprint: dict[str, typing.Any] = {}
+    if resume.is_resume and bool(stats_policy.get("reuse", True)):
+        saved_cfg: typing.Any = dataset_stats.load_stored(resume.source_dir, resume.ckpt_path)
+        if saved_cfg is None:
+            print(
+                f"[stats] no saved config next to {resume.ckpt_path} — dataset statistics "
+                f"are recomputed from the current training set."
+            )
+        else:
+            stored, stored_fingerprint = dataset_stats.stored_values(saved_cfg)
+            reused = dataset_stats.apply(backbone_kwargs, stored, skip=recompute)
+            if reused:
+                print(
+                    f"[stats] reusing {', '.join(reused)} recorded with the checkpoint "
+                    f"({resume.source_dir}); set dataset_stats.recompute to derive any of "
+                    f"them from the current data instead."
+                )
+
     # Auto-extract elements from the training set for SIMURGH-family backbones.
     # This replaces any manually-specified elements list in the config —
     # the dataset is always authoritative. Other backbones (hyperspec,
     # invariant_gnn) use a fixed-size embedding table and ignore this key.
     backbone_name: str = cfg.model.backbone.name
-    if backbone_name in (
-        "simurgh",
-        "simurgh_ace_first",
-        "simurgh_arace",
-        "simurgh_monolithic",
-        "monolithic_arace",
+    if (
+        backbone_name
+        in (
+            "simurgh",
+            "simurgh_ace_first",
+            "simurgh_arace",
+            "simurgh_monolithic",
+            "monolithic_arace",
+        )
+        and "elements" not in reused
     ):
         elements: list[int] = compute_unique_elements(datamodule.data_train)
         symbol_str: str = " ".join(f"{ATOMIC_SYMBOLS.get(z, '?')}({z})" for z in elements)
@@ -307,7 +333,7 @@ def _run_training(cfg: DictConfig) -> None:
 
     # avg_num_neighbors — MACE-style sum-aggregation normaliser.
     dressing_cfg: typing.Any = backbone_kwargs.get("dressing_kwargs")
-    if isinstance(dressing_cfg, DictConfig) or isinstance(dressing_cfg, dict):
+    if isinstance(dressing_cfg, (DictConfig, dict)):
         dressing_dict: dict[str, typing.Any] = dict(dressing_cfg)
         if dressing_dict.get("avg_num_neighbors") is None:
             avg_nn: float = compute_avg_num_neighbors(datamodule.data_train)
@@ -323,19 +349,61 @@ def _run_training(cfg: DictConfig) -> None:
         print(f"[stats] avg_num_neighbors={avg_nn_arace:.4f}")
 
     # pair_counts — for data-driven expert routing.
-    # Injected when the backbone has an artisan_config with rare_artisan.enabled=true.
-    artisan_cfg_raw: typing.Any = backbone_kwargs.get("artisan_config")
-    if isinstance(artisan_cfg_raw, (DictConfig, dict)):
+    # Injected when a backbone declares rare_artisan.enabled=true.  The
+    # two model families spell the artisan sub-config differently —
+    # "artisan_config" on the legacy SIMURGH backbones, "artisan" on the
+    # ARACE ones (simurgh_arace / monolithic_arace / nf_simurgh) — so both
+    # keys are checked.  The routing layout inside is identical.
+    for artisan_key in ("artisan_config", "artisan"):
+        artisan_cfg_raw: typing.Any = backbone_kwargs.get(artisan_key)
+        if not isinstance(artisan_cfg_raw, (DictConfig, dict)):
+            continue
         ecfg: dict[str, typing.Any] = dict(artisan_cfg_raw)
         ge: dict[str, typing.Any] = dict(ecfg.get("rare_artisan") or {})
         if bool(ge.get("enabled", False)) and ecfg.get("pair_counts") is None:
             pc: dict[tuple[int, int], int] = compute_pair_counts(datamodule.data_train)
             total: int = max(1, sum(pc.values()))
-            print(
-                f"[stats] pair_counts computed ({len(pc)} pairs, " f"{total} total directed edges)"
-            )
-            ecfg["pair_counts"] = {list(k): v for k, v in pc.items()}
-            backbone_kwargs["artisan_config"] = ecfg
+            print(f"[stats] pair_counts computed ({len(pc)} pairs, {total} total directed edges)")
+            # YAML-safe "Zlo_Zhi" keys, and written into BOTH the kwargs
+            # and the config.  Routing decides which artisan modules
+            # exist, so a checkpoint trained with it cannot load into a
+            # model rebuilt from a config that has lost the counts — the
+            # saved config.yaml has to carry them.
+            encoded: dict[str, int] = encode_pair_counts(pc)
+            ecfg["pair_counts"] = encoded
+            backbone_kwargs[artisan_key] = ecfg
+            with open_dict(cfg):
+                cfg.model.backbone[artisan_key]["pair_counts"] = encoded
+
+    # Persist every dataset-derived argument in the config the run saves
+    # (hparams + checkpoints/config.yaml), as pair_counts already is.  A
+    # model rebuilt from that config — GOALCalculator on a bare .ckpt,
+    # goal-eval, goal-inspect — otherwise falls back to the defaults
+    # (elements (1, 6, 7, 8), scale 1.0, no atomic references), and
+    # anything sized from them (``artisan.n_elements: auto``) changes shape.
+    _persist_derived_backbone_args(cfg, backbone_kwargs)
+
+    # Which data the statistics describe, for the next resume to compare.
+    n_train: int | None = len(datamodule.data_train) if datamodule.data_train is not None else None
+    current_fingerprint: dict[str, typing.Any] = dataset_stats.dataset_fingerprint(cfg, n_train)
+    if reused:
+        _check_reused_stats(
+            reused, stored_fingerprint, current_fingerprint, backbone_kwargs, datamodule
+        )
+        origin: str = f"reused from {resume.source_dir}"
+        if recompute:
+            origin += f"; recomputed: {', '.join(sorted(recompute))}"
+        dataset_stats.record(
+            cfg,
+            backbone_kwargs,
+            stored_fingerprint or current_fingerprint,
+            origin=origin,
+            trained_on=current_fingerprint,
+        )
+    else:
+        dataset_stats.record(
+            cfg, backbone_kwargs, current_fingerprint, origin="computed from the training set"
+        )
 
     backbone: typing.Any = backbone_cls(**backbone_kwargs)
 
@@ -350,9 +418,8 @@ def _run_training(cfg: DictConfig) -> None:
         compile_model=cfg.training.get("compile_model", False),
     )
 
-    # Automatic checkpoint resumption — last.ckpt if exists, else None
-    last_ckpt: Path = checkpoint_dir / "last.ckpt"
-    resume_path: str | None = str(last_ckpt) if last_ckpt.exists() else None
+    if resume.is_resume:
+        _prepare_resumed_module(module, resume, recompute)
 
     callbacks: list[Callback] = [
         LearningRateMonitor(logging_interval="epoch"),
@@ -363,6 +430,17 @@ def _run_training(cfg: DictConfig) -> None:
         # disable / replace it.  Don't re-add it here — Lightning
         # rejects multiple progress-bar callbacks.
     ]
+
+    # Lightning restores LR-scheduler state wholesale, which silently
+    # overrides a raised trainer.max_epochs — see goal.ml.training.resume.
+    if resume.is_resume:
+        callbacks.append(
+            LRScheduleRetarget(
+                policy=str((cfg.get("resume") or {}).get("lr_schedule", "stretch")),
+                base_lr=float(cfg.training.optimizer.lr),
+                epochs_completed=resume.epochs_completed,
+            )
+        )
 
     # Optionally add SLURM plugin
     plugins: list[typing.Any] = []
@@ -381,10 +459,21 @@ def _run_training(cfg: DictConfig) -> None:
     ckpt_manager_cfg = cfg.get("checkpoint_manager")
     if ckpt_manager_cfg is not None:
         ckpt_manager: GOALCheckpointManager = hydra.utils.instantiate(ckpt_manager_cfg)
-        # Restore pool state if resuming
-        if resume_path is not None:
-            GOALCheckpointManager.restore_pools_from_dir(ckpt_manager, str(checkpoint_dir))
-            print(f"[ckpt/resume] Pool state restored from {checkpoint_dir}/checkpoint_state.json")
+        # Restore pool state if resuming.  The pools may name files in
+        # another run's directory; the manager keeps them for ranking but
+        # never deletes outside its own dirpath.
+        if resume.is_resume and resume.source_dir is not None:
+            GOALCheckpointManager.restore_pools_from_dir(ckpt_manager, str(resume.source_dir))
+            print(
+                f"[ckpt/resume] Pool state restored from "
+                f"{resume.source_dir}/checkpoint_state.json"
+            )
+            if resume.is_extension:
+                ckpt_manager.record_extension(
+                    from_epoch=resume.epochs_completed,
+                    to_epoch=int(cfg.trainer.max_epochs),
+                    source_ckpt=str(resume.ckpt_path),
+                )
         hydra_callbacks.append(ckpt_manager)
 
     # Guard: ModelCheckpoint + GOALCheckpointManager active at the same time
@@ -418,26 +507,31 @@ def _run_training(cfg: DictConfig) -> None:
         **strategy_override,
     )
 
-    trainer.fit(module, datamodule=datamodule, ckpt_path=resume_path)
+    trainer.fit(module, datamodule=datamodule, ckpt_path=resume.ckpt_path)
 
     # Mark completion so SLURM doesn't requeue after success
     if trainer.is_global_zero:
-        (checkpoint_dir / "TRAINING_COMPLETE").touch()
+        (checkpoint_dir / SENTINEL_NAME).touch()
 
 
 @hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_gmd26")
 def train_ml(cfg: DictConfig) -> None:
-    """GOAL training entry point for self-contained configs/ml/ experiment files.
+    """GOAL training entry point for self-contained src/goal/configs/ml/ experiment files.
 
     Usage:
         goal-train-ml                                  # loads simurgh_gmd26.yaml (default)
         goal-train-ml --config-name simurgh_md17        # loads simurgh_md17.yaml
         goal-train-ml --config-name hyperspec_md17     # loads hyperspec_md17.yaml
 
-    All parameters live in a single file under configs/ml/.
+    All parameters live in a single file under src/goal/configs/ml/.
     Override any parameter from the CLI:
         goal-train-ml trainer.max_epochs=100
         goal-train-ml training.optimizer.lr=0.001
+
+    Continue a run that already finished by raising the budget and
+    pointing at its checkpoints:
+        goal-train-ml trainer.max_epochs=2000 \
+            resume.from=logs/simurgh_gmd26/runs/<old_run>/checkpoints
     """
     _run_training(cfg)
 

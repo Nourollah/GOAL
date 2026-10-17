@@ -26,12 +26,14 @@ import logging
 import hydra
 from omegaconf import DictConfig
 
+from goal import CONFIGS_DIR
+
 log = logging.getLogger(__name__)
 
 
 @hydra.main(
     version_base="1.3",
-    config_path="../../../../configs",
+    config_path=CONFIGS_DIR,
     config_name="md/simulations/langevin_with_model",
 )
 def simulate(cfg: DictConfig) -> None:
@@ -63,7 +65,7 @@ def simulate(cfg: DictConfig) -> None:
 
 @hydra.main(
     version_base="1.3",
-    config_path="../../../../configs",
+    config_path=CONFIGS_DIR,
     config_name="md/mts/simulations/mts_respa",
 )
 def simulate_mts(cfg: DictConfig) -> None:
@@ -93,3 +95,9 @@ def simulate_mts(cfg: DictConfig) -> None:
         result.get("final_temperature") or float("nan"),
     )
     log.info("MTS stats: %s", result.get("mts_stats", {}))
+
+
+if __name__ == "__main__":
+    # ``python -m goal.md.cli.simulate`` runs single-timescale MD; the MTS
+    # command is ``goal-simulate-mts`` (console script).
+    simulate()

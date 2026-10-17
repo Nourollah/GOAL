@@ -1,0 +1,28 @@
+# @package _global_
+# Langevin MD of one molecule with a trained GOAL model — the default
+# config of `goal-simulate`.
+#
+# Usage:
+#   goal-simulate calculator.checkpoint=logs/<task>/runs/<run>/checkpoints
+#   goal-simulate calculator.checkpoint=model.simurgh calculator.device=cuda \
+#       'molecule.smiles="CC(=O)O"' steps=5000 output_dir=outputs/md/acetic_acid
+#
+# The `# @package _global_` line above is required: without it Hydra nests
+# this file under `md.simulations` and the run finds no `molecule:`.
+defaults:
+  - /md/molecules@molecule: ethanol
+  - /md/calculators@calculator: goal_model
+  - _self_
+
+# MD parameters (read by goal.md.core.simulation.Simulation)
+steps: 1000
+timestep_fs: 0.5 # molecules with hydrogens: 0.5 fs
+temperature_K: 300.0
+friction: 0.01 # Langevin friction, 1/fs
+chunk_size: 100
+log_interval: 10
+
+# Outputs (relative paths resolve under output_dir, from the launch directory)
+output_dir: outputs/md/langevin
+trajectory_file: trajectory.traj
+log_file: md.log

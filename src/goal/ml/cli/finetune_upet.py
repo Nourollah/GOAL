@@ -112,6 +112,26 @@ test_set: 0.0
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point of the ``goal-finetune-upet`` console script.
+
+    Parses ``argv`` (``sys.argv[1:]`` when ``None``), validates the base
+    model name, writes ``options.yaml`` (from :func:`build_options_yaml`)
+    into ``--output``, creating the directory if needed, and, unless
+    ``--dry-run`` is given, runs ``mtt train options.yaml -o
+    <output>/model.ckpt`` as a subprocess inside ``--output``.
+
+    Returns
+    -------
+    int
+        ``0`` for a dry run, otherwise the exit code of ``mtt train``
+        (a non-zero code is also reported on stderr).
+
+    Raises
+    ------
+    SystemExit
+        If the model is not a known UPET family/size, the training file
+        does not exist, or ``mtt`` is not on ``PATH``.
+    """
     parser = argparse.ArgumentParser(
         prog="goal-finetune-upet",
         description="Fine-tune a UPET/PET model with metatrain (mtt train subprocess).",

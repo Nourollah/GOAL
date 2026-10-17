@@ -48,7 +48,7 @@ ARTISAN_SUBCONFIG: dict = {
     "element_conditioned": True,
 }
 
-_CONFIGS_ML_DIR = Path(__file__).parents[3] / "configs" / "ml"
+_CONFIGS_ML_DIR = Path(__file__).parents[3] / "src" / "goal" / "configs" / "ml"
 
 
 def _build_backbone(
@@ -118,17 +118,14 @@ class TestModularForwardPass:
         for round_idx in range(round_e.shape[0]):
             contribution = round_e[round_idx].abs().sum().item()
             assert contribution > 1e-12, (
-                f"Round {round_idx} contributes no energy "
-                f"(|E_L| = {contribution:.3e})"
+                f"Round {round_idx} contributes no energy " f"(|E_L| = {contribution:.3e})"
             )
 
     def test_registered_in_registries(self) -> None:
         assert BACKBONE_REGISTRY.get("simurgh_arace") is SimurghAraceBackbone
         assert MODEL_REGISTRY.get("simurgh_arace") is SimurghAraceBackbone
         # Legacy ACE-first backbone stays reachable under both names.
-        assert BACKBONE_REGISTRY.get("simurgh") is BACKBONE_REGISTRY.get(
-            "simurgh_ace_first"
-        )
+        assert BACKBONE_REGISTRY.get("simurgh") is BACKBONE_REGISTRY.get("simurgh_ace_first")
 
     def test_gates_keyed_by_round_and_pair(self) -> None:
         backbone = _build_backbone(num_rounds=2)
@@ -192,9 +189,7 @@ class TestGOALModuleCompatibility:
 
         assert torch.isfinite(total).item(), "Training loss is not finite"
         total.backward()  # must not raise
-        n_with_grad = sum(
-            1 for p in module.parameters() if p.requires_grad and p.grad is not None
-        )
+        n_with_grad = sum(1 for p in module.parameters() if p.requires_grad and p.grad is not None)
         assert n_with_grad > 0
 
 
@@ -281,9 +276,7 @@ class TestMonolithicModularConsistency:
         e_diff = (out_mono["energy"] - out_mod["energy"]).abs().max().item()
         assert e_diff < 1e-5, f"Energies differ: {e_diff:.3e}"
 
-        f_diff = (
-            (out_mono["forces"].detach() - out_mod["forces"].detach()).abs().max().item()
-        )
+        f_diff = (out_mono["forces"].detach() - out_mod["forces"].detach()).abs().max().item()
         assert f_diff < 1e-5, f"Forces differ: {f_diff:.3e}"
 
 
@@ -331,9 +324,7 @@ class TestHpoConfig:
         from hydra import compose, initialize_config_dir
 
         os.environ.setdefault("PROJECT_ROOT", str(_CONFIGS_ML_DIR.parents[1]))
-        with initialize_config_dir(
-            config_dir=str(_CONFIGS_ML_DIR), version_base=None
-        ):
+        with initialize_config_dir(config_dir=str(_CONFIGS_ML_DIR), version_base=None):
             cfg = compose(config_name="simurgh_gmd26_hpo")
 
         assert cfg.model.backbone.name == "simurgh_arace"
@@ -353,17 +344,15 @@ class TestHpoConfig:
                 f"Search-space key '{key}' has no matching "
                 f"SimurghAraceBackbone.__init__ parameter '{top_level}'"
             )
-            assert OmegaConf.select(cfg, f"model.backbone.{sub}") is not None, (
-                f"'{sub}' missing from the composed model.backbone config"
-            )
+            assert (
+                OmegaConf.select(cfg, f"model.backbone.{sub}") is not None
+            ), f"'{sub}' missing from the composed model.backbone config"
 
     def test_default_config_uses_arace(self) -> None:
         from hydra import compose, initialize_config_dir
 
         os.environ.setdefault("PROJECT_ROOT", str(_CONFIGS_ML_DIR.parents[1]))
-        with initialize_config_dir(
-            config_dir=str(_CONFIGS_ML_DIR), version_base=None
-        ):
+        with initialize_config_dir(config_dir=str(_CONFIGS_ML_DIR), version_base=None):
             cfg = compose(config_name="simurgh_gmd26")
             legacy = compose(config_name="simurgh_ace_first_gmd26")
         assert cfg.model.backbone.name == "simurgh_arace"

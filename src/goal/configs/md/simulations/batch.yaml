@@ -1,0 +1,29 @@
+# Defaults for `goal-simulate-batch --config <this file>` — batched MD or
+# relaxation of many structures with one GOAL model.  Keys are the fields of
+# goal.md.core.batched.BatchSimulationConfig; command-line flags override them.
+#
+#   goal-simulate-batch --config src/goal/configs/md/simulations/batch.yaml \
+#       --checkpoint logs/<task>/runs/<run>/checkpoints --structures frames.xyz
+#
+# backend: auto  → nvalchemi-toolkit on an NVIDIA GPU (all structures in one
+#                  GPU batch), otherwise ASE + GOALCalculator one by one.
+checkpoint: "" # required: .simurgh archive, checkpoint directory or .ckpt
+checkpoint_select: best # best | last | epoch=N (checkpoint directories)
+structures: [] # required: structure files; every frame is simulated
+
+mode: md # md | relax
+steps: 1000
+timestep_fs: 0.5 # fs
+temperature_K: 300.0
+friction: 0.01 # 1/fs
+fmax: 0.05 # eV/Å, relax only
+
+backend: auto # auto | nvalchemi | ase
+sampler: langevin # langevin | metadynamics | remd (the last two are roadmap stubs)
+device: auto # auto | cpu | cuda | cuda:N
+
+output_dir: outputs/md/batch
+write_trajectory: true
+trajectory_format: extxyz # extxyz (one file per structure) | zarr (one store)
+log_every: 100
+seed: 42

@@ -28,8 +28,13 @@ from e3nn.o3 import Irreps
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
 from goal.ml.data.graph import AtomicGraph, NodeFeatures
+from goal.ml.nn.blocks.artisans import (
+    ArtisanConfig,
+    SimurghArtisanBank,
+    parse_pair_counts,
+    resolve_n_elements,
+)
 from goal.ml.nn.blocks.env_dressing import EnvironmentDressing
-from goal.ml.nn.blocks.artisans import ArtisanConfig, SimurghArtisanBank
 from goal.ml.nn.models.simurgh.geometry import differentiable_edges
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 
@@ -159,14 +164,15 @@ class SimurghBackbone(nn.Module):
             artisan_cfg["equivariant"] = {
                 str(k): v for k, v in dict(artisan_cfg["equivariant"]).items()
             }
+            if "n_elements" in artisan_cfg["equivariant"]:
+                artisan_cfg["equivariant"]["n_elements"] = resolve_n_elements(
+                    artisan_cfg["equivariant"]["n_elements"], elements
+                )
 
         # pair_counts injected by train.py when rare_pair_enabled is True
-        pair_counts: dict[tuple[int, int], int] | None = None
-        raw_pair_counts: typing.Any = artisan_cfg.pop("pair_counts", None)
-        if raw_pair_counts is not None:
-            pair_counts = {
-                (int(k[0]), int(k[1])): int(v) for k, v in dict(raw_pair_counts).items()
-            }
+        pair_counts: dict[tuple[int, int], int] | None = parse_pair_counts(
+            artisan_cfg.pop("pair_counts", None)
+        )
 
         self.artisan_bank: SimurghArtisanBank = SimurghArtisanBank(
             elements=elements,
@@ -261,8 +267,7 @@ class SimurghBackbone(nn.Module):
 
         if mode not in self._ATOMIC_ENERGIES_MODES:
             raise ValueError(
-                f"atomic_energies.mode must be one of "
-                f"{self._ATOMIC_ENERGIES_MODES}, got {mode!r}."
+                f"atomic_energies.mode must be one of {self._ATOMIC_ENERGIES_MODES}, got {mode!r}."
             )
 
         if mode == "learned":
@@ -388,6 +393,26 @@ class SimurghBackbone(nn.Module):
     # ------------------------------------------------------------------
 
     def forward(self, graph: AtomicGraph) -> NodeFeatures:
+        """Dress the atoms, run the artisan bank and add the atomic baseline.
+
+        Parameters
+        ----------
+        graph : AtomicGraph
+            Batched graph with ``pos`` (Å), ``atomic_numbers`` and
+            ``edge_index``.  If ``graph.pos`` does not require grad it is
+            replaced by a detached, grad-enabled copy, so energy-derived
+            force heads can differentiate against it.
+
+        Returns
+        -------
+        NodeFeatures
+            ``node_feats`` — ``(N, irreps_out.dim)`` dressed equivariant
+            features; ``node_energies`` — ``(N,)`` invariant per-atom energy
+            ``scale · E_artisan + E0(Z)``, plus the unscaled per-layer
+            readout energies when the dressing has them; ``node_forces`` —
+            ``(N, 3)`` scaled pairwise forces when ``compute_pairwise_forces``
+            is on, else ``None``.
+        """
         # Re-derive edge geometry from positions so the autograd graph
         # links energy back to ``graph.pos`` (required by autograd-based
         # force heads).  Enable ``requires_grad`` on ``graph.pos`` when

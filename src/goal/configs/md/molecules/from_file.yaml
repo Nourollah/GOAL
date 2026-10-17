@@ -1,0 +1,6 @@
+# Example: Load molecule from file
+_target_: goal.md.core.molecule_factory.MoleculeFactory.create
+_convert_: none
+
+key: from_file
+path: ??? # Set via command line

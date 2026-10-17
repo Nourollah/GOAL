@@ -176,8 +176,7 @@ class TestZeroMasking:
         out = artisan.forward_equivariant(feats, feats, edge_sh, lengths, z_dst)
         assert torch.isfinite(out).all(), "Zero-masked edges produced non-finite output"
         assert out.abs().max().item() == 0.0, (
-            f"Zero input did not produce zero output: max |out| = "
-            f"{out.abs().max().item():.3e}"
+            f"Zero input did not produce zero output: max |out| = " f"{out.abs().max().item():.3e}"
         )
 
 

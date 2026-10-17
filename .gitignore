@@ -153,3 +153,6 @@ configs/local/default.yaml
 
 # Aim logging
 .aim
+
+# Model checkpoints (Lightning .ckpt files anywhere in the tree)
+*.ckpt

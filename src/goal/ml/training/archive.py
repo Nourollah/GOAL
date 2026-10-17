@@ -26,7 +26,7 @@ Directory layout produced by ``GOALCheckpointManager``::
       frozen_source/goal/...        ← model source, frozen at t=0
       config.yaml                   ← fully resolved Hydra config
       metadata.json                 ← version, git commit, elements, ...
-      best_val_forces_mae=...ckpt   ← weights (+ .json sidecar each)
+      best_val_forces_forces_mae=...ckpt ← weights (+ .json sidecar each)
       last.ckpt
       checkpoint_state.json
 
@@ -98,9 +98,12 @@ def _goal_src_root() -> Path:
 
 def get_git_commit() -> str | None:
     """Return the current git commit hash of the goal source tree, or None."""
+    git = shutil.which("git")
+    if git is None:
+        return None
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            [git, "rev-parse", "HEAD"],
             cwd=str(_goal_src_root()),
             capture_output=True,
             text=True,
@@ -560,9 +563,7 @@ def inspect_checkpoint(path: str | Path) -> dict[str, typing.Any]:
         info["format"] = "archive"
         with zipfile.ZipFile(p) as zf:
             names = set(zf.namelist())
-            info["source_frozen"] = any(
-                n.startswith(f"{FROZEN_SOURCE_DIRNAME}/") for n in names
-            )
+            info["source_frozen"] = any(n.startswith(f"{FROZEN_SOURCE_DIRNAME}/") for n in names)
             if "metadata.json" in names:
                 info["metadata"] = json.loads(zf.read("metadata.json"))
             if "checkpoint.json" in names:

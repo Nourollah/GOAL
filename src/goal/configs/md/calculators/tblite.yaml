@@ -1,0 +1,15 @@
+# tblite semi-empirical tight-binding calculator (GFN1/GFN2-xTB)
+# Requires: tblite — included in the `-full` pixi environments
+# (cuda-full, cpu-full, rocm-full); with pip: pip install tblite
+_target_: goal.md.core.calculator_factory.CalculatorFactory.create
+_convert_: all
+key: tblite
+
+method: GFN2-xTB # GFN2-xTB, GFN1-xTB or IPEA1-xTB
+charge: null # null -> from the atoms' initial charges
+multiplicity: null # 2S+1; null -> from the atoms' initial magnetic moments
+accuracy: 1.0
+electronic_temperature: 300.0 # K
+max_iterations: 250
+solvation: null # e.g. [alpb, water]
+verbosity: 0

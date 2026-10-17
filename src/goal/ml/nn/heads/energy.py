@@ -51,6 +51,28 @@ class EnergyHead(nn.Module):
         features: NodeFeatures,
         graph: AtomicGraph,
     ) -> dict[str, torch.Tensor]:
+        """Predict the total energy of each graph.
+
+        Per-atom energies are taken from ``features.node_energies`` when
+        the backbone provides them (e.g. SIMURGH); otherwise they come
+        from this head's scalar readout of ``features.node_feats``.  The
+        total energy is their per-graph sum.  No forces or stress.
+
+        Parameters
+        ----------
+        features : NodeFeatures
+            Backbone output; reads ``node_energies`` ``(N,)`` if set,
+            else ``node_feats`` ``(N, irreps_in.dim)``.
+        graph : AtomicGraph
+            Input graph providing ``batch`` ``(N,)`` (all atoms are
+            assigned to graph 0 when ``batch`` is ``None``).
+
+        Returns
+        -------
+        dict[str, Tensor]
+            ``'energy'`` ``(B,)`` in eV and ``'num_atoms'`` ``(B,)``
+            (float atom counts per graph).
+        """
         # Prefer pre-computed per-atom energies (e.g. from SIMURGH) when the
         # backbone supplies them; otherwise apply our own scalar readout.
         if features.node_energies is not None:

@@ -21,8 +21,8 @@ from e3nn.o3 import Irreps
 from torch_geometric.utils import scatter
 
 from goal.ml.data.graph import AtomicGraph
-from goal.ml.nn.blocks.env_dressing import EnvironmentDressing
 from goal.ml.nn.blocks.artisans import ArtisanConfig, SimurghArtisanBank
+from goal.ml.nn.blocks.env_dressing import EnvironmentDressing
 from goal.ml.nn.models.simurgh.geometry import differentiable_edges
 from goal.ml.nn.primitives.linear import EquivariantLinear
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY

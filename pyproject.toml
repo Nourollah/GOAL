@@ -1,21 +1,29 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "goal"
+# Distribution name on PyPI / conda-forge ("goal" is taken on PyPI).
+# The import name stays `goal`:  import goal.ml, goal.md
+name = "goal-atomistic"
 version = "0.1.0"
-description = "General Open Atomistic Laboratory — a modular framework for machine-learning interatomic potentials"
+description = "General Open Atomistic Laboratory: train machine-learning interatomic potentials and run molecular dynamics with them"
 readme = "README.md"
 requires-python = ">=3.14"
 authors = [{ name = "Amir Masoud Nourollah", email = "nourollah.am@gmail.com" }]
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["atomistic-simulation", "machine-learning", "interatomic-potentials", "equivariant", "gnn", "molecular-dynamics"]
 classifiers = [
-  "License :: OSI Approved :: MIT License",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Physics",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
   "torch>=2.4",
@@ -23,12 +31,13 @@ dependencies = [
   "e3nn>=0.5",
   "lightning>=2.6",
   "hydra-core>=1.3.2",
+  "hydra-colorlog",
+  "omegaconf>=2.3",
   "ase>=3.23",
+  "rdkit>=2026.3.3,<2027",
+  "lmdb",
   "wandb",
   "rich>=13",
-  "rootutils",
-  "hydra-colorlog",
-  "lmdb", "pytest>=9.0.3,<10", "ipython>=9.13.0,<10", "xonsh>=0.23.7,<0.24", "jupyter>=1.1.1,<2", "ipykernel>=7.2.0,<8", "rdkit>=2026.3.3,<2027",
 ]
 
 [project.optional-dependencies]
@@ -36,24 +45,37 @@ mace = ["mace-torch>=0.3.16"]
 fairchem = ["fairchem-core>=1.0"]
 matscipy = ["matscipy"]
 nvalchemiops = ["nvalchemi-toolkit-ops[torch]"]
+# NVIDIA GPU neighbour lists with the matching CUDA runtime wheels.
+nvalchemiops-cu12 = ["nvalchemi-toolkit-ops[torch-cu12]"]
+nvalchemiops-cu13 = ["nvalchemi-toolkit-ops[torch-cu13]"]
+# nvalchemi-toolkit itself (batched GPU MD, SIMURGHNvalchemiWrapper) is NOT an
+# extra: every PyPI release so far declares requires-python <3.14, and a git URL
+# would block the PyPI upload.  Install it from git when needed:
+#   pip install "nvalchemi-toolkit @ git+https://github.com/NVIDIA/nvalchemi-toolkit"
+zarr = ["zarr>=3"]
+lora = ["peft>=0.13"]
 deepspeed = ["deepspeed>=0.14"]
 tune = ["ray[tune]>=2.55.1", "optuna>=3.0"]
 torchmetrics = ["torchmetrics>=1.9.0"]
 examples = ["h5py>=3.10", "requests>=2.31"]
 md = [
-  "flashmd>=0.2.5,<0.3",
+  "flashmd>=0.2.5",
+  "tblite>=0.4; platform_machine == 'x86_64'",   # PyPI wheels are x86-64 only; pixi gets it from conda-forge
   "ase>=3.25.0,<4",
-  "xtb-python>=22.1,<23",
-  "rdkit>=2025.9.3,<2026",
-  "typer>=0.16.0,<0.17",
+  "typer>=0.16.0",
   "pandas>=2.3.0,<3",
   "ipi>=3.0",
 ]
-dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
-all = ["goal[mace,fairchem,matscipy,nvalchemiops,deepspeed,tune,torchmetrics,examples,md]"]
+dev = ["pytest>=9.0.3,<10", "pytest-cov", "rootutils", "ruff", "mypy", "ipython>=9.13.0,<10", "jupyter>=1.1.1,<2", "ipykernel>=7.2.0,<8"]
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "markdown-callouts>=0.4"]
+# mace is excluded from `all`: mace-torch pins e3nn==0.4.4, which conflicts with GOAL (see the MACE note below).
+all = ["goal-atomistic[fairchem,matscipy,nvalchemiops,deepspeed,tune,torchmetrics,examples,md,zarr,lora]"]
 
 [project.urls]
+Homepage = "https://github.com/Nourollah/GOAL"
+Documentation = "https://nourollah.github.io/GOAL/"
 Repository = "https://github.com/Nourollah/GOAL"
+Issues = "https://github.com/Nourollah/GOAL/issues"
 
 [project.scripts]
 goal-train = "goal.ml.cli.train:train_ml"
@@ -64,6 +86,9 @@ goal-finetune-upet = "goal.ml.cli.finetune_upet:main"
 goal-tune = "goal.ml.cli.tune:tune"
 goal-simulate = "goal.md.cli.simulate:simulate"
 goal-simulate-mts = "goal.md.cli.simulate:simulate_mts"
+goal-simulate-batch = "goal.md.cli.simulate_batch:main"
+goal-pack-zarr = "goal.ml.cli.pack_zarr:main"
+goal-distill = "goal.ml.cli.distill:main"
 goal-inspect = "goal.ml.cli.inspect_ckpt:main"
 goal-pack-archive = "goal.ml.cli.pack:main"
 
@@ -72,6 +97,11 @@ goal-pack-archive = "goal.ml.cli.pack:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["goal*"]
+
+# Ship the Hydra configs (and their READMEs) inside the package.
+[tool.setuptools.package-data]
+goal = ["configs/**/*.yaml", "configs/**/*.md", "configs/**/*.py"]
+"goal.ml.data.benchmarks" = ["README.md"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -88,6 +118,7 @@ log_cli = "True"
 markers = [
   "slow: slow tests",
   "integration: tests that require an actual foundation model / external engine installed",
+  "gpu: tests that need real accelerator hardware (an NVIDIA GPU); skipped when absent",
 ]
 minversion = "6.0"
 testpaths = ["tests/", "tests/ml/", "tests/md/"]
@@ -104,19 +135,102 @@ exclude_lines = [
 # Pixi workspace configuration (replaces pixi.toml)
 # ---------------------------------------------------------------------------
 
+# Same line length as black in .pre-commit-config.yaml, so `ruff format`
+# (the pixi `format` task) and the pre-commit hooks agree.
+[tool.ruff]
+line-length = 99
+
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64", "linux-aarch64"]
+platforms = [
+    "linux-64",
+    "linux-aarch64",
+    # CUDA variants: same architectures, plus the virtual packages the CUDA
+    # environments need (CUDA 12 driver; glibc >= 2.34 for warp-lang/nvalchemi).
+    { name = "linux-64-cuda", platform = "linux-64", cuda = "12", glibc = "2.34" },
+    { name = "linux-aarch64-cuda", platform = "linux-aarch64", cuda = "12", glibc = "2.34" },
+]
+
+# --- Environments ---------------------------------------------------------
+#
+#   pixi install -e cuda        NVIDIA GPU (x86_64 + aarch64)          ML module
+#   pixi install -e cuda-full   NVIDIA GPU                             ML + MD modules
+#   pixi install -e cpu         CPU only (x86_64 + aarch64)            ML module
+#   pixi install -e cpu-full    CPU only                               ML + MD modules
+#   pixi install -e rocm        AMD GPU (x86_64 only)                  ML module
+#   pixi install -e rocm-full   AMD GPU                                ML + MD modules
+#   pixi install -e docs        MkDocs only (no torch)
+#
+# Every environment except `docs` contains the full ML stack (default feature
+# below). The `md` feature adds the MD module on top. Each environment is solved
+# for every platform it supports, so x86_64 and aarch64 share one definition.
+#
+# `default` is an alias of `cuda`: same features, same solve group, hence the
+# exact same package versions. It exists only so that a bare `pixi run …`
+# lands on the CUDA build; documentation always spells out `-e`.
+
+[tool.pixi.environments]
+cuda = { features = ["cuda"], solve-group = "cuda" }
+default = { features = ["cuda"], solve-group = "cuda" }
+cuda-full = { features = ["cuda", "md"], solve-group = "cuda-full" }
+cpu = { features = ["cpu"], solve-group = "cpu" }
+cpu-full = { features = ["cpu", "md"], solve-group = "cpu-full" }
+rocm = { features = ["rocm"], solve-group = "rocm" }
+rocm-full = { features = ["rocm", "md"], solve-group = "rocm-full" }
+docs = { features = ["docs"], no-default-feature = true }
+
+# --- Default feature: Python + the full ML module -------------------------
 
 [tool.pixi.dependencies]
 python = "3.14.*"
 dftd3-python = ">=1.4.0,<2"
 
 [tool.pixi.pypi-dependencies]
-goal = { path = ".", editable = true }
+goal-atomistic = { path = ".", editable = true }
+# Interactive / dev tools (pip users get these from the `dev` extra)
+pytest = ">=9.0.3,<10"
+rootutils = "*"
+ipython = ">=9.13.0,<10"
+xonsh = ">=0.23.7,<0.24"
+jupyter = ">=1.1.1,<2"
+ipykernel = ">=7.2.0,<8"
 py3dmol = "*"
+# ML extras (all installed by default)
+peft = ">=0.13"
+zarr = ">=3"
+deepspeed = ">=0.14"
+ray = { version = ">=2.55.1", extras = ["tune"] }
+optuna = ">=3.0"
+matscipy = "*"
+torchmetrics = ">=1.9.0"
+h5py = ">=3.10"
+requests = ">=2.31"
+# Dev tools
+pytest-cov = "*"
+ruff = "*"
+mypy = "*"
+pre-commit = ">=3"
 
-# --- Platform features ---
+[tool.pixi.pypi-options]
+# deepspeed is an sdist whose setup.py imports torch, so it must build
+# against the environment's torch instead of an isolated build env.
+no-build-isolation = ["deepspeed"]
+
+# FairChem (UMA) is NOT in the environments: fairchem-core pins torch~=2.13,
+# which would downgrade torch everywhere. Install it on demand with
+#   pip install -e ".[fairchem]"
+
+# --- Hardware features ----------------------------------------------------
+
+[tool.pixi.feature.cuda]
+platforms = ["linux-64-cuda", "linux-aarch64-cuda"]
+
+[tool.pixi.feature.cuda.dependencies]
+pytorch-gpu = ">=2.10"
+
+[tool.pixi.feature.cuda.pypi-dependencies]
+# GPU-accelerated neighbour lists (NVIDIA only)
+nvalchemi-toolkit-ops = { version = "*", extras = ["torch"] }
 
 [tool.pixi.feature.cpu]
 platforms = ["linux-64", "linux-aarch64"]
@@ -124,44 +238,34 @@ platforms = ["linux-64", "linux-aarch64"]
 [tool.pixi.feature.cpu.dependencies]
 pytorch-cpu = ">=2.10"
 
-[tool.pixi.feature.cuda]
+# ROCm PyTorch is not on conda-forge: torch comes from PyTorch's ROCm wheel
+# index, which only publishes x86_64 builds.
+[tool.pixi.feature.rocm]
 platforms = ["linux-64"]
 
-[tool.pixi.feature.cuda.dependencies]
-pytorch-gpu = ">=2.10"
+[tool.pixi.feature.rocm.pypi-dependencies]
+torch = ">=2.10"
 
-[tool.pixi.feature.cuda.pypi-dependencies]
-jupyter = ">=1.1.1,<2"
-ipykernel = ">=6"
+[tool.pixi.feature.rocm.pypi-options]
+# The ROCm wheels carry a `+rocm7.2` local version, which outranks the plain
+# PyPI build under best-match resolution. triton-rocm comes from the same index.
+extra-index-urls = ["https://download.pytorch.org/whl/rocm7.2"]
+index-strategy = "unsafe-best-match"
 
-[tool.pixi.feature.cuda.system-requirements]
-cuda = "12.0"
+# --- MD module ------------------------------------------------------------
 
-[tool.pixi.feature.dev.dependencies]
-pytest = ">=7"
-ruff = "*"
-mypy = "*"
-pre-commit = ">=3"
+[tool.pixi.feature.md.dependencies]
+qe = ">=7.4"   # Quantum ESPRESSO binaries (pw.x, …) for the `espresso` calculator
+tblite-python = ">=0.4"   # GFN1/GFN2-xTB tight binding for the `tblite` calculator
+# conda-forge's qe 7.6 links libelpa.so.19 but does not declare ELPA as a
+# dependency; pin the matching MPI build explicitly until that is fixed.
+elpa = { version = "2025.06.*", build = "mpi_openmpi*" }
 
-[tool.pixi.feature.dev.pypi-dependencies]
-pytest-cov = "*"
-
-# --- Optional adapter features ---
-# Some optional deps have Python version or e3nn version conflicts with
-# the core environment.  They are available as pip extras — install via:
-#   pip install -e ".[fairchem]"       # FairChem adapter
-#   pip install -e ".[nvalchemiops]"   # NVIDIA GPU neighbour list (CUDA-only)
-#   pip install -e ".[tune]"           # Ray Tune + Optuna (needs Python ≤3.13)
-#   pip install -e ".[all]"            # everything
-#   For [mace], see "MACE (mace-torch)" below — the [mace] extra itself is NOT
-#   installable (see why).
-#
-# Note: pixi's uv-managed envs don't ship a `pip` binary — use `uv pip install
-# --python <env>/bin/python ...` instead of plain `pip install` inside them.
-#
-# Pixi features are provided where compatible.  Features that cannot be
-# resolved in the pixi environment (e3nn conflict, missing cp314 wheels)
-# are commented out — users should fall back to pip install for those.
+[tool.pixi.feature.md.pypi-dependencies]
+flashmd = ">=0.2.5"
+ipi = ">=3.0"
+typer = ">=0.16.0"
+pandas = ">=2.3.0,<3"
 
 # --- MACE (mace-torch) ---
 # mace-torch hard-pins e3nn==0.4.4, while GOAL's own equivariant blocks (SIMURGH/
@@ -197,41 +301,19 @@ pytest-cov = "*"
 # — mace_mp() loads a real checkpoint on GPU, and goal.ml.data.graph.AtomicGraph
 # (used by that notebook) still imports fine since it doesn't touch e3nn's API.
 
-# [tool.pixi.feature.mace.pypi-dependencies]
-# mace-torch = ">=0.3"            # conflicts: pins e3nn==0.4.4 — use the standalone .venv-mace instead (see above)
+# --- Documentation (MkDocs Material) ---
 
-[tool.pixi.feature.fairchem.pypi-dependencies]
-fairchem-core = ">=1.0"
+[tool.pixi.feature.docs.dependencies]
+python = "3.13.*"
 
-[tool.pixi.feature.deepspeed.pypi-dependencies]
-deepspeed = ">=0.14"
+[tool.pixi.feature.docs.pypi-dependencies]
+mkdocs = ">=1.6,<2"
+mkdocs-material = ">=9.5,<10"
+markdown-callouts = ">=0.4"
 
-# nvalchemi-toolkit-ops: GPU-accelerated neighbour lists (CUDA-only).
-# Requires the cuda pixi feature.  No cp314 wheels on PyPI yet — check
-# https://github.com/nvidia/nvalchemi-toolkit-ops for availability.
-# [tool.pixi.feature.nvalchemiops.pypi-dependencies]
-# nvalchemi-toolkit-ops = { version = "*", extras = ["torch"] }   # no cp314 wheels yet
-
-# [tool.pixi.feature.tune.pypi-dependencies]
-# ray = { version = ">=2.9", extras = ["tune"] }  # no cp314 wheels yet
-# optuna = ">=3.0"
-
-[tool.pixi.feature.examples.pypi-dependencies]
-h5py = ">=3.10"
-requests = ">=2.31"
-
-[tool.pixi.environments]
-default = ["cpu"]
-cuda = ["cuda"]
-dev = ["cpu", "dev"]
-dev-cuda = ["cuda", "dev"]
-fairchem = ["cuda", "fairchem"]
-cuda-deepspeed = ["cuda", "deepspeed"]
-examples = ["cuda", "examples"]
-# mace = ["cuda", "mace"]          # doesn't work — see "MACE (mace-torch)" comment above; use .venv-mace instead
-# tune = ["cpu", "tune"]            # pip install -e ".[tune]" instead
-# cuda-tune = ["cuda", "tune"]
-# cuda-nvalchemiops = ["cuda", "nvalchemiops"]  # uncomment when cp314 wheels land
+[tool.pixi.feature.docs.tasks]
+docs-serve = "mkdocs serve"
+docs-build = "mkdocs build --strict"
 
 # --- Tasks ---
 
@@ -248,14 +330,18 @@ clean-logs = "rm -rf logs/**"
 test = "pytest -k 'not slow'"
 test-full = "pytest"
 lint = "ruff check src/ tests/"
+# Fails when a doc, script or config comment still uses removed config-group syntax.
+lint-configs = "pytest tests/test_cli_and_packaging.py -k stale -q"
 format = "ruff format src/ tests/"
 typecheck = "mypy src/goal/ml/"
 train = "python -c 'from goal.ml.cli.train import train_ml; train_ml()'"
 train-ml = "python -c 'from goal.ml.cli.train import train_ml; train_ml()'"
-eval = "python -m goal.ml.cli.evaluate"
-finetune = "python -m goal.ml.cli.finetune"
-simulate = "python -m goal.md.cli.simulate"
-simulate-mts = "python -m goal.md.cli.simulate simulate_mts"
+# Arguments after the task name are appended, e.g.
+#   pixi run -e cuda-full simulate calculator.checkpoint=model.simurgh steps=5000
+eval = "goal-eval"
+finetune = "goal-finetune"
+simulate = "goal-simulate"
+simulate-mts = "goal-simulate-mts"
 
 [dependency-groups]
 cuda = ["jupyter", "ipykernel"]

@@ -55,9 +55,7 @@ def format_report(info: dict[str, typing.Any]) -> str:
             lines.append(_row("Elements", _element_symbols(meta["elements"])))
         if "dedicated_pairs" in meta:
             n_rare = 1 if meta.get("rare_artisan") else 0
-            lines.append(
-                _row("Pairs", f"{len(meta['dedicated_pairs'])} dedicated, {n_rare} rare")
-            )
+            lines.append(_row("Pairs", f"{len(meta['dedicated_pairs'])} dedicated, {n_rare} rare"))
         if "avg_num_neighbors" in meta:
             lines.append(_row("Avg neighbours", f"{meta['avg_num_neighbors']:.2f}"))
         if "scale" in meta:
@@ -81,6 +79,19 @@ def format_report(info: dict[str, typing.Any]) -> str:
 
 
 def main(argv: typing.Sequence[str] | None = None) -> int:
+    """Entry point of the ``goal-inspect`` console script.
+
+    Parses ``argv`` (``sys.argv[1:]`` when ``None``) for one path (a
+    ``.simurgh`` archive, a checkpoint directory or a ``.ckpt`` file)
+    and prints :func:`format_report` of :func:`inspect_checkpoint` to
+    stdout.
+
+    Returns
+    -------
+    int
+        ``0`` on success; ``1`` if the path is not found (error on
+        stderr).
+    """
     parser = argparse.ArgumentParser(
         prog="goal-inspect",
         description="Inspect a .simurgh archive, checkpoint directory, or .ckpt file.",

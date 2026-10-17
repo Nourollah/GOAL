@@ -1,0 +1,18 @@
+# path to root directory
+# Falls back to the shell's working directory (PWD) when PROJECT_ROOT is not set.
+# Override explicitly: PROJECT_ROOT=/some/path pixi run train ...
+root_dir: ${oc.env:PROJECT_ROOT,${oc.env:PWD}}
+
+# path to data directory
+data_dir: ${paths.root_dir}/data/
+
+# path to logging directory
+log_dir: ${paths.root_dir}/logs/
+
+# path to output directory, created dynamically by hydra
+# path generation pattern is specified in `src/goal/configs/hydra/default.yaml`
+# use it to store all files generated during the run, like ckpts and metrics
+output_dir: ${hydra:runtime.output_dir}
+
+# path to working directory
+work_dir: ${hydra:runtime.cwd}

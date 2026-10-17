@@ -265,7 +265,12 @@ class TestNvalchemiopsBackend:
         graph = AtomicGraph.from_ase(atoms, cutoff=cutoff, neighbor_list_backend="nvalchemiops")
 
         assert graph.edge_index.shape[1] > 0, "No edges found"
-        assert (graph.edge_lengths <= cutoff + 1e-6).all(), "Edge exceeds cutoff"
+        # from_ase does not store edge lengths (models re-derive them from
+        # positions); check the neighbour list itself.
+        from goal.ml.data.neighbor_list import build_neighbor_list
+
+        nl = build_neighbor_list(atoms, cutoff, backend="nvalchemiops")
+        assert (nl.edge_lengths <= cutoff + 1e-6).all(), "Edge exceeds cutoff"
 
         src, dst = graph.edge_index
         pairs = set(zip(src.tolist(), dst.tolist()))

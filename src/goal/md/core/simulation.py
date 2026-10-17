@@ -22,9 +22,10 @@ Usage patterns
 **Config-first (Hydra)**::
 
     from hydra import compose, initialize_config_dir
+    from goal import CONFIGS_DIR
     from goal.md.core.simulation import simulate_from_config
 
-    with initialize_config_dir(config_dir="configs/"):
+    with initialize_config_dir(config_dir=CONFIGS_DIR):
         cfg = compose("md/simulations/langevin_with_model")
     result = simulate_from_config(cfg)
 """
@@ -222,10 +223,16 @@ class Simulation:
 
         The config must contain the following top-level keys:
 
-        - ``molecule`` — passed to :meth:`MoleculeFactory.create`
-        - ``calculator`` — passed to :meth:`CalculatorFactory.create`
-        - ``dynamics`` — mapping with ``type`` key and dynamics parameters
-        - All optional fields of :class:`SimulationConfig`
+        - ``molecule`` — passed to :meth:`MoleculeFactory.from_config`
+          (builder named by ``key``, ``type`` or ``method``)
+        - ``calculator`` — passed to :meth:`CalculatorFactory.from_config`
+          (builder named by ``key`` or ``type``)
+        - All optional fields of :class:`SimulationConfig` (``steps``,
+          ``timestep_fs``, ``temperature_K``, ``friction`` …).  The older
+          spelling ``num_steps`` is accepted for ``steps``.
+
+        The integrator is always ASE Langevin; a ``dynamics:`` section is
+        not read.
 
         Parameters
         ----------
@@ -237,22 +244,24 @@ class Simulation:
         Simulation
         """
         from goal.md.core.calculator_factory import CalculatorFactory
-        from goal.md.core.md_factory import DynamicsFactory
         from goal.md.core.molecule_factory import MoleculeFactory
 
-        # Build molecule
-        mol_cfg = dict(cfg.get("molecule", {}))
-        method = mol_cfg.pop("method", "from_smiles")
-        atoms: Atoms = MoleculeFactory.create(method, **mol_cfg)
+        if cfg.get("molecule") is None or cfg.get("calculator") is None:
+            raise ValueError(
+                "A simulation config needs top-level 'molecule:' and 'calculator:' "
+                f"sections; got top-level keys {sorted(cfg.keys())}.  A config "
+                "stored in a sub-directory must start with '# @package _global_', "
+                "otherwise Hydra nests it (e.g. under 'md.simulations')."
+            )
 
-        # Build calculator
-        calc_cfg = dict(cfg.get("calculator", {}))
-        calc_key = calc_cfg.pop("type", calc_cfg.pop("key", "goal_model"))
-        calculator = CalculatorFactory.create(calc_key, **calc_cfg)
+        atoms: Atoms = MoleculeFactory.from_config(cfg.molecule, default_key="from_smiles")
+        calculator = CalculatorFactory.from_config(cfg.calculator, default_key="goal_model")
 
         # Simulation parameters
         sim_keys = {f.name for f in dataclasses.fields(SimulationConfig)}
         sim_params = {k: v for k, v in cfg.items() if k in sim_keys}
+        if "steps" not in sim_params and cfg.get("num_steps") is not None:
+            sim_params["steps"] = int(cfg.num_steps)
 
         return cls(atoms=atoms, calculator=calculator, **sim_params)
 
@@ -262,7 +271,7 @@ def simulate_from_config(cfg: typing.Any) -> RunResult:
 
     Designed to be the ``_target_`` in simulation config files::
 
-        # configs/md/simulations/langevin_with_model.yaml
+        # src/goal/configs/md/simulations/langevin_with_model.yaml
         _target_: goal.md.core.simulation.simulate_from_config
 
     Parameters

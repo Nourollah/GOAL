@@ -53,6 +53,37 @@ class StressHead(nn.Module):
         features: NodeFeatures,
         graph: AtomicGraph,
     ) -> dict[str, torch.Tensor]:
+        """Predict total energy and, when gradients are tracked, the stress.
+
+        The energy is the per-graph sum of scalar-readout atomic
+        energies.  If ``graph.pos.requires_grad`` is ``True`` the
+        position gradient ``g = dE/dr`` is taken with autograd and an
+        edge virial is accumulated per graph,
+        ``sigma = (1/V) * sum_edges r_ij (outer) g[col]``, with
+        ``r_ij = r_col - r_row`` (plus periodic shift) taken from
+        ``graph.edge_attr`` or recomputed via ``differentiable_edges``.
+        Each edge is assigned to the graph of its ``row`` atom.  The sum
+        is divided by ``|det(cell)|`` only when ``graph.cell`` is set;
+        otherwise the unnormalised virial is returned.  The autograd
+        graph is kept (``create_graph``) only in training mode.
+
+        Parameters
+        ----------
+        features : NodeFeatures
+            Backbone output; only ``node_feats`` ``(N, irreps_in.dim)``
+            is read (``node_energies`` is ignored by this head).
+        graph : AtomicGraph
+            Input graph providing ``pos`` ``(N, 3)`` in Å, ``batch``
+            ``(N,)``, ``edge_index`` ``(2, E)``, optionally ``edge_attr``
+            ``(E, 3)``, ``unit_shifts`` and ``cell`` ``(B, 3, 3)`` in Å.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            ``'energy'`` ``(B,)`` in eV and ``'num_atoms'`` ``(B,)``;
+            plus ``'stress'`` ``(B, 3, 3)`` in eV/Å³ only when
+            ``graph.pos.requires_grad`` is ``True``.
+        """
         node_energies: torch.Tensor = self.readout(features.node_feats).squeeze(-1)  # (N,)
 
         batch: torch.Tensor = (

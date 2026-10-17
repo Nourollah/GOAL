@@ -1,147 +1,134 @@
 """Hydra-based evaluation entry point.
 
-Evaluates a trained model checkpoint on the test split.
-Compatible with Lightning 2.6+ and DDP/FSDP strategies.
+Evaluates a trained checkpoint on a test split::
+
+    goal-eval ckpt_path=logs/<task>/runs/<run>/checkpoints          # managed directory
+    goal-eval ckpt_path=models/simurgh_gmd26.simurgh                # archive
+    goal-eval ckpt_path=.../last.ckpt +data.test_paths=[data/test.xyz]
+
+The **model** is always rebuilt from the checkpoint itself — the same
+loader as :class:`~goal.ml.utils.calculator.GOALCalculator`: frozen source
+for archives and checkpoint directories, the saved config (including the
+dataset-derived ``elements`` / ``scale`` / ``avg_num_neighbors``), and the
+EMA weights when the run kept them.  The config passed to this command
+only says what to evaluate on:
+
+* ``data`` is merged onto the checkpoint's own ``data:`` section, so the
+  default (empty) evaluates on exactly the test split the run used;
+* ``trainer`` sets device / precision for the test loop.
+
+``--config-name <experiment>`` still works: that experiment's ``data:``
+section then replaces the checkpoint's.
 """
 
 from __future__ import annotations
 
+import json
 import typing
+from pathlib import Path
 
 import hydra
+import lightning as L
 import torch
-from lightning import Callback
-from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf, open_dict
 
-from goal.ml.cli import CONFIGS_DIR
+from goal.ml.cli import CONFIGS_ML_DIR
+from goal.ml.cli.builders import instantiate_loggers
 from goal.ml.data.datamodule import GOALDataModule
-from goal.ml.nn.models.base import MonolithicModel
-from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
-from goal.ml.training.loss import CompositeLoss, WeightedLoss
-from goal.ml.training.module import GOALModule
+
+#: Keys of a plain ``trainer:`` block (no ``_target_``) forwarded to ``L.Trainer``.
+_TRAINER_KEYS: tuple[str, ...] = (
+    "accelerator",
+    "devices",
+    "num_nodes",
+    "precision",
+    "strategy",
+    "logger",
+    "enable_progress_bar",
+    "limit_test_batches",
+    "inference_mode",
+)
 
 
-def _instantiate_callbacks(cfg: DictConfig | None) -> list[Callback]:
-    """Instantiate Lightning callbacks from Hydra config."""
-    if not cfg:
-        return []
-    callbacks: list[Callback] = []
-    for _, cb_conf in cfg.items():
-        if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
-            callbacks.append(hydra.utils.instantiate(cb_conf))
-    return callbacks
+def build_eval_config(cfg: DictConfig, ckpt_cfg: DictConfig) -> DictConfig:
+    """The checkpoint's config with ``cfg.data`` merged over its ``data:``."""
+    merged: DictConfig = OmegaConf.create(OmegaConf.to_container(ckpt_cfg, resolve=False))
+    override: typing.Any = cfg.get("data", None)
+    if override:
+        with open_dict(merged):
+            merged.data = OmegaConf.merge(merged.get("data", {}), override)
+    return merged
 
 
-def _instantiate_loggers(cfg: DictConfig | None) -> list[Logger]:
-    """Instantiate Lightning loggers from Hydra config."""
-    if not cfg:
-        return []
-    loggers: list[Logger] = []
-    for _, lg_conf in cfg.items():
-        if isinstance(lg_conf, DictConfig) and "_target_" in lg_conf:
-            loggers.append(hydra.utils.instantiate(lg_conf))
-    return loggers
+def build_eval_trainer(cfg: DictConfig, ckpt_cfg: DictConfig) -> L.Trainer:
+    """Test-loop trainer from ``cfg.trainer``.
 
-
-def _build_loss(cfg: DictConfig) -> CompositeLoss:
-    """Construct the composite loss from config.
-
-    Mirrors ``train.py``'s ``_build_loss`` so loss labels and fn specs
-    are consistent between training and evaluation.
+    A ``trainer:`` block with ``_target_`` (an experiment config) is
+    instantiated as-is; a plain one (``eval.yaml``) builds ``L.Trainer``
+    from the keys above.  ``precision: null`` uses the checkpoint's own
+    ``trainer.precision`` so a float64 model is tested in float64.
     """
-    losses: list[WeightedLoss] = []
-    for loss_cfg in cfg.training.losses:
-        loss_cls: typing.Any = LOSS_REGISTRY.get(loss_cfg.name)
-        fn_spec: typing.Any = loss_cfg.get("fn", "mse")
-        loss_kwargs: dict[str, typing.Any] = {
-            k: v for k, v in loss_cfg.items() if k not in ("name", "weight", "fn")
-        }
-        if isinstance(fn_spec, str):
-            losses.append(
-                WeightedLoss(
-                    loss_cls(loss_fn=fn_spec, **loss_kwargs),
-                    weight=loss_cfg.weight,
-                    label=loss_cfg.name,
-                )
-            )
-        else:
-            for sub in fn_spec:
-                sub_name: str = sub["name"] if isinstance(sub, dict) else sub.name
-                sub_weight: float = float(sub["weight"] if isinstance(sub, dict) else sub.weight)
-                fn_label: str = sub_name.rsplit(".", 1)[-1]
-                losses.append(
-                    WeightedLoss(
-                        loss_cls(loss_fn=sub_name),
-                        weight=sub_weight,
-                        label=f"{loss_cfg.name}_{fn_label}",
-                        group=loss_cfg.name,
-                    )
-                )
-    return CompositeLoss(losses)
+    trainer_cfg: typing.Any = cfg.get("trainer", None) or {}
+    loggers: list[typing.Any] = instantiate_loggers(cfg.get("logger"))
+    if "_target_" in trainer_cfg:
+        return hydra.utils.instantiate(trainer_cfg, callbacks=None, logger=loggers or False)
+
+    kwargs: dict[str, typing.Any] = {
+        k: trainer_cfg[k] for k in _TRAINER_KEYS if trainer_cfg.get(k, None) is not None
+    }
+    if kwargs.get("precision") is None:
+        saved: typing.Any = (ckpt_cfg.get("trainer", None) or {}).get("precision", None)
+        if saved is not None:
+            kwargs["precision"] = saved
+    kwargs.setdefault("logger", loggers or False)
+    kwargs.setdefault("accelerator", "auto")
+    kwargs.setdefault("devices", 1)
+    # Forces are -dE/dpos: the test loop must keep autograd available.
+    kwargs.setdefault("inference_mode", False)
+    return L.Trainer(**kwargs)
 
 
-def _build_head(cfg: DictConfig, backbone: typing.Any) -> typing.Any:
-    """Build the task head from config, or ``None`` for monolithic backbones."""
-    head_cfg = cfg.model.get("head", None)
-    is_monolithic: bool = isinstance(backbone, MonolithicModel)
-
-    if is_monolithic:
-        return None
-
-    if head_cfg is None:
-        raise ValueError(
-            f"Backbone '{cfg.model.backbone.name}' requires a 'head:' block in the model config."
-        )
-
-    head_cls: typing.Any = HEAD_REGISTRY.get(head_cfg.name)
-    head_kwargs: dict[str, typing.Any] = {k: v for k, v in head_cfg.items() if k != "name"}
-    return head_cls(**head_kwargs)
-
-
-@hydra.main(version_base=None, config_path=CONFIGS_DIR, config_name="eval")
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="eval")
 def evaluate(cfg: DictConfig) -> None:
     """GOAL evaluation entry point.
 
-    Loads a checkpoint and evaluates on the test set.
-    Strategy (DDP, FSDP, etc.) is controlled via the trainer config group:
-        python evaluate.py trainer=ddp ckpt_path=...
+    Rebuilds the model from ``ckpt_path`` and runs ``trainer.test()`` on
+    the test split.  Strategy / device are controlled via ``trainer.*``.
     """
-    assert cfg.ckpt_path, "Must provide ckpt_path for evaluation"
+    from goal.ml.utils.calculator import load_goal_checkpoint
+
+    if cfg.get("seed") is not None:
+        L.seed_everything(cfg.seed, workers=True)
 
     # Performance: TF32 for Ampere+ GPUs — falls back safely on older hardware
-    perf: dict[str, typing.Any] = cfg.training.get("performance", {})
     has_tf32: bool = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
-    precision: str = perf.get(
-        "float32_matmul_precision",
-        "high" if has_tf32 else "highest",
+    torch.set_float32_matmul_precision("high" if has_tf32 else "highest")
+
+    loaded = load_goal_checkpoint(
+        str(cfg.ckpt_path),
+        checkpoint=str(cfg.get("checkpoint", "best")),
+        device="cpu",  # the trainer moves it
+        use_ema=bool(cfg.get("use_ema", True)),
     )
-    torch.set_float32_matmul_precision(precision)
+    print(f"[goal-eval] {cfg.ckpt_path}: {loaded.weights.upper()} weights")
 
-    # Build components via registry
-    backbone_cls: typing.Any = BACKBONE_REGISTRY.get(cfg.model.backbone.name)
-    backbone_kwargs: dict[str, typing.Any] = {
-        k: v for k, v in cfg.model.backbone.items() if k != "name"
-    }
-    backbone: typing.Any = backbone_cls(**backbone_kwargs)
+    eval_cfg: DictConfig = build_eval_config(cfg, loaded.config)
+    datamodule: GOALDataModule = GOALDataModule(eval_cfg)
+    trainer: L.Trainer = build_eval_trainer(cfg, loaded.config)
 
-    head: typing.Any = _build_head(cfg, backbone)
-    loss: CompositeLoss = _build_loss(cfg)
+    results: list[dict[str, float]] = trainer.test(loaded.module, datamodule=datamodule)
 
-    module: GOALModule = GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
-    datamodule: GOALDataModule = GOALDataModule(cfg)
-
-    # Instantiate callbacks / loggers from Hydra config
-    callbacks: list[Callback] = _instantiate_callbacks(cfg.get("callbacks"))
-    loggers: list[Logger] = _instantiate_loggers(cfg.get("logger"))
-
-    trainer: typing.Any = hydra.utils.instantiate(
-        cfg.trainer,
-        callbacks=callbacks or None,
-        logger=loggers or True,
-    )
-
-    trainer.test(module, datamodule=datamodule, ckpt_path=cfg.ckpt_path)
+    output_file: typing.Any = cfg.get("output_file", None)
+    if output_file and trainer.is_global_zero:
+        out = Path(str(output_file))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "checkpoint": str(cfg.ckpt_path),
+            "weights": loaded.weights,
+            "metrics": [{k: float(v) for k, v in r.items()} for r in results],
+        }
+        out.write_text(json.dumps(payload, indent=2))
+        print(f"[goal-eval] metrics written to {out}")
 
 
 if __name__ == "__main__":

@@ -114,15 +114,27 @@ def extract_ase_labels(
     """
     return {
         "energy": _resolve_property(
-            atoms, "energy", mapping["energy"], explicit, atoms.info,
+            atoms,
+            "energy",
+            mapping["energy"],
+            explicit,
+            atoms.info,
             lambda a: a.get_potential_energy(),
         ),
         "forces": _resolve_property(
-            atoms, "forces", mapping["forces"], explicit, atoms.arrays,
+            atoms,
+            "forces",
+            mapping["forces"],
+            explicit,
+            atoms.arrays,
             lambda a: a.get_forces(),
         ),
         "stress": _resolve_property(
-            atoms, "stress", mapping["stress"], explicit, atoms.info,
+            atoms,
+            "stress",
+            mapping["stress"],
+            explicit,
+            atoms.info,
             lambda a: a.get_stress(voigt=False),
         ),
     }

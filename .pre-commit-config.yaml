@@ -10,6 +10,9 @@ repos:
       - id: end-of-file-fixer
       - id: check-docstring-first
       - id: check-yaml
+        # mkdocs.yml uses `!!python/name:` tags (MkDocs Material); --unsafe
+        # checks YAML syntax only instead of constructing those objects.
+        args: [--unsafe]
       - id: debug-statements
       - id: detect-private-key
       - id: check-executables-have-shebangs
@@ -51,8 +54,13 @@ repos:
             --ignore-init-method,
             --ignore-module,
             --ignore-nested-functions,
+            --ignore-magic,
+            --ignore-property-decorators,
             -vv,
           ]
+        # Docstring coverage is measured on the package. Tests document
+        # themselves through descriptive names; scripts are one-off tools.
+        exclude: ^(tests|scripts)/
 
   # python check (PEP8), programming errors and code complexity
   - repo: https://github.com/PyCQA/flake8
@@ -76,11 +84,15 @@ repos:
   #   B311 — random not crypto-safe (used in tutorial-generation script)
   #   B403 — pickle import (paired with B301)
   #   B614 — unsafe torch.load (loads trusted checkpoints from configured paths)
+  #   B404 — subprocess import  ┐ GOAL launches its own tools on purpose (mtt for
+  #   B603 — subprocess call    ┘ UPET fine-tuning, git for archive metadata, the
+  #                               CLIs in tests), always with argument lists and
+  #                               never through a shell (shell=True is still flagged).
   - repo: https://github.com/PyCQA/bandit
     rev: "1.8.3"
     hooks:
       - id: bandit
-        args: ["-s", "B101,B108,B110,B301,B311,B403,B614"]
+        args: ["-s", "B101,B108,B110,B301,B311,B403,B404,B603,B614"]
 
   # yaml formatting
   - repo: https://github.com/pre-commit/mirrors-prettier
@@ -103,7 +115,10 @@ repos:
       - id: codespell
         args:
           - --skip=logs/**,data/**,*.ipynb,pixi.lock
-          # - --ignore-words-list=abc,def
+          # datas: list of Data objects; equil: equilibration file names;
+          # te: train/val/test split; Nd/Te: element symbols;
+          # eference: from "**r**eference" in the RESPA acronym.
+          - --ignore-words-list=datas,equil,te,nd,eference
 
   # jupyter notebook cell output clearing
   - repo: https://github.com/kynan/nbstripout

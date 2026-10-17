@@ -1,0 +1,180 @@
+# @package _global_
+########################################################
+# GOAL fine-tuning config — LoRA on a trained SIMURGH checkpoint
+#
+#   goal-train --config-name finetune/simurgh_lora \
+#       model.backbone.checkpoint_path=/abs/path/logs/simurgh_gmd26/runs/<run>/checkpoints \
+#       'data.train_paths=[data/dicarboxylic/train.xyz]' \
+#       'data.val_paths=[data/dicarboxylic/val.xyz]'
+#
+# (`goal-finetune` uses this file as its default config too.)
+#
+# The base checkpoint is loaded with its EMA weights and frozen; low-rank
+# adapters are injected into the invariant nn.Linear layers of the artisans
+# (element conditioning, radial MLPs).  The energy readouts and the atomic
+# reference energies are trained in full (head_trainable).  Equivariant e3nn
+# maps are not nn.Linear and stay frozen, so equivariance is preserved.
+#
+# Same GOALModule + Lightning trainer + GOALCheckpointManager as native
+# training; the fine-tuned checkpoint loads in GOALCalculator like any other
+# (it rebuilds from checkpoint_path, so keep that file reachable — use an
+# absolute path).  Needs `peft` (in every pixi environment).
+########################################################
+
+experiment:
+  name: "finetune_simurgh_lora"
+  description: "SIMURGH LoRA fine-tuning on a small dataset"
+  tags: ["finetune", "simurgh", "lora"]
+
+seed: 42
+task_name: "finetune_simurgh_lora"
+run_name_suffix: ""
+run_name: ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}${run_name_suffix}
+
+hydra:
+  run:
+    dir: ${paths.log_dir}/${task_name}/runs/${run_name}
+  sweep:
+    dir: ${paths.log_dir}/${task_name}/multiruns/${run_name}
+    subdir: ${hydra.job.num}
+  job_logging:
+    handlers:
+      file:
+        filename: ${hydra.runtime.output_dir}/${task_name}.log
+
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT,${oc.env:PWD}}
+  data_dir: ${paths.root_dir}/data
+  log_dir: ${paths.root_dir}/logs
+  output_dir: ${hydra:runtime.output_dir}
+
+# ─────────────────────────────────────────────────────
+# DATA
+# data.cutoff MUST equal the base checkpoint's cutoff (simurgh_gmd26: 8.0 Å);
+# the backbone refuses a mismatch.  If the base run used fragment labels,
+# copy its data.compute_fragment_index / data.fragment_* keys here too.
+# ─────────────────────────────────────────────────────
+data:
+  dataset_type: xyz
+  train_paths: ??? # e.g. [data/dicarboxylic/train.xyz]
+  val_paths: ??? # e.g. [data/dicarboxylic/val.xyz]
+  cutoff: 8.0
+  batch_size: 4
+  num_workers: 0
+  pin_memory: false
+
+# ─────────────────────────────────────────────────────
+# MODEL — LoRA-adapted SIMURGH (monolithic → head: null)
+# ─────────────────────────────────────────────────────
+model:
+  backbone:
+    name: simurgh_lora
+    checkpoint_path: ??? # .simurgh archive, checkpoint directory or .ckpt (absolute path)
+    checkpoint: best # selector inside a checkpoint directory: best | last | epoch=N
+    use_ema: true # start from the base run's EMA weights
+    cutoff: ${data.cutoff} # checked against the base checkpoint
+    rank: 8 # adapter rank; 4–64
+    alpha: 16.0 # update scale alpha/rank; keep alpha >= rank
+    dropout: 0.0 # 0.05–0.1 for very small datasets
+    target_modules: [artisan] # substrings of the nn.Linear names to adapt
+    bias: none # none | all | lora_only
+    head_trainable: true # train energy readouts + atomic references in full
+  head: null
+
+# ─────────────────────────────────────────────────────
+# TRAINER
+# ─────────────────────────────────────────────────────
+trainer:
+  _target_: lightning.pytorch.trainer.Trainer
+  default_root_dir: ${paths.output_dir}
+  min_epochs: 1
+  max_epochs: 100
+  accelerator: auto
+  devices: 1
+  num_nodes: 1
+  precision: "32" # match the base run (use "64" for a float64 checkpoint)
+  strategy: auto
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 1
+  gradient_clip_val: null
+  accumulate_grad_batches: 1
+  num_sanity_val_steps: 2
+  inference_mode: false # REQUIRED — autograd forces need grad in eval
+
+training:
+  gradient_clip: 10.0
+  checkpoint_dir: ${paths.output_dir}/checkpoints
+  compile_model: false
+  slurm_mode: false
+  performance:
+    float32_matmul_precision: highest
+    cudnn_benchmark: false
+    cudnn_deterministic: false
+
+  # Adapters tolerate a larger lr than full fine-tuning.
+  optimizer:
+    lr: 1.0e-3
+    weight_decay: 0.0
+    amsgrad: true
+    min_lr: 1.0e-6
+    scheduler_type: cosine
+    scheduler:
+      patience: 25
+      factor: 0.5
+
+  ema:
+    enabled: true
+    decay: 0.99
+
+  losses:
+    - name: energy
+      fn: mae
+      weight: 1.0
+      normalize_by_n_atoms: true
+    - name: forces
+      fn: mae
+      weight: 10.0
+      normalize_by_n_atoms: true
+
+  strict_stage_labels: false
+
+# ─────────────────────────────────────────────────────
+# CHECKPOINTING — same manager as native training
+# ─────────────────────────────────────────────────────
+checkpoint_manager:
+  _target_: goal.ml.training.callbacks.checkpoint_manager.GOALCheckpointManager
+  dirpath: ${paths.output_dir}/checkpoints
+  top_k:
+    enabled: true
+    k: 3
+    metric: "val_forces/forces_mae"
+    mode: "min"
+  interval:
+    enabled: true
+    every_n_epochs: 5
+    keep_last_n: 3
+  last:
+    enabled: true
+    filename: "last.ckpt"
+  save_archive: true
+  archive_interval: false
+
+callbacks:
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: 1
+
+logger:
+  csv:
+    _target_: lightning.pytorch.loggers.csv_logs.CSVLogger
+    save_dir: "${paths.output_dir}"
+    name: "csv_logs"
+    prefix: ""
+
+# A frozen backbone under DDP: parameters without gradients are expected.
+strategy:
+  name: auto
+  find_unused_parameters: true
+
+ckpt_path: null
+hparams_search: null

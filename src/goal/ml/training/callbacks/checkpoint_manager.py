@@ -47,30 +47,60 @@ from goal.ml.training.archive import (
     gather_model_metadata,
     pack_simurgh_archive,
 )
+from goal.ml.training.metrics import metric_section
 
 log = logging.getLogger(__name__)
 
-# Metric names whose natural direction is "lower is better"
+# Metric *leaf* names (the part after the last "/") whose natural
+# direction is "lower is better".  Matching on the leaf keeps this
+# working across logger sections, so ``val/total``,
+# ``val_forces/forces_mae`` and ``test_energy/energy_mae_per_atom`` are
+# all recognised without listing every section separately.
 _KNOWN_MIN_METRICS: frozenset[str] = frozenset(
     {
-        "val/total",
-        "val/energy_mae",
-        "val/forces_mae",
-        "val/energy_mse",
-        "val/forces_mse",
-        "val/loss",
-        "train/loss",
+        "total",
+        "energy",
+        "forces",
+        "energy_mae",
+        "energy_mae_per_atom",
+        "energy_rmse_per_atom",
+        "forces_mae",
+        "forces_rmse",
+        "forces_magnitude_mae",
+        "energy_mse",
+        "forces_mse",
+        "newton_violation",
+        "loss",
     }
 )
 
-# Metric names whose natural direction is "higher is better"
+# Metric leaf names whose natural direction is "higher is better"
 _KNOWN_MAX_METRICS: frozenset[str] = frozenset(
     {
-        "val/forces_cosine_similarity",
-        "val/accuracy",
-        "val/r2",
+        "forces_cosine_similarity",
+        "accuracy",
+        "r2",
     }
 )
+
+
+def _legacy_key(metric: str) -> str | None:
+    """Sectioned equivalent of a pre-split metric key, or ``None``.
+
+    Energy and force curves used to share the ``{split}/`` section with
+    the loss total; they now live in ``{split}_energy/`` and
+    ``{split}_forces/``.  A config written against the old names would
+    otherwise silently stop saving top-k checkpoints, so the old key is
+    translated once and a warning points at the config:
+    ``"val/forces_mae"`` -> ``"val_forces/forces_mae"``.
+    """
+    split, sep, name = metric.partition("/")
+    # Only the three plain splits can be legacy keys — anything else
+    # (``val_forces/…``) is already sectioned and must be left alone.
+    if split not in ("train", "val", "test") or not sep or "/" in name:
+        return None
+    section: str | None = metric_section(name)
+    return f"{split}_{section}/{name}" if section else None
 
 
 def _is_better(new: float, old: float, mode: str) -> bool:
@@ -129,7 +159,7 @@ class GOALCheckpointManager(Callback):
         _tk = top_k or {}
         self.top_k_enabled: bool = bool(_tk.get("enabled", True))
         self.top_k_k: int = int(_tk.get("k", 5))
-        self.top_k_metric: str = str(_tk.get("metric", "val/forces_mae"))
+        self.top_k_metric: str = str(_tk.get("metric", "val_forces/forces_mae"))
         self.top_k_mode: str = str(_tk.get("mode", "min"))
         if self.top_k_mode not in ("min", "max"):
             raise ValueError(f"top_k.mode must be 'min' or 'max', got '{self.top_k_mode}'")
@@ -159,6 +189,46 @@ class GOALCheckpointManager(Callback):
 
         # resolved dirpath (set in setup)
         self._resolved_dirpath: str | None = None
+        # Directory a resumed run imported its pools from, when that is
+        # not where this run writes.  Files there belong to the earlier
+        # run and are never deleted — see ``_owns``.
+        self._source_dirpath: str | None = None
+        # Extension provenance, recorded by train.py when a finished run
+        # is continued past its original budget.
+        self._extension: dict[str, Any] | None = None
+
+    # ------------------------------------------------------------------
+    # Ownership
+    # ------------------------------------------------------------------
+
+    def _owns(self, path: str) -> bool:
+        """Whether ``path`` is a checkpoint this run is allowed to delete.
+
+        A resumed run inherits pool entries from the run it continues
+        (:meth:`restore_pools_from_dir`).  When it writes to a *different*
+        directory — the normal case, since ``checkpoint_manager.dirpath``
+        follows Hydra's timestamped output dir — those inherited entries
+        still name files under the earlier run.  Evicting one from the
+        pool must not delete the earlier run's checkpoint.
+        """
+        if self._resolved_dirpath is None:
+            return False
+        try:
+            return Path(path).resolve().parent == Path(self._resolved_dirpath).resolve()
+        except OSError:  # unresolvable path — refuse rather than guess
+            return False
+
+    def _evict(self, path: str, pool: str) -> None:
+        """Drop ``path`` from a pool, deleting it only if this run owns it."""
+        if self._owns(path):
+            _delete_checkpoint(path)
+            log.info("[ckpt/%s] Evicted %s", pool, Path(path).name)
+        else:
+            log.info(
+                "[ckpt/%s] Evicted from pool but kept on disk (owned by the resumed run): %s",
+                pool,
+                path,
+            )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -208,32 +278,100 @@ class GOALCheckpointManager(Callback):
                 "the original training start (resume detected).",
                 frozen_dir,
             )
-            return
+        else:
+            try:
+                frozen_files = freeze_model_source(pl_module, frozen_dir)
+                self._save_resolved_config(dirpath, pl_module)
+                self._save_metadata(dirpath, pl_module)
+            except Exception:  # noqa: BLE001
+                log.exception(
+                    "[ckpt/freeze] FAILED to freeze model source into %s. "
+                    "Training continues, but checkpoints in this directory will "
+                    "NOT be self-contained.",
+                    dirpath,
+                )
+                return
+
+            log.info(
+                "Model source frozen to %s/ (%d files)\n"
+                "Config saved to %s\n"
+                "All checkpoints in this directory are self-contained.",
+                frozen_dir,
+                len(frozen_files),
+                dirpath / "config.yaml",
+            )
+
+        if self._extension is not None:
+            self._save_extension_record(dirpath, pl_module)
+
+    # ------------------------------------------------------------------
+    # Extension provenance
+    # ------------------------------------------------------------------
+
+    def record_extension(self, from_epoch: int, to_epoch: int, source_ckpt: str) -> None:
+        """Note that this run continues a finished one past its budget.
+
+        Called by ``train.py`` before ``trainer.fit``; written to disk at
+        ``on_train_start`` once the checkpoint directory exists.
+        """
+        self._extension = {
+            "from_epoch": int(from_epoch),
+            "to_epoch": int(to_epoch),
+            "source_checkpoint": str(source_ckpt),
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    def _save_extension_record(self, dirpath: Path, pl_module: L.LightningModule) -> None:
+        """Append the extension to ``metadata.json`` and snapshot its config.
+
+        ``config.yaml`` is left untouched: every sidecar in the directory
+        points at it as the config the *weights* were built from, and the
+        architecture has not changed.  The extended budget goes into a
+        dated sibling so the two are distinguishable after the fact.
+        """
+        assert self._extension is not None
+        metadata_path = dirpath / "metadata.json"
+        try:
+            metadata: dict[str, Any] = (
+                json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+            )
+        except (json.JSONDecodeError, OSError) as exc:
+            log.warning(
+                "[ckpt/extend] Could not read %s (%s) — starting a new record.",
+                metadata_path,
+                exc,
+            )
+            metadata = {}
+
+        extensions: list[Any] = list(metadata.get("extensions") or [])
+        extensions.append(self._extension)
+        metadata["extensions"] = extensions
 
         try:
-            frozen_files = freeze_model_source(pl_module, frozen_dir)
-            self._save_resolved_config(dirpath, pl_module)
-            self._save_metadata(dirpath, pl_module)
-        except Exception:  # noqa: BLE001
-            log.exception(
-                "[ckpt/freeze] FAILED to freeze model source into %s. "
-                "Training continues, but checkpoints in this directory will "
-                "NOT be self-contained.",
-                dirpath,
-            )
+            tmp = str(metadata_path) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(metadata, f, indent=2)
+            os.replace(tmp, str(metadata_path))
+        except OSError as exc:
+            log.warning("[ckpt/extend] Could not write %s: %s", metadata_path, exc)
             return
 
+        stamp = self._extension["timestamp"].replace(":", "-")
+        self._save_resolved_config(dirpath, pl_module, filename=f"config_extended_{stamp}.yaml")
         log.info(
-            "Model source frozen to %s/ (%d files)\n"
-            "Config saved to %s\n"
-            "All checkpoints in this directory are self-contained.",
-            frozen_dir,
-            len(frozen_files),
-            dirpath / "config.yaml",
+            "[ckpt/extend] Continuing from epoch %d to %d (source: %s)",
+            self._extension["from_epoch"],
+            self._extension["to_epoch"],
+            self._extension["source_checkpoint"],
         )
 
-    def _save_resolved_config(self, dirpath: Path, pl_module: L.LightningModule) -> None:
-        """Write the fully resolved Hydra config to ``{dirpath}/config.yaml``."""
+    def _save_resolved_config(
+        self,
+        dirpath: Path,
+        pl_module: L.LightningModule,
+        filename: str = "config.yaml",
+    ) -> None:
+        """Write the fully resolved Hydra config to ``{dirpath}/{filename}``."""
         cfg = getattr(pl_module, "config", None)
         if cfg is None:
             log.warning("[ckpt/freeze] pl_module has no .config — config.yaml not written.")
@@ -248,9 +386,9 @@ class GOALCheckpointManager(Callback):
                 "saving config.yaml unresolved."
             )
             text = OmegaConf.to_yaml(cfg, resolve=False)
-        tmp = dirpath / "config.yaml.tmp"
+        tmp = dirpath / f"{filename}.tmp"
         tmp.write_text(text)
-        os.replace(tmp, dirpath / "config.yaml")
+        os.replace(tmp, dirpath / filename)
 
     def _save_metadata(self, dirpath: Path, pl_module: L.LightningModule) -> None:
         """Write provenance metadata to ``{dirpath}/metadata.json``."""
@@ -286,6 +424,15 @@ class GOALCheckpointManager(Callback):
     # ------------------------------------------------------------------
 
     def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        """Update the three checkpoint pools after each validation epoch.
+
+        Runs on global rank zero only, and only once :meth:`setup` has
+        resolved the checkpoint directory.  Using ``trainer.callback_metrics``,
+        each enabled pool saves (and evicts) checkpoints: top-k by
+        ``top_k_metric`` (pool 1), every ``interval_every_n`` epochs
+        (pool 2), and the rolling last checkpoint (pool 3).  The pool state
+        is then written to ``checkpoint_state.json`` in that directory.
+        """
         if not trainer.is_global_zero:
             return
         if self._resolved_dirpath is None:
@@ -320,13 +467,23 @@ class GOALCheckpointManager(Callback):
         metrics: dict[str, Any],
     ) -> None:
         if self.top_k_metric not in metrics:
-            log.warning(
-                "GOALCheckpointManager: top_k metric '%s' not found in callback_metrics "
-                "(available: %s). Skipping top-k save.",
-                self.top_k_metric,
-                list(metrics.keys()),
-            )
-            return
+            alias: str | None = _legacy_key(self.top_k_metric)
+            if alias is not None and alias in metrics:
+                log.warning(
+                    "GOALCheckpointManager: top_k metric '%s' is the pre-split name; "
+                    "using '%s' instead.  Update the config to the new key.",
+                    self.top_k_metric,
+                    alias,
+                )
+                self.top_k_metric = alias
+            else:
+                log.warning(
+                    "GOALCheckpointManager: top_k metric '%s' not found in callback_metrics "
+                    "(available: %s). Skipping top-k save.",
+                    self.top_k_metric,
+                    list(metrics.keys()),
+                )
+                return
 
         value: float = float(metrics[self.top_k_metric])
         metric_slug = self.top_k_metric.replace("/", "_")
@@ -354,8 +511,7 @@ class GOALCheckpointManager(Callback):
                 self._write_sidecar(filepath, epoch, metrics, pool="top_k")
                 # Only delete if the file is not also in the interval pool
                 if worst_path not in self._interval_pool:
-                    _delete_checkpoint(worst_path)
-                    log.info("[ckpt/top_k] Evicted %s", Path(worst_path).name)
+                    self._evict(worst_path, pool="top_k")
                 else:
                     log.info(
                         "[ckpt/top_k] Evicted from top-k but kept (in interval pool): %s",
@@ -385,15 +541,15 @@ class GOALCheckpointManager(Callback):
             # Only delete if not in top-k pool
             top_k_paths = {p for _, p in self._top_k_pool}
             if oldest_path not in top_k_paths:
-                _delete_checkpoint(oldest_path)
-                log.info("[ckpt/interval] Evicted %s", Path(oldest_path).name)
+                self._evict(oldest_path, pool="interval")
             else:
                 log.info(
                     "[ckpt/interval] Evicted from interval but kept (in top-k pool): %s",
                     Path(oldest_path).name,
                 )
             # The interval archive tracks its checkpoint's lifetime either way
-            _delete_file(str(Path(oldest_path).with_suffix(ARCHIVE_SUFFIX)))
+            if self._owns(oldest_path):
+                _delete_file(str(Path(oldest_path).with_suffix(ARCHIVE_SUFFIX)))
             self._interval_pool.popleft()
 
         self._save_atomic(trainer, filepath)
@@ -563,7 +719,11 @@ class GOALCheckpointManager(Callback):
         """
         state_path = Path(dirpath) / "checkpoint_state.json"
         if state_path.exists():
-            manager._resolved_dirpath = dirpath
+            # Deliberately *not* ``_resolved_dirpath``: that is where this
+            # run writes, and ``setup()`` sets it from the config.  The
+            # restored pools may name files under ``dirpath`` instead, and
+            # ``_owns`` uses the difference to keep them from being deleted.
+            manager._source_dirpath = dirpath
             manager._load_state(state_path)
         else:
             log.info("[ckpt/resume] No checkpoint_state.json in %s — starting fresh.", dirpath)
@@ -574,15 +734,16 @@ class GOALCheckpointManager(Callback):
 
     def _warn_mode_mismatch(self) -> None:
         metric = self.top_k_metric
+        leaf = metric.rsplit("/", 1)[-1]
         mode = self.top_k_mode
-        if metric in _KNOWN_MIN_METRICS and mode != "min":
+        if leaf in _KNOWN_MIN_METRICS and mode != "min":
             warnings.warn(
                 f"GOALCheckpointManager: metric '{metric}' is typically minimised "
                 f"but mode='{mode}' was given.  Set mode='min' unless you intend this.",
                 UserWarning,
                 stacklevel=3,
             )
-        elif metric in _KNOWN_MAX_METRICS and mode != "max":
+        elif leaf in _KNOWN_MAX_METRICS and mode != "max":
             warnings.warn(
                 f"GOALCheckpointManager: metric '{metric}' is typically maximised "
                 f"but mode='{mode}' was given.  Set mode='max' unless you intend this.",
@@ -593,6 +754,16 @@ class GOALCheckpointManager(Callback):
     @property
     def dirpath(self) -> str | None:
         return self._resolved_dirpath
+
+    @property
+    def source_dirpath(self) -> str | None:
+        """Directory this run inherited its pools from, if it resumed one."""
+        return self._source_dirpath
+
+    @property
+    def extension(self) -> dict[str, Any] | None:
+        """Extension provenance recorded for this run, if any."""
+        return dict(self._extension) if self._extension is not None else None
 
     @property
     def top_k_pool(self) -> list[tuple[float, str]]:

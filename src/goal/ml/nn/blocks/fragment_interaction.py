@@ -200,9 +200,9 @@ def build_fragment_geometry(
     counts: torch.Tensor = torch.zeros(n_fragments, 1, device=device, dtype=dtype).index_add(
         0, fragment_index, torch.ones(positions.shape[0], 1, device=device, dtype=dtype)
     )
-    centroids: torch.Tensor = torch.zeros(
-        n_fragments, 3, device=device, dtype=dtype
-    ).index_add(0, fragment_index, positions) / counts.clamp(min=1.0)
+    centroids: torch.Tensor = torch.zeros(n_fragments, 3, device=device, dtype=dtype).index_add(
+        0, fragment_index, positions
+    ) / counts.clamp(min=1.0)
 
     # ----- Candidate pairs: every ordered k != l inside one structure -----
     idx: torch.Tensor = torch.arange(n_fragments, device=device)
@@ -416,9 +416,7 @@ class EquivariantFragmentInteraction(nn.Module):
             dummy_feats: torch.Tensor = torch.zeros(
                 1, self.irreps_hidden.dim, device=device, dtype=dtype
             )
-            dummy_sh: torch.Tensor = torch.zeros(
-                1, self.irreps_sh.dim, device=device, dtype=dtype
-            )
+            dummy_sh: torch.Tensor = torch.zeros(1, self.irreps_sh.dim, device=device, dtype=dtype)
             dummy_w: torch.Tensor = self.radial_mlp(
                 self.radial_basis(torch.ones(1, device=device, dtype=dtype))
             )
@@ -455,6 +453,7 @@ class EquivariantFragmentInteraction(nn.Module):
         return self.out_linear(aggregated)[fragment_index]
 
     def extra_repr(self) -> str:
+        """Summarise the node / hidden / SH irreps and cutoff for ``repr``."""
         return (
             f"irreps_node={self.irreps_node}, irreps_hidden={self.irreps_hidden}, "
             f"irreps_sh={self.irreps_sh}, cutoff={self._cutoff}"

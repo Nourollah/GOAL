@@ -13,7 +13,6 @@ from torch_geometric.loader import DataLoader
 
 from goal.ml.nn.models.foundation.mace import MACEFinetune
 
-
 # ---------------------------------------------------------------------------
 # Fine-tuning strategies
 # ---------------------------------------------------------------------------
@@ -61,13 +60,24 @@ def test_lora_config_created_with_rank(fake_mace, monkeypatch) -> None:
 def test_adapt_input_methane(fake_mace, methane_graph) -> None:
     bb = MACEFinetune(model=fake_mace, strategy="head_only")
     data = bb._adapt_input(methane_graph)
-    for key in ("positions", "node_attrs", "edge_index", "shifts", "unit_shifts", "cell", "batch", "ptr"):
+    for key in (
+        "positions",
+        "node_attrs",
+        "edge_index",
+        "shifts",
+        "unit_shifts",
+        "cell",
+        "batch",
+        "ptr",
+    ):
         assert key in data, f"missing MACE key {key!r}"
     n = methane_graph.pos.shape[0]
     e = methane_graph.edge_index.shape[1]
     # one-hot node_attrs (N, n_elements), each row sums to 1
     assert data["node_attrs"].shape == (n, len(fake_mace.atomic_numbers))
-    assert torch.allclose(data["node_attrs"].sum(-1), torch.ones(n, dtype=data["node_attrs"].dtype))
+    assert torch.allclose(
+        data["node_attrs"].sum(-1), torch.ones(n, dtype=data["node_attrs"].dtype)
+    )
     # non-periodic methane → shifts (E, 3) all zeros
     assert data["shifts"].shape == (e, 3)
     assert torch.all(data["shifts"] == 0)
@@ -90,7 +100,12 @@ def test_adapt_output_shapes(fake_mace, methane_graph) -> None:
 def test_goalmodule_training_step(fake_mace, methane_graph) -> None:
     from omegaconf import OmegaConf
 
-    from goal.ml.training.loss import CompositeLoss, EnergyLoss, ForcesLoss, WeightedLoss
+    from goal.ml.training.loss import (
+        CompositeLoss,
+        EnergyLoss,
+        ForcesLoss,
+        WeightedLoss,
+    )
     from goal.ml.training.module import GOALModule
 
     loss = CompositeLoss(
@@ -110,9 +125,7 @@ def test_goalmodule_training_step(fake_mace, methane_graph) -> None:
     assert torch.isfinite(losses["total"])
     losses["total"].backward()
     # A trainable (readout) parameter received a gradient.
-    assert any(
-        p.grad is not None for n, p in bb._model.named_parameters() if "readouts" in n
-    )
+    assert any(p.grad is not None for n, p in bb._model.named_parameters() if "readouts" in n)
 
 
 # ---------------------------------------------------------------------------

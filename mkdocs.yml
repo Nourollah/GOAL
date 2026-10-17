@@ -1,0 +1,175 @@
+site_name: GOAL
+site_description: General Open Atomistic Laboratory — machine-learning interatomic potentials (goal.ml) and molecular dynamics (goal.md)
+site_author: Amir Masoud Nourollah
+site_url: https://nourollah.github.io/GOAL/
+repo_url: https://github.com/Nourollah/GOAL
+repo_name: Nourollah/GOAL
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; GOAL contributors — MIT License
+
+docs_dir: docs
+site_dir: site
+
+# LaTeX sources and PDFs for talks live next to the docs but are not pages.
+exclude_docs: |
+  slides/
+
+# With `mkdocs build --strict` (CI), any of these turns into a build failure.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Nourollah/GOAL
+
+theme:
+  name: material
+  logo: assets/goal-logo.png
+  favicon: assets/goal-logo.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.path
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - attr_list
+  - md_in_html
+  - admonition
+  - footnotes
+  - github-callouts # renders GitHub "> [!NOTE]" blocks, so pages look right on GitHub and on the site
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Project structure: getting-started/project-structure.md
+      - Notebooks: getting-started/notebooks.md
+  - ML (goal.ml):
+      - ml/index.md
+      - Training:
+          - Training a model: ml/training/training.md
+          - Distributed training: ml/training/distributed.md
+          - Resuming & extending: ml/training/resuming.md
+          - Performance engineering: ml/training/performance.md
+          - Loss functions: ml/training/losses.md
+          - Callbacks & logging: ml/training/callbacks-logging.md
+          - Hyperparameter tuning: ml/training/hyperparameter-tuning.md
+          - Custom training loops: ml/training/custom-loops.md
+      - Data:
+          - Loading data: ml/data/loading.md
+          - ASE-LMDB & OMol25: ml/data/aselmdb-omol25.md
+          - Benchmark datasets: ml/data/benchmarks.md
+      - Models:
+          - Overview & model zoo: ml/models/overview.md
+          - SIMURGH: ml/models/simurgh.md
+          - NF_SIMURGH: ml/models/nf-simurgh.md
+          - SIMURGH Simplified: ml/models/simurgh-simplified.md
+          - Ablation study: ml/models/ablation-study.md
+          - Other backbones: ml/models/other-backbones.md
+          - Heads: ml/models/heads.md
+          - Writing a new model: ml/models/custom-model.md
+      - Fine-tuning:
+          - Overview: ml/finetuning/overview.md
+          - MACE: ml/finetuning/mace.md
+          - UMA / FairChem: ml/finetuning/uma.md
+          - UPET / PET: ml/finetuning/upet.md
+      - Features:
+          - Feature extraction: ml/features/feature-extraction.md
+          - Mini trainer: ml/features/mini-trainer.md
+      - Deployment:
+          - Evaluation: ml/deployment/evaluation.md
+          - ASE calculator: ml/deployment/ase-calculator.md
+          - Checkpoints & archives: ml/deployment/archives.md
+      - Reference:
+          - Configuration: ml/reference/configuration.md
+          - CLI: ml/reference/cli.md
+          - Pixi tasks: ml/reference/pixi-tasks.md
+  - Integrations (NVIDIA nvalchemi & more):
+      - Overview & hardware fallback: integrations/nvalchemi_overview.md
+      - LoRA fine-tuning of SIMURGH: integrations/lora_finetune.md
+      - nvalchemi model wrapper: integrations/nvalchemi_wrapper.md
+      - Neighbour lists: integrations/neighbor_list.md
+      - Batched simulation: integrations/batched_simulation.md
+      - Zarr data: integrations/zarr_data.md
+      - Roadmap stubs: integrations/roadmap_stubs.md
+  - MD (goal.md):
+      - md/index.md
+      - Guide:
+          - Usage patterns: md/guide/usage-patterns.md
+          - Molecules: md/guide/molecules.md
+          - Dynamics: md/guide/dynamics.md
+          - Bridge to goal.ml: md/guide/ml-bridge.md
+          - Extending goal.md: md/guide/extending.md
+      - Calculators:
+          - Overview: md/calculators/overview.md
+          - Trained GOAL models: md/calculators/goal-model.md
+          - tblite (GFN-xTB): md/calculators/tblite.md
+          - MACE, NequIP & FlashMD: md/calculators/foundation.md
+          - UPET / PET-MAD: md/calculators/upet.md
+          - CP2K: md/calculators/cp2k.md
+          - Quantum ESPRESSO: md/calculators/espresso.md
+          - VASP: md/calculators/vasp.md
+          - ORCA: md/calculators/orca.md
+      - Multiple time-step MD:
+          - Overview: md/mts/overview.md
+          - RESPA integrator: md/mts/respa.md
+          - i-PI adapter: md/mts/ipi.md
+          - Design notes: md/mts/design.md
+      - Reference:
+          - Configuration: md/reference/configuration.md
+          - CLI: md/reference/cli.md
+          - Troubleshooting: md/reference/troubleshooting.md

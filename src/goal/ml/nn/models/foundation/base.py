@@ -57,9 +57,7 @@ def resolve_dtype(dtype: str | torch.dtype) -> torch.dtype:
         return dtype
     key = str(dtype).replace("torch.", "").lower()
     if key not in _DTYPE_MAP:
-        raise ValueError(
-            f"Unknown dtype {dtype!r}. Choose one of {sorted(_DTYPE_MAP)}."
-        )
+        raise ValueError(f"Unknown dtype {dtype!r}. Choose one of {sorted(_DTYPE_MAP)}.")
     return _DTYPE_MAP[key]
 
 
@@ -113,9 +111,7 @@ class FoundationModelBackbone(nn.Module):
     ) -> None:
         super().__init__()
         if strategy not in ("head_only", "full", "lora"):
-            raise ValueError(
-                f"strategy must be 'head_only', 'full', or 'lora', got {strategy!r}."
-            )
+            raise ValueError(f"strategy must be 'head_only', 'full', or 'lora', got {strategy!r}.")
         self.strategy: str = strategy
         self.torch_dtype: torch.dtype = resolve_dtype(dtype)
         self.reestimate_e0s: bool = bool(reestimate_e0s)
@@ -136,6 +132,26 @@ class FoundationModelBackbone(nn.Module):
         return ["energy", "forces"]
 
     def forward(self, graph: typing.Any) -> dict[str, torch.Tensor]:  # pragma: no cover
+        """Run the wrapped model and return GOAL's monolithic property dict.
+
+        Subclasses must convert the ``AtomicGraph`` to the upstream
+        model's input format, evaluate ``self._model`` (forces are usually
+        obtained by autograd inside the upstream model, so the call should
+        run under ``torch.enable_grad()``), and cast the outputs back to
+        ``graph.pos.dtype`` so they match the labels.
+
+        Parameters
+        ----------
+        graph : AtomicGraph
+            Batched input graph (``pos`` ``(N, 3)`` in Å, ``z``,
+            ``edge_index``, ``batch``, optional ``cell``).
+
+        Returns
+        -------
+        dict[str, Tensor]
+            ``'energy'`` ``(B,)`` in eV, ``'forces'`` ``(N, 3)`` in eV/Å
+            and ``'num_atoms'`` ``(B,)``.
+        """
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -167,7 +183,9 @@ class FoundationModelBackbone(nn.Module):
         if self.strategy == "full":
             for p in self._model.parameters():
                 p.requires_grad_(True)
-            log.info("[finetune] strategy=full — all %d params trainable.", _count(self._model, True))
+            log.info(
+                "[finetune] strategy=full — all %d params trainable.", _count(self._model, True)
+            )
             return
 
         if self.strategy == "head_only":
@@ -244,7 +262,5 @@ class FoundationModelBackbone(nn.Module):
 def _count(model: nn.Module, requires_grad: bool | None) -> int:
     """Count parameters, optionally filtered by ``requires_grad``."""
     return sum(
-        1
-        for p in model.parameters()
-        if requires_grad is None or p.requires_grad == requires_grad
+        1 for p in model.parameters() if requires_grad is None or p.requires_grad == requires_grad
     )

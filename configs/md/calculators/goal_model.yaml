@@ -1,9 +1,0 @@
-# Use a trained ML model from goal.ml
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
-
-method: goal_model
-checkpoint: ??? # Path to model checkpoint
-cutoff: null # Read from checkpoint if null
-device: cpu
-head: null

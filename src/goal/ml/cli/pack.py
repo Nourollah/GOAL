@@ -24,6 +24,21 @@ from goal.ml.training.archive import (
 
 
 def main(argv: typing.Sequence[str] | None = None) -> int:
+    """Entry point of the ``goal-pack-archive`` console script.
+
+    Parses ``argv`` (``sys.argv[1:]`` when ``None``), resolves
+    ``--checkpoint`` (``best``, ``last``, ``epoch=N`` or a ``.ckpt``
+    filename/path) inside ``--checkpoint-dir`` with
+    :func:`resolve_checkpoint`, and packs it with
+    :func:`pack_simurgh_archive` to ``--output`` (default: the
+    checkpoint stem plus ``.simurgh`` inside the checkpoint directory).
+
+    Returns
+    -------
+    int
+        ``0`` on success; ``1`` if resolving or packing raises
+        ``FileNotFoundError`` or ``ValueError`` (message on stderr).
+    """
     parser = argparse.ArgumentParser(
         prog="goal-pack-archive",
         description=f"Pack a checkpoint into a self-contained {ARCHIVE_SUFFIX} archive.",

@@ -14,7 +14,7 @@ class GOALCalculatorNotFound(Exception):
     """External QM code (or its Python bindings) is not installed or not configured.
 
     Raised by calculator builders when the underlying engine — ORCA, CP2K,
-    Quantum ESPRESSO, VASP, xTB, UPET, … — cannot be located, or when a
+    Quantum ESPRESSO, VASP, UPET, … — cannot be located, or when a
     required piece of configuration (pseudopotential set, ``$VASP_PP_PATH``,
     …) is missing.  The message should say *exactly* what is missing and how
     to provide it.

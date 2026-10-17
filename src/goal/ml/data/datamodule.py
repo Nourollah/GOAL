@@ -35,6 +35,10 @@ _DATA_EXTENSIONS: frozenset[str] = frozenset(
         ".h5",
         ".hdf5",
         ".lmdb",
+        # FairChem ASE-LMDB shards (OMol25 / OMat24 / ODAC23) — a split is
+        # a directory of ``data0000.aselmdb`` … files, so discovery has to
+        # know the suffix for Mode 1/4 to see them at all.
+        ".aselmdb",
         ".traj",
         ".db",
     }
@@ -88,7 +92,7 @@ def _discover_files_in_dir(
 
 
 # Fragment-label options.  Understood by every ``BaseAtomicDataset``, but
-# not by the benchmark loaders in ``examples.datasets`` (md17 / qm9 / ani1),
+# not by the benchmark loaders in ``goal.ml.data.benchmarks`` (md17 / qm9 / ani1),
 # which are a separate hierarchy.
 _FRAGMENT_KEYS: tuple[str, ...] = (
     "compute_fragment_index",
@@ -109,7 +113,7 @@ def _resolve_fragment_keys(
 
     ``data.compute_fragment_index`` / ``data.fragment_covalent_cutoff`` are
     forwarded to the dataset like every other non-meta ``data`` key, so a
-    dataset class that predates them (the ``examples.datasets`` benchmark
+    dataset class that predates them (the ``goal.ml.data.benchmarks`` benchmark
     loaders) would raise an opaque ``TypeError: unexpected keyword
     argument``.  Silently dropping them is right when the feature is *off*
     — the keys then say nothing about intent — but wrong when it is on,
@@ -201,6 +205,13 @@ class GOALDataModule(L.LightningDataModule):
         ``data.test_dir`` are directories.  All matching data files
         inside each directory are automatically discovered and loaded.
 
+    In every mode, ``data.monitor_test_during_training: true`` makes
+    :meth:`val_dataloader` return the val **and** test loaders, so the
+    held-out set is reported every validation epoch in its own logger
+    sections (``test/``, ``test_energy/``, ``test_forces/``) instead of
+    only at the end of a run.  See
+    :attr:`monitor_test_during_training`.
+
     Parameters
     ----------
     cfg : DictConfig
@@ -238,11 +249,50 @@ class GOALDataModule(L.LightningDataModule):
         "split_ratio",
         "split_seed",
         "multiprocessing_context",
+        "monitor_test_during_training",
     }
 
     def _extra_kwargs(self) -> dict[str, typing.Any]:
         """Dataset-specific kwargs (everything that isn't meta)."""
         return {k: v for k, v in self.cfg.data.items() if k not in self._META_KEYS}
+
+    # ------------------------------------------------------------------
+    # Monitoring the held-out set during training
+    # ------------------------------------------------------------------
+
+    @property
+    def monitor_test_during_training(self) -> bool:
+        """Whether the test split also runs through the validation loop.
+
+        ``data.monitor_test_during_training: true`` makes
+        :meth:`val_dataloader` return **two** loaders — the val split and
+        the test split — so a run reports both every epoch, separately.
+        The intended use is an in-distribution val set plus an
+        out-of-distribution test set (the GMD ``TestID`` / ``TestOOD``
+        layout): the generalisation gap becomes a curve you watch instead
+        of a number you only learn after training.
+
+        Costs one extra forward pass over the test split per validation
+        epoch, and the OOD numbers must *not* be used for model
+        selection (``checkpoint_manager.top_k.metric``) or early
+        stopping — monitoring a set you then select on turns it into a
+        second validation set.
+        """
+        return bool(self.cfg.data.get("monitor_test_during_training", False))
+
+    @property
+    def val_split_names(self) -> list[str]:
+        """Section name per dataloader returned by :meth:`val_dataloader`.
+
+        ``["val"]`` normally, ``["val", "test"]`` when the test split is
+        monitored during training.  ``GOALModule.validation_step`` reads
+        this to pick the logger prefix per ``dataloader_idx``, which is
+        what keeps the two sets in separate W&B sections.
+        """
+        names: list[str] = ["val"]
+        if self.monitor_test_during_training and self.data_test is not None:
+            names.append("test")
+        return names
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate datasets.
@@ -268,15 +318,23 @@ class GOALDataModule(L.LightningDataModule):
         has_dir: bool = "train_dir" in data_cfg and data_cfg.train_dir is not None
         has_per_split: bool = "train_paths" in data_cfg and data_cfg.train_paths is not None
 
+        # Every loading mode builds the test split only for
+        # ``stage in ("test", None)``.  Monitoring the test set during
+        # training needs it at ``fit`` time too, so widen the stage the
+        # mode helpers see (``None`` = build every split).
+        mode_stage: str | None = stage
+        if stage == "fit" and self.monitor_test_during_training:
+            mode_stage = None
+
         if has_dir:
             rank_zero_info("[DataModule] Mode 4 — directory-based per-split loading")
-            self._setup_from_dirs(ds_cls, data_cfg, cutoff, extra, merge, seed, stage)
+            self._setup_from_dirs(ds_cls, data_cfg, cutoff, extra, merge, seed, mode_stage)
         elif has_per_split:
             rank_zero_info("[DataModule] Mode 2 — per-split path loading")
-            self._setup_per_split(ds_cls, data_cfg, cutoff, extra, merge, seed, stage)
+            self._setup_per_split(ds_cls, data_cfg, cutoff, extra, merge, seed, mode_stage)
         else:
             rank_zero_info("[DataModule] Mode 1/3 — auto-split from root")
-            self._setup_auto_split(ds_cls, data_cfg, cutoff, extra, merge, seed, stage)
+            self._setup_auto_split(ds_cls, data_cfg, cutoff, extra, merge, seed, mode_stage)
 
         # Report dataset sizes after setup
         if self.data_train is not None:
@@ -285,6 +343,22 @@ class GOALDataModule(L.LightningDataModule):
             rank_zero_info(f"[DataModule] Val    : {len(self.data_val):>8,} structures")
         if self.data_test is not None:
             rank_zero_info(f"[DataModule] Test   : {len(self.data_test):>8,} structures")
+
+        if self.monitor_test_during_training and stage in ("fit", None):
+            if self.data_test is None:
+                warnings.warn(
+                    "data.monitor_test_during_training is enabled but no test "
+                    "split is configured (set test_dir / test_paths, or a "
+                    "3-value split_ratio).  Training will report the val "
+                    "split only — nothing will be logged under 'test/'.",
+                    stacklevel=2,
+                )
+            else:
+                rank_zero_info(
+                    "[DataModule] Monitoring the test split during training "
+                    "→ logged separately under 'test/', 'test_energy/', "
+                    "'test_forces/' every validation epoch"
+                )
 
     def _setup_from_dirs(
         self,
@@ -448,11 +522,14 @@ class GOALDataModule(L.LightningDataModule):
         in train rather than starving it.  A positive ratio that rounds to 0
         frames emits a warning instead of failing silently.
         """
-        # Expand any directory roots into their contained data files.
+        # Expand any directory roots into their contained data files —
+        # unless the dataset's root *is* a directory (a Zarr store), which
+        # declares ``ROOT_IS_DIRECTORY``.
         expanded: list[str] = []
+        root_is_directory: bool = bool(getattr(ds_cls, "ROOT_IS_DIRECTORY", False))
         for r in roots:
             p = Path(r)
-            if p.is_dir():
+            if p.is_dir() and not root_is_directory:
                 expanded.extend(_discover_files_in_dir(p))
             else:
                 expanded.append(str(r))
@@ -534,6 +611,11 @@ class GOALDataModule(L.LightningDataModule):
         return kwargs
 
     def train_dataloader(self) -> DataLoader:
+        """The shuffled training loader over ``data_train``.
+
+        Uses ``cfg.data.batch_size`` and the shared worker settings from
+        :meth:`_loader_kwargs`.
+        """
         return PyGDataLoader(
             self.data_train,
             batch_size=self.cfg.data.batch_size,
@@ -541,23 +623,40 @@ class GOALDataModule(L.LightningDataModule):
             **self._loader_kwargs(),
         )
 
-    def val_dataloader(self) -> DataLoader:
+    def _eval_loader(self, dataset: Dataset) -> DataLoader:
+        """An unshuffled loader over *dataset* (val / test)."""
         return PyGDataLoader(
-            self.data_val,
+            dataset,
             batch_size=self.cfg.data.batch_size,
             shuffle=False,
             **self._loader_kwargs(),
         )
 
+    def val_dataloader(self) -> DataLoader | list[DataLoader]:
+        """The validation loader, or ``[val, test]`` when the test split
+        is monitored during training.
+
+        A plain loader is returned in the single-set case so Lightning
+        does not append a ``/dataloader_idx_0`` suffix to anything and
+        existing runs log exactly the keys they always did.
+        """
+        loaders: list[DataLoader] = [self._eval_loader(self.data_val)]
+        if self.monitor_test_during_training and self.data_test is not None:
+            loaders.append(self._eval_loader(self.data_test))
+        return loaders[0] if len(loaders) == 1 else loaders
+
     def test_dataloader(self) -> DataLoader:
+        """The unshuffled test loader over ``data_test``.
+
+        Raises
+        ------
+        RuntimeError
+            If ``data_test`` is ``None``: neither ``test_paths`` nor a
+            three-value ``split_ratio`` provided a test split.
+        """
         if self.data_test is None:
             raise RuntimeError(
                 "No test dataset available. Provide test_paths or a "
                 "split_ratio with 3 values (e.g. [0.8, 0.1, 0.1])."
             )
-        return PyGDataLoader(
-            self.data_test,
-            batch_size=self.cfg.data.batch_size,
-            shuffle=False,
-            **self._loader_kwargs(),
-        )
+        return self._eval_loader(self.data_test)

@@ -1,7 +1,0 @@
-# ORCA as reference (base) calculator for MTS
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
-
-method: orca
-orca_path: orca
-keywords: "EnGrad wB97M-V def2-TZVPD RIJCOSX TightSCF DEFGRID3"

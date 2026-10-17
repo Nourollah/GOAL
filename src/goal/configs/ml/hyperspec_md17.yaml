@@ -1,0 +1,519 @@
+########################################################
+# GOAL ML Experiment Configuration
+# Model  : HyperSpec — E(3)-equivariant Graph Neural Network
+# Dataset: MD17 aspirin (rMD17 revised split)
+#
+# Self-contained config. Every parameter the project supports is
+# listed here — either set to its value for this experiment, or
+# documented in comments showing what else is available.
+# No other file needs to be opened to understand what is possible.
+#
+# HyperSpec is a native equivariant GNN (not an artisan bank).
+# Use this as a strong baseline against SIMURGH, or for tasks where
+# the mixture-of-experts structure is not needed (single-element
+# systems, small datasets, ablation studies).
+########################################################
+
+# ─────────────────────────────────────────────────────
+# EXPERIMENT METADATA
+# ─────────────────────────────────────────────────────
+experiment:
+  name: "hyperspec_md17"
+  description: "HyperSpec GNN on MD17 aspirin (rMD17, 950 train / 50 val)"
+  tags: ["hyperspec", "md17", "aspirin"]
+
+seed: 42
+task_name: "hyperspec_md17"
+run_name_suffix: "" # optional tag, prepend "_": e.g. "_aspirin"
+run_name: ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}${run_name_suffix}
+
+hydra:
+  run:
+    dir: ${paths.log_dir}/${task_name}/runs/${run_name}
+  sweep:
+    dir: ${paths.log_dir}/${task_name}/multiruns/${run_name}
+    subdir: ${hydra.job.num}
+  job_logging:
+    handlers:
+      file:
+        filename: ${hydra.runtime.output_dir}/${task_name}.log
+
+# ─────────────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────────────
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT,${oc.env:PWD}}
+  data_dir: ${paths.root_dir}/data
+  log_dir: ${paths.root_dir}/logs
+  output_dir: ${hydra:runtime.output_dir}
+
+# ─────────────────────────────────────────────────────
+# DATA
+# ─────────────────────────────────────────────────────
+# dataset_type options:
+#   "xyz", "hdf5", "lmdb", "trajectory",
+#   "md17"  — MD17/rMD17 benchmark (goal.ml.data.benchmarks.md17)
+#   "qm9"   — QM9 quantum chemistry (goal.ml.data.benchmarks.qm9)
+#   "ani1"/"ani1x" — ANI-1/ANI-1x (goal.ml.data.benchmarks.ani1)
+#
+# Loading modes:
+#   Mode 1 — single root, auto-split
+#   Mode 2 — explicit per-split file lists (train_paths / val_paths)
+#   Mode 3 — merged multi-source, then auto-split
+#   Mode 4 — directory per split (train_dir / val_dir / test_dir)
+# ─────────────────────────────────────────────────────
+data:
+  dataset_type: md17
+
+  root: ${paths.data_dir}/md17
+  molecule: aspirin
+  revised: true # rMD17 revised (higher quality forces)
+  cutoff: 5.0 # Å, must match model.backbone.cutoff
+  train_size: 950
+  val_size: 50
+  seed: 42
+  dtype: float64
+
+  batch_size: 16 # HyperSpec handles larger batches than SIMURGH artisan bank
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: null
+
+  # energy_key / forces_key not used for md17 dataset_type
+  merge_strategy: sequential
+  split_ratio: [0.8, 0.1, 0.1]
+  split_seed: 42
+
+# ─────────────────────────────────────────────────────
+# MODEL
+# ─────────────────────────────────────────────────────
+# backbone.name options:
+#   "simurgh"             — E(3)-equivariant artisan-bank force field
+#   "simurgh_monolithic"  — SIMURGH without backbone/head split
+#   "monolithic_arace"   — SIMURGH ARACE: artisans + ACE alternating, monolithic
+#   "hyperspec"          — E(3)-equivariant GNN (this file)
+#   "invariant_gnn"      — invariant SchNet-like GNN
+#   "monolithic_example" — minimal reference monolithic model
+#
+# HyperSpec is a modular backbone — it produces NodeFeatures that
+# are consumed by a task head. head: null is NOT valid for HyperSpec.
+#
+# head.name options (not null — HyperSpec requires a head):
+#   "energy_forces"  — energy + autograd forces (default)
+#   "dual_forces"    — energy + forces with selectable mode
+#   "direct_forces"  — energy + direct equivariant force projection
+#   "energy"         — energy only
+#   "stress"         — energy + virial stress
+#   "dipole"         — dipole moment
+#   "scalar"         — generic per-structure scalar
+#   "multi"          — multiple heads simultaneously
+# ─────────────────────────────────────────────────────
+model:
+  backbone:
+    name: hyperspec
+
+    # Atom-type embedding dimension
+    # Shared embedding table for all elements (size = num_elements × embedding_dim)
+    num_elements: 120 # supports all elements up to Z=120
+    embedding_dim: 64
+
+    # Equivariant hidden width per l-block.
+    # irreps_hidden = hidden_channels × (0e + 1o + 2e + ...)
+    hidden_channels: 128
+
+    # Number of message-passing interaction layers.
+    # More layers → longer-range interactions; each adds compute.
+    # 2–4 is typical for MD17-scale datasets.
+    num_interactions: 3
+
+    # Maximum spherical-harmonic order:
+    #   0 = scalars only (invariant)
+    #   1 = + vectors (bond directions)
+    #   2 = + rank-2 tensors (angles)    — default, recommended
+    #   3 = + rank-3 (dihedrals, ~2× cost)
+    lmax: 2
+
+    # Neighbour cutoff radius (Å). Must match data.cutoff.
+    cutoff: 5.0
+
+    # Number of Bessel radial basis functions.
+    # 8 is standard (MACE default); 16 for more radial resolution.
+    num_radial_basis: 8
+
+    # Note: HyperSpec does NOT have:
+    #   - atomic_energies (no energy baseline subtraction)
+    #   - artisan_config (no mixture of experts)
+    #   - dressing_kwargs (uses flat hyperparams above)
+    #   - elements list (uses num_elements embedding table)
+    # For energy baseline subtraction, use SIMURGH or add a
+    # ScaleShiftBlock wrapper around HyperSpec.
+
+  # ── Task head ──────────────────────────────────────────────────────
+  # irreps_in must match backbone output:
+  #   {hidden_channels}x0e + {hidden_channels}x1o + {hidden_channels}x2e
+  # for lmax=2 (the default). For lmax=1: 0e + 1o only.
+  #
+  # Force-prediction modes:
+  #   "autograd" — F = -∂E/∂r (conservative, energy-conserving)
+  #   "direct"   — equivariant 1x1o projection (non-conservative, cheaper)
+  #   "hybrid"   — autograd + correction_weight * direct
+  #   "pairwise" — not applicable to HyperSpec (SIMURGH-only)
+  head:
+    name: energy_forces
+    irreps_in: "128x0e+128x1o+128x2e" # must match hidden_channels × lmax irreps
+    hidden_dim: 64
+    compute_stress: false # true for periodic systems with virial stress labels
+    # mode / correction_weight / pairwise_correction_weight only apply to
+    # name: dual_forces — remove this comment block when switching heads.
+
+# ─────────────────────────────────────────────────────
+# TRAINER
+# ─────────────────────────────────────────────────────
+# trainer.max_epochs is authoritative — governs both Lightning and
+# the scheduler T_max. Do NOT use training.max_epochs.
+#
+# accelerator options: "cpu", "gpu", "mps", "tpu", "auto"
+# precision options: "32-true", "bf16-mixed", "16-mixed", "64-true"
+# strategy options: "auto", "ddp", "fsdp", "deepspeed_zero1/2/3"
+# ─────────────────────────────────────────────────────
+trainer:
+  _target_: lightning.pytorch.trainer.Trainer
+  default_root_dir: ${paths.output_dir}
+
+  min_epochs: 1
+  max_epochs: 200
+
+  accelerator: cpu
+  devices: 1
+  num_nodes: 1
+  precision: "32"
+  strategy: auto
+
+  check_val_every_n_epoch: 1
+  val_check_interval: null
+  log_every_n_steps: 1
+
+  gradient_clip_val: null
+  gradient_clip_algorithm: "norm"
+  accumulate_grad_batches: 1
+  num_sanity_val_steps: 2
+  inference_mode: false
+
+  deterministic: false
+  detect_anomaly: false
+  enable_model_summary: true
+  enable_progress_bar: true
+  sync_batchnorm: false
+
+# ─────────────────────────────────────────────────────
+# TRAINING HYPERPARAMETERS
+# ─────────────────────────────────────────────────────
+training:
+  gradient_clip: 10.0
+  checkpoint_dir: ${paths.output_dir}/checkpoints
+  compile_model: false
+  compile:
+    mode: "default"
+    fullgraph: false
+    dynamic: null
+  slurm_mode: false
+
+  performance:
+    float32_matmul_precision: highest
+    cudnn_benchmark: false
+    cudnn_deterministic: false
+
+  # AdamW optimiser — HyperSpec equivariant params also get WD=0 automatically
+  optimizer:
+    lr: 5.0e-4
+    weight_decay: 1.0e-6
+    amsgrad: true
+    min_lr: 1.0e-7
+    # scheduler_type options:
+    #   "cosine_warmup"    — linear warmup then cosine decay (recommended)
+    #   "cosine"           — cosine decay from epoch 0
+    #   "reduce_on_plateau"— halve LR when val/total plateaus
+    scheduler_type: cosine_warmup
+    warmup_epochs: 5
+    scheduler:
+      patience: 20
+      factor: 0.5
+
+  ema:
+    enabled: true
+    decay: 0.99
+
+  # No position noise by default for HyperSpec baseline
+  # (add 0.005 to match SIMURGH training conditions for fair comparison)
+  position_noise_std: 0.0
+
+  # HyperSpec: no stage curriculum needed (no artisan gate collapse risk)
+  # Simple single-stage training from epoch 0.
+  # Uncomment stages block to enable curriculum:
+  # stages:
+  #   - name: "energy_only"
+  #     epochs: 10
+  #     loss_weights:
+  #       energy: 1.0
+  #       forces: 0.0
+  #   - name: "energy_forces"
+  #     epochs: null
+  #     loss_weights:
+  #       energy: 1.0
+  #       forces: 1.0
+  stages: [] # empty = no curriculum; base loss weights apply throughout
+
+  # Loss functions
+  # fn options: "mse", "mae", "rmse", "huber", "smooth_l1"
+  # normalize_by_n_atoms: false for MD17 (single fixed-size molecule)
+  #
+  # HyperSpec has no gate_reg loss (no artisan gates to regularise).
+  # Available losses:
+  #   "energy"          — per-atom energy MAE/MSE
+  #   "forces"          — atomic forces MAE/MSE
+  #   "stress"          — virial stress (periodic systems)
+  #   "newton"          — Newton violation (autograd forces only)
+  #   "dipole"          — dipole moment
+  #   "scalar_property" — generic scalar
+  losses:
+    - name: energy
+      fn: mae
+      weight: 1.0
+      normalize_by_n_atoms: false
+
+    - name: forces
+      fn: mae
+      weight: 1.0
+      normalize_by_n_atoms: false
+
+  strict_stage_labels: false
+
+# ─────────────────────────────────────────────────────
+# CHECKPOINTING
+# ─────────────────────────────────────────────────────
+# Three independent pools: top_k, interval, last.
+# See simurgh_gmd26.yaml for full documentation of all options.
+#
+# metric options (any metric logged at validation time — note the
+# section prefix: force curves live in val_forces/, energy curves in
+# val_energy/, and only the loss total is in plain val/):
+#   "val_forces/forces_mae"               — force MAE (min)
+#   "val_energy/energy_mae_per_atom"      — per-atom energy MAE (min)
+#   "val_forces/forces_cosine_similarity" — force direction accuracy (max)
+#   "val/total"                           — total loss (min)
+# ─────────────────────────────────────────────────────
+checkpoint_manager:
+  _target_: goal.ml.training.callbacks.checkpoint_manager.GOALCheckpointManager
+  dirpath: ${paths.output_dir}/checkpoints
+
+  top_k:
+    enabled: true
+    k: 5
+    metric: "val_forces/forces_mae"
+    mode: "min"
+
+  interval:
+    enabled: true
+    every_n_epochs: 10
+    keep_last_n: 3
+
+  last:
+    enabled: true
+    filename: "last.ckpt"
+
+  # Self-contained .simurgh archives — see simurgh_gmd26.yaml for docs.
+  save_archive: true
+  archive_interval: false
+
+# ─────────────────────────────────────────────────────
+# CALLBACKS
+# ─────────────────────────────────────────────────────
+# See simurgh_gmd26.yaml for full documentation of all available callbacks.
+# ─────────────────────────────────────────────────────
+callbacks:
+  rich_progress_bar:
+    _target_: goal.ml.training.callbacks.progress.GOALRichProgressBar
+
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: 1
+
+  # early_stopping:
+  #   _target_: lightning.pytorch.callbacks.EarlyStopping
+  # Check right after validation, not at the end of the training epoch:
+  # a run resumed from a checkpoint saved after validation first closes
+  # that finished epoch with no metrics logged, which strict mode rejects.
+  check_on_train_epoch_end: false
+  #   monitor: "val_forces/forces_mae"
+  #   patience: 30
+  #   mode: "min"
+  #   min_delta: 1.0e-6
+  #   strict: true
+  #   check_finite: true
+  #   stopping_threshold: null
+  #   divergence_threshold: null
+
+  # backbone_finetuning:
+  #   _target_: lightning.pytorch.callbacks.BackboneFinetuning
+  #   unfreeze_backbone_at_epoch: 10
+  #   backbone_initial_ratio_lr: 0.1
+
+  # ema_weight_averaging:
+  #   _target_: lightning.pytorch.callbacks.EMAWeightAveraging
+  #   decay: 0.999   # set training.ema.enabled: false to avoid double EMA
+
+  # grad_accumulation:
+  #   _target_: lightning.pytorch.callbacks.GradientAccumulationScheduler
+  #   scheduling: {0: 1, 10: 2}
+
+  # swa:
+  #   _target_: lightning.pytorch.callbacks.StochasticWeightAveraging
+  #   swa_lrs: 1.0e-4
+  #   swa_epoch_start: 0.75
+  #   annealing_epochs: 10
+  #   annealing_strategy: cos
+
+  # throughput_monitor:
+  #   _target_: lightning.pytorch.callbacks.ThroughputMonitor
+  #   window_size: 100
+
+# ─────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────
+# ── LOGGER SECTIONS (what lands where in W&B / TensorBoard) ─────────
+# The text before the first "/" is the section a curve is filed under:
+#
+#   {split}/         total (the weighted loss), plus any loss component
+#                    that is neither energy nor forces
+#   {split}_energy/  the energy loss term, energy_mae_per_atom,
+#                    energy_rmse_per_atom, energy_round_{L}
+#   {split}_forces/  the forces loss term, forces_mae, forces_rmse,
+#                    forces_cosine_similarity, forces_magnitude_mae,
+#                    newton_violation and its _x/_y/_z components
+#   {split}_gate/    every gate diagnostic (gate_mean_round_{L},
+#                    aux_loss, gate_reg, artisan/…) — numerous, for
+#                    occasional inspection, never on the progress bar
+#
+# {split} is train, val (the in-distribution set) or test (the
+# out-of-distribution set: logged every validation epoch when
+# data.monitor_test_during_training is on, otherwise only by an explicit
+# trainer.test() run).  Select on val_*, read test_*.
+#
+# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+#
+# See simurgh_gmd26.yaml for full documentation of all available loggers.
+# ─────────────────────────────────────────────────────
+logger:
+  csv:
+    _target_: lightning.pytorch.loggers.csv_logs.CSVLogger
+    save_dir: "${paths.output_dir}"
+    name: "csv_logs"
+    prefix: ""
+
+  # wandb:
+  #   _target_: lightning.pytorch.loggers.wandb.WandbLogger
+  #   project: "goal-hyperspec-md17"
+  #   entity: null
+  #   save_dir: "${paths.output_dir}"
+  #   offline: false
+  #   log_model: false
+  #   tags: ["hyperspec", "md17"]
+
+  # tensorboard:
+  # mlflow:
+  # neptune:
+  # aim:
+  # comet:
+
+# ─────────────────────────────────────────────────────
+# DISTRIBUTED TRAINING
+# ─────────────────────────────────────────────────────
+# See simurgh_gmd26.yaml for full documentation of all strategy options.
+# ─────────────────────────────────────────────────────
+strategy:
+  name: auto
+  find_unused_parameters: false
+  static_graph: false
+  gradient_as_bucket_view: true
+  bucket_cap_mb: 25
+  process_group_backend: nccl
+  auto_wrap_policy: size
+  size_based_min_params: 1000000
+  activation_checkpointing: true
+  cpu_offload: false
+  sharding_strategy: full_shard
+  state_dict_type: full
+  stage: 3
+  offload_optimizer: false
+  offload_parameters: false
+  overlap_comm: true
+  contiguous_gradients: true
+  allgather_bucket_size: 200000000
+  reduce_bucket_size: 200000000
+  logging_level: 30
+
+# ─────────────────────────────────────────────────────
+# RESUME / EXTEND
+# ─────────────────────────────────────────────────────
+# An INTERRUPTED run picks itself up with nothing set here: on launch,
+# training.checkpoint_dir/last.ckpt is loaded if it exists, and the
+# GOALCheckpointManager pools are restored from checkpoint_state.json.
+#
+# This block is for continuing a run that ALREADY FINISHED. Raise the
+# budget and point resume.from at the old run's checkpoints:
+#
+#   goal-train --config-name <this file> \
+#       trainer.max_epochs=3000 \
+#       resume.from=logs/<task_name>/runs/<old_run>/checkpoints
+#
+# The continued run writes its own checkpoints under its own output
+# directory; the old run's files are read for pool ranking but never
+# deleted. A launch with nothing left to train (max_epochs already
+# reached) exits immediately — which is what stops SLURM from requeueing
+# a completed job.
+resume:
+  # Run directory, checkpoint directory, or .ckpt file to continue from.
+  # null = this run's own training.checkpoint_dir (plain auto-resume).
+  from: null
+
+  # What to do with the restored LR schedule when max_epochs changes.
+  # Lightning restores T_max / base_lrs / last_epoch from the checkpoint,
+  # so the new budget never reaches the scheduler on its own — and since
+  # CosineAnnealingLR is periodic with period 2*T_max, the LR would climb
+  # BACK UP its curve over the added epochs, undoing the run.
+  #   stretch — re-aim the schedule at the new budget: the LR lands where
+  #             a run configured with the new max_epochs from the start
+  #             would be at this epoch, and keeps annealing down.
+  #   restart — fresh cosine cycle over the added epochs only, from
+  #             training.optimizer.lr (SGDR-style warm restart).
+  #   keep    — leave the restored schedule as-is (the old behaviour;
+  #             only for reproducing a pre-existing resume).
+  lr_schedule: stretch
+
+# Dataset statistics derived from the training set before the model is built
+# (elements, atomic reference energies, scale, avg_num_neighbors, pair_counts).
+# goal-train records them in checkpoints/config.yaml, with the dataset they
+# came from, and reuses them when this run is resumed or extended — they are
+# not recomputed, and the model is rebuilt exactly as trained even if the
+# training data has changed since (a change is reported).
+dataset_stats:
+  # Reuse the values recorded with the checkpoint on resume / extension.
+  reuse: true
+  # Statistics to derive again anyway, or "all": elements, atomic_energies,
+  # scale, avg_num_neighbors, pair_counts.  An explicit value under
+  # model.backbone is kept; otherwise it is computed from the current data.
+  # scale / atomic_energies / avg_num_neighbors can always be changed;
+  # elements / pair_counts shape the model, so they only work on resume if
+  # the result still matches the checkpoint.
+  recompute: []
+
+# ckpt_path: legacy alias for resume.from — still honoured, and the key
+# goal-eval reads to pick a checkpoint to evaluate.
+ckpt_path: null
+
+# ─────────────────────────────────────────────────────
+# HYPERPARAMETER SEARCH
+# ─────────────────────────────────────────────────────
+# See simurgh_gmd26.yaml for full search configuration options.
+hparams_search: null

@@ -9,8 +9,10 @@ components.
 
 The entry point is :func:`mlip_metrics(predictions, batch)` which
 returns a flat ``{name: scalar tensor}`` dict.  The training loop
-prefixes the keys with ``"train/"`` or ``"val/"`` and feeds them to
-Lightning's ``log_dict``.
+turns each name into a logger key with :func:`metric_section` (which
+files energy numbers under ``{split}_energy/``, force numbers under
+``{split}_forces/`` and gate diagnostics under ``{split}_gate/``) and
+feeds them to Lightning's ``log_dict``.
 
 Metrics emitted
 ---------------
@@ -39,6 +41,84 @@ PROG_BAR_METRICS: frozenset[str] = frozenset(
         "newton_violation",
     }
 )
+
+
+# ----------------------------------------------------------------------
+# Logger sections
+# ----------------------------------------------------------------------
+#
+# W&B and TensorBoard group panels by the text before the first ``/``,
+# so the section a curve lands in is chosen by the *prefix* the training
+# loop builds: ``{split}`` plus the sub-section resolved here.  One
+# table, used for both the diagnostic metrics above and the loss labels
+# coming out of ``CompositeLoss``, so a name cannot be filed in two
+# different sections depending on which logging helper emitted it.
+#
+#   {split}/         the run's verdict: ``total``, plus any loss
+#                    component that is neither energy nor forces
+#                    (``stress``, ``dipole``, ...).
+#   {split}_energy/  everything about the energy: its loss term, the
+#                    per-atom MAE/RMSE, the per-round decomposition.
+#   {split}_forces/  everything about the forces: its loss term, the
+#                    MAE/RMSE/cosine/magnitude split, and the Newton
+#                    violation (a force diagnostic, four numbers).
+#   {split}_gate/    every gate diagnostic — numerous and for
+#                    occasional inspection, never for judging a run.
+#
+# Splitting energy from forces matters because the two live on
+# different scales and are read for different reasons: an energy MAE
+# panel next to a force cosine-similarity panel is two unrelated
+# questions sharing a row.
+
+#: Sub-section for a metric or loss label, matched by exact name.
+METRIC_SECTIONS: dict[str, str] = {
+    # Loss labels (``WeightedLoss.label`` in the CompositeLoss).
+    "energy": "energy",
+    "forces": "forces",
+    "aux_loss": "gate",
+    "gate_reg": "gate",
+    # Energy diagnostics.
+    "energy_mae_per_atom": "energy",
+    "energy_rmse_per_atom": "energy",
+    # Force diagnostics.
+    "forces_mae": "forces",
+    "forces_rmse": "forces",
+    "forces_cosine_similarity": "forces",
+    "forces_magnitude_mae": "forces",
+}
+
+#: Names routed by prefix rather than by exact match, in priority
+#: order.  Two families cannot be enumerated: the per-round /
+#: per-element-pair diagnostics (``energy_round_{L}``,
+#: ``gate_mean_round_{L}``, ``artisan/round{L}/{pair}``,
+#: ``artisan_load/{pair}``) and the composite sub-loss labels, which
+#: ``build_loss`` names ``{property}_{fn}`` — ``forces_mse``,
+#: ``energy_huber`` and so on for any registered loss function.  So a
+#: name simply beginning with ``energy`` or ``forces`` follows its
+#: property, which is also what keeps a sub-loss in the same section as
+#: the group total it belongs to.
+_SECTION_BY_PREFIX: tuple[tuple[str, str], ...] = (
+    ("energy", "energy"),
+    ("forces", "forces"),
+    ("newton_violation", "forces"),
+    ("gate", "gate"),
+    ("artisan", "gate"),
+)
+
+
+def metric_section(name: str) -> str | None:
+    """Sub-section for *name*, or ``None`` when it belongs in ``{split}/``.
+
+    ``"forces_mae"`` -> ``"forces"`` (logged as ``val_forces/forces_mae``);
+    ``"total"`` -> ``None`` (logged as ``val/total``).
+    """
+    section: str | None = METRIC_SECTIONS.get(name)
+    if section is not None:
+        return section
+    for prefix, by_prefix in _SECTION_BY_PREFIX:
+        if name.startswith(prefix):
+            return by_prefix
+    return None
 
 
 def _scatter_sum_batch(

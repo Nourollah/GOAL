@@ -15,6 +15,7 @@ from e3nn.o3 import Irreps
 from goal.ml.data.graph import AtomicGraph, NodeFeatures
 from goal.ml.nn.blocks.embedding import AtomicNumberEmbedding
 from goal.ml.nn.blocks.interaction import EquivariantInteractionBlock
+from goal.ml.nn.models.simurgh.geometry import differentiable_edges
 from goal.ml.nn.primitives.linear import EquivariantLinear
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 
@@ -118,6 +119,17 @@ class HyperSpecModel(nn.Module):
         NodeFeatures
             Equivariant node features after all interaction layers.
         """
+        # Edge geometry is re-derived from positions so the energy is a
+        # function of ``graph.pos`` in the autograd graph — the energy /
+        # forces heads differentiate against ``graph.pos`` and fall back to
+        # zero forces when it carries no gradient.  The neighbour list's own
+        # ``edge_attr`` / ``edge_weight`` are plain data, cut off from it.
+        positions: torch.Tensor = typing.cast(torch.Tensor, graph.pos)
+        if torch.is_grad_enabled() and not positions.requires_grad:
+            positions = positions.detach().requires_grad_(True)
+            graph.pos = positions
+        edge_vectors, edge_lengths = differentiable_edges(graph, positions)
+
         # Initial embedding (scalar features only)
         h: torch.Tensor = self.embedding(graph.z)  # (N, embedding_dim)
         h = self.input_linear(h)  # (N, irreps_hidden.dim)
@@ -127,8 +139,8 @@ class HyperSpecModel(nn.Module):
             h = interaction(  # (N, irreps_hidden.dim)
                 node_feats=h,
                 edge_index=graph.edge_index,  # (2, E)
-                edge_vectors=graph.edge_attr,  # (E, 3)
-                edge_lengths=graph.edge_weight,  # (E,)
+                edge_vectors=edge_vectors,  # (E, 3)
+                edge_lengths=edge_lengths,  # (E,)
             )
 
         return NodeFeatures(

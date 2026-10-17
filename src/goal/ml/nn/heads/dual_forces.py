@@ -138,6 +138,45 @@ class DualForcesHead(nn.Module):
         features: NodeFeatures,
         graph: AtomicGraph,
     ) -> dict[str, torch.Tensor]:
+        """Predict total energy and forces according to ``self.mode``.
+
+        The energy is the per-graph sum of ``features.node_energies``
+        (when the backbone supplies them) or of the scalar readout.
+        Forces depend on the mode:
+
+        * ``"direct"``: ``F = force_proj(node_feats)``; no autograd.
+        * ``"pairwise"``: ``F = features.node_forces``; if
+          ``pairwise_correction_weight > 0`` and ``graph.pos`` tracks
+          gradients, ``F = -dE/dr + w * node_forces`` instead.
+        * ``"autograd"``: ``F = -dE/dr``.
+        * ``"hybrid"``: ``F = -dE/dr + correction_weight * F_direct``.
+
+        In ``"autograd"`` and ``"hybrid"`` modes the forces are all
+        zeros when ``graph.pos.requires_grad`` is ``False``.  The
+        autograd graph is kept (``create_graph``) only in training mode.
+
+        Parameters
+        ----------
+        features : NodeFeatures
+            Backbone output; reads ``node_energies`` ``(N,)`` or
+            ``node_feats`` ``(N, irreps_in.dim)``, and ``node_forces``
+            ``(N, 3)`` in ``"pairwise"`` mode.
+        graph : AtomicGraph
+            Input graph providing ``pos`` ``(N, 3)`` in Å and ``batch``
+            ``(N,)``.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            ``'energy'`` ``(B,)`` in eV, ``'num_atoms'`` ``(B,)`` (float
+            atom counts) and ``'forces'`` ``(N, 3)`` in eV/Å.
+
+        Raises
+        ------
+        ValueError
+            In ``"pairwise"`` mode when ``features.node_forces`` is
+            ``None``.
+        """
         energy: torch.Tensor
         num_atoms: torch.Tensor
         energy, _batch, num_atoms = self._energy(features, graph)

@@ -1,0 +1,7 @@
+# ML model for on-the-fly learning
+_target_: goal.md.core.calculator_factory.CalculatorFactory.create
+_convert_: none
+
+key: goal_model
+checkpoint: ??? # Initial model checkpoint (archive, directory or .ckpt)
+device: cuda

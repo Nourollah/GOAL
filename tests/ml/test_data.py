@@ -422,3 +422,143 @@ class TestGOALDataModule:
 
         with pytest.raises(RuntimeError, match="No test dataset"):
             dm.test_dataloader()
+
+
+# ---------------------------------------------------------------------------
+# Tests: monitoring the test split during training
+# ---------------------------------------------------------------------------
+
+
+class TestMonitorTestDuringTraining:
+    """``data.monitor_test_during_training`` turns the held-out set into a
+    second validation dataloader, so an ID and an OOD set are reported
+    side by side every epoch without ever being averaged together."""
+
+    def _make_dirs(self, tmp_path: Path) -> dict[str, str]:
+        for name in ("train", "val", "test"):
+            d: Path = tmp_path / name
+            d.mkdir()
+            (d / "data.xyz").touch()
+        return {
+            "data.train_dir": str(tmp_path / "train"),
+            "data.val_dir": str(tmp_path / "val"),
+            "data.test_dir": str(tmp_path / "test"),
+        }
+
+    def _make_cfg(self, **overrides: typing.Any) -> DictConfig:
+        base: dict[str, typing.Any] = {
+            "data": {
+                "dataset_type": "mock",
+                "cutoff": 5.0,
+                "batch_size": 4,
+                "num_workers": 0,
+                "pin_memory": False,
+            }
+        }
+        for k, v in overrides.items():
+            if k.startswith("data."):
+                base["data"][k.split(".", 1)[1]] = v
+            else:
+                base[k] = v
+        return OmegaConf.create(base)
+
+    @pytest.fixture(autouse=True)
+    def _register_mock_dataset(self):
+        from goal.ml.registry import DATASET_REGISTRY
+
+        if "mock" not in DATASET_REGISTRY:
+            DATASET_REGISTRY.register_instance("mock", MockAtomicDataset)
+        yield
+
+    def _setup(self, tmp_path: Path, monitor: bool, stage: str | None = "fit"):
+        from goal.ml.data.datamodule import GOALDataModule
+
+        cfg: DictConfig = self._make_cfg(
+            **self._make_dirs(tmp_path),
+            **{"data.monitor_test_during_training": monitor},
+        )
+        with patch(
+            "goal.ml.data.datamodule._build_datasets",
+            side_effect=lambda cls, paths, split, cutoff, extra: [MockAtomicDataset(size=10)],
+        ):
+            dm: GOALDataModule = GOALDataModule(cfg)
+            dm.setup(stage=stage)
+        return dm
+
+    def test_off_by_default(self, tmp_path: Path):
+        dm = self._setup(tmp_path, monitor=False)
+        assert dm.monitor_test_during_training is False
+        assert dm.val_split_names == ["val"]
+        # ``fit`` alone never builds the test split when it isn't monitored.
+        assert dm.data_test is None
+
+    def test_test_split_is_built_during_fit_when_monitored(self, tmp_path: Path):
+        """The mode helpers gate the test split behind stage 'test'/None —
+        monitoring it during training needs it at fit time too."""
+        dm = self._setup(tmp_path, monitor=True)
+        assert dm.data_test is not None
+        assert dm.val_split_names == ["val", "test"]
+
+    def test_val_dataloader_returns_both_sets_in_order(self, tmp_path: Path):
+        dm = self._setup(tmp_path, monitor=True)
+        loaders = dm.val_dataloader()
+
+        assert isinstance(loaders, list)
+        assert len(loaders) == 2
+        # Order matters: index 0 must be the ID set, because
+        # ``GOALModule._val_prefix`` maps index -> section name by position.
+        assert loaders[0].dataset is dm.data_val
+        assert loaders[1].dataset is dm.data_test
+
+    def test_single_loader_is_not_wrapped_in_a_list(self, tmp_path: Path):
+        """A plain loader keeps Lightning from appending
+        '/dataloader_idx_0' to every key of an ordinary run."""
+        dm = self._setup(tmp_path, monitor=False)
+        loaders = dm.val_dataloader()
+
+        assert not isinstance(loaders, list)
+        assert loaders.dataset is dm.data_val
+
+    def test_val_and_test_loaders_are_distinct_datasets(self, tmp_path: Path):
+        dm = self._setup(tmp_path, monitor=True)
+        assert dm.data_val is not dm.data_test
+
+    def test_warns_when_enabled_without_a_test_split(self, tmp_path: Path):
+        from goal.ml.data.datamodule import GOALDataModule
+
+        train_dir: Path = tmp_path / "train"
+        val_dir: Path = tmp_path / "val"
+        for d in (train_dir, val_dir):
+            d.mkdir()
+            (d / "data.xyz").touch()
+
+        cfg: DictConfig = self._make_cfg(
+            **{
+                "data.train_dir": str(train_dir),
+                "data.val_dir": str(val_dir),
+                "data.monitor_test_during_training": True,
+            }
+        )
+        with patch(
+            "goal.ml.data.datamodule._build_datasets",
+            side_effect=lambda cls, paths, split, cutoff, extra: [MockAtomicDataset(size=10)],
+        ):
+            dm: GOALDataModule = GOALDataModule(cfg)
+            with pytest.warns(UserWarning, match="no test split is configured"):
+                dm.setup(stage="fit")
+
+        # Degrades to a normal run rather than failing one.
+        assert dm.val_split_names == ["val"]
+        assert not isinstance(dm.val_dataloader(), list)
+
+    def test_flag_is_a_meta_key(self):
+        """Otherwise it would be forwarded to the dataset constructor."""
+        from goal.ml.data.datamodule import GOALDataModule
+
+        assert "monitor_test_during_training" in GOALDataModule._META_KEYS
+
+        cfg: DictConfig = self._make_cfg(
+            **{"data.root": "/fake", "data.monitor_test_during_training": True}
+        )
+        dm: GOALDataModule = GOALDataModule(cfg)
+        assert "monitor_test_during_training" not in dm._extra_kwargs()

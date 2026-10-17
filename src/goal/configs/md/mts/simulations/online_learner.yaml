@@ -1,0 +1,68 @@
+# @package _global_
+# Online-learning MTS simulation
+# The ML model is fine-tuned on-the-fly from QM reference data.
+# Once accurate enough, the ML model takes over; QM is then called only
+# once per `learner.eval_interval` steps, for re-calibration.
+#
+# Usage:
+#   goal-simulate-mts --config-name md/mts/simulations/online_learner \
+#       ml_calculator.checkpoint=path/to/model.simurgh  \
+#       base_calculator.orca_path=/path/to/orca
+#
+# Decision policy: ThresholdPolicy (switch when force_rmse < threshold)
+# Fine-tuning: GOALOnlineFinetuner (goal.ml gradient steps each eval_interval)
+#
+# With base_calculator + ml_calculator present, goal-simulate-mts drives a
+# QMLearnerCalculator as the only force provider (no separate slow
+# correction), so mts_ratio is 1: every step is one learner call.
+
+molecule:
+  key: from_smiles
+  smiles: CCO
+
+# High-accuracy QM (base) calculator
+base_calculator:
+  type: orca
+  orca_path: ???
+  keywords: "EnGrad wB97M-V def2-TZVPD RIJCOSX TightSCF DEFGRID3"
+  charge: 0
+  multiplicity: 1
+
+# ML model (will be fine-tuned during simulation)
+ml_calculator:
+  type: goal_model
+  checkpoint: ???
+  device: cpu
+
+# Switch/fine-tuning policy
+learner:
+  eval_interval: 100 # evaluate and fine-tune every N steps
+  data_buffer_size: 5000 # max frames in replay buffer
+  fine_tuning:
+    learning_rate: 1.0e-4
+    epochs_per_update: 3 # epochs through the buffer per fine-tuning call
+    batch_size: 8
+    min_buffer_size: 20
+    cutoff: 5.0
+    grad_clip: 1.0
+    energy_weight: 1.0
+    forces_weight: 10.0
+  policy:
+    type: threshold # or: step_fraction, always_base
+    force_rmse: 0.05 # eV/Å threshold for switching
+    energy_mae: 0.005 # eV/atom threshold
+    min_steps: 500
+    return_threshold_scale: 2.0
+
+mts:
+  timestep_fs: 1.0
+  mts_ratio: 1 # the learner switches QM/ML itself; no RESPA slow correction
+  total_steps: 50000
+  temperature_K: 300.0
+  friction: 0.01
+  log_interval: 100
+  trajectory_file: trajectory.traj
+  log_file: md.log
+  output_dir: outputs/md/online_learner
+  chunk_size: 100
+  show_progress: true

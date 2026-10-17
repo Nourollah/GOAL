@@ -87,8 +87,10 @@ def atomicgraph_to_mace_batch(
     node_attrs[torch.arange(n_atoms, device=device), col] = 1.0
 
     # --- batch / ptr ---
-    batch = graph.batch if getattr(graph, "batch", None) is not None else torch.zeros(
-        n_atoms, dtype=torch.long, device=device
+    batch = (
+        graph.batch
+        if getattr(graph, "batch", None) is not None
+        else torch.zeros(n_atoms, dtype=torch.long, device=device)
     )
     num_graphs = int(batch.max().item()) + 1 if n_atoms > 0 else 1
     ptr = getattr(graph, "ptr", None)
@@ -251,9 +253,7 @@ class MACEFinetune(FoundationModelBackbone):
             for z, e in references.items():
                 idx = z_index.get(int(z))
                 if idx is None:
-                    log.warning(
-                        "[finetune] Z=%d not in MACE z-table — E0 not updated for it.", z
-                    )
+                    log.warning("[finetune] Z=%d not in MACE z-table — E0 not updated for it.", z)
                     continue
                 if buf.dim() == 1:
                     buf[idx] = float(e)
@@ -286,8 +286,10 @@ class MACEFinetune(FoundationModelBackbone):
         energy = energy.to(target_dtype)
         forces = forces.to(target_dtype)
 
-        batch = graph.batch if getattr(graph, "batch", None) is not None else torch.zeros(
-            graph.pos.shape[0], dtype=torch.long, device=graph.pos.device
+        batch = (
+            graph.batch
+            if getattr(graph, "batch", None) is not None
+            else torch.zeros(graph.pos.shape[0], dtype=torch.long, device=graph.pos.device)
         )
         num_atoms = scatter(
             torch.ones(graph.pos.shape[0], device=graph.pos.device, dtype=energy.dtype),

@@ -60,6 +60,37 @@ class MoleculeFactory:
             )
         return builder.build(*args, **kwargs)
 
+    @classmethod
+    def from_config(
+        cls, section: typing.Any, default_key: str = "from_smiles"
+    ) -> ase.Atoms | list[ase.Atoms]:
+        """Build from a config mapping such as a ``molecule:`` section.
+
+        The builder is named by ``key`` (preferred), ``type`` or the older
+        ``method``.  Hydra's own ``_target_`` / ``_convert_`` /
+        ``_recursive_`` / ``_partial_`` entries are ignored, so the group
+        templates in ``goal/configs/md/molecules/`` can be used unchanged.
+        """
+        from omegaconf import OmegaConf
+
+        if OmegaConf.is_config(section):
+            section = OmegaConf.to_container(section, resolve=True)
+        kwargs: dict[str, typing.Any] = {
+            str(k): v for k, v in dict(section or {}).items() if not _is_hydra_meta(str(k))
+        }
+        key: str = str(
+            kwargs.pop("key", None)
+            or kwargs.pop("type", None)
+            or kwargs.pop("method", None)
+            or default_key
+        )
+        return cls.create(key, **kwargs)
+
+
+def _is_hydra_meta(name: str) -> bool:
+    """``_target_``-style keys Hydra reserves for ``instantiate``."""
+    return name.startswith("_") and name.endswith("_")
+
 
 class MoleculeBuilder(abc.ABC):
     """Abstract base class for molecule builders."""

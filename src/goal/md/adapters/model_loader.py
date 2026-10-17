@@ -17,6 +17,8 @@ def load_goal_calculator(
     device: str = "cpu",
     dtype: typing.Any = None,
     head: str | None = None,
+    checkpoint: str = "best",
+    use_ema: bool = True,
 ) -> GOALCalculator:
     """Load a goal.ml trained model as an ASE calculator.
 
@@ -26,15 +28,20 @@ def load_goal_calculator(
     Parameters
     ----------
     checkpoint_path : str or Path
-        Path to Lightning checkpoint (.ckpt) from goal.ml training
+        A ``.simurgh`` archive, a checkpoint directory, or a bare ``.ckpt``.
     cutoff : float, optional
-        Neighbor list cutoff in Ångströms. If None, read from checkpoint config.
+        Ignored — the cutoff is always read from the checkpoint's config.
     device : str
         Torch device ("cpu", "cuda", "cuda:0", etc.). Default: "cpu"
     dtype : torch.dtype, optional
-        Precision. Default: torch.float64 (from checkpoint if available)
+        Input precision.  ``None`` (default) matches the model's dtype.
     head : str, optional
         Multi-head identifier for multi-task models
+    checkpoint : str
+        Selector inside a checkpoint directory: ``"best"`` (default),
+        ``"last"``, ``"epoch=N"`` or a ``.ckpt`` name.
+    use_ema : bool
+        Load the EMA weights when the checkpoint has them (default).
 
     Returns
     -------
@@ -63,53 +70,69 @@ def load_goal_calculator(
     """
     from goal.ml.utils.calculator import GOALCalculator
 
-    if dtype is None:
-        import torch
-
-        dtype = torch.float64
-
     calc = GOALCalculator(
         checkpoint_path=str(checkpoint_path),
-        cutoff=cutoff,
         device=device,
         dtype=dtype,
         head=head,
+        checkpoint=checkpoint,
+        use_ema=use_ema,
     )
 
     return calc
 
 
-def get_model_cutoff(checkpoint_path: str | Path) -> float:
-    """Extract neighbor list cutoff from model checkpoint.
+def get_model_cutoff(checkpoint_path: str | Path, checkpoint: str = "best") -> float:
+    """Extract the neighbour-list cutoff a model was trained with.
+
+    Reads the saved config only — the model is not built, so this is
+    cheap and works for checkpoints the current code can no longer load.
 
     Parameters
     ----------
     checkpoint_path : str or Path
-        Path to Lightning checkpoint
+        A ``.simurgh`` archive, a checkpoint directory, or a bare ``.ckpt``.
+    checkpoint : str
+        Selector inside a checkpoint directory (see ``load_goal_calculator``).
 
     Returns
     -------
     float
-        Cutoff in Ångströms
+        Cutoff in Ångströms (``data.cutoff``, else ``model.backbone.cutoff``,
+        else 5.0).
 
     Raises
     ------
     FileNotFoundError
-        If checkpoint not found
-    KeyError
-        If cutoff not found in config
+        If the checkpoint does not exist.
     """
-    from goal.ml.training.module import GOALModule
+    import zipfile
 
-    checkpoint_path = Path(checkpoint_path)
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    import torch
+    from omegaconf import OmegaConf
 
-    module = GOALModule.load_from_checkpoint(str(checkpoint_path))
-    cutoff = float(
-        module.config.data.get(
-            "cutoff",
-            module.config.model.backbone.get("cutoff", 5.0),
-        )
-    )
-    return cutoff
+    from goal.ml.training.archive import ARCHIVE_SUFFIX, resolve_checkpoint
+
+    path = Path(checkpoint_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+    if str(path).endswith(ARCHIVE_SUFFIX):
+        with zipfile.ZipFile(path) as zf:
+            cfg = OmegaConf.create(zf.read("config.yaml").decode())
+    elif path.is_dir():
+        cfg_file = path / "config.yaml"
+        if cfg_file.is_file():
+            cfg = OmegaConf.load(cfg_file)
+        else:
+            raw = torch.load(
+                str(resolve_checkpoint(path, checkpoint)), map_location="cpu", weights_only=False
+            )
+            cfg = raw["hyper_parameters"]["config"]
+    else:
+        raw = torch.load(str(path), map_location="cpu", weights_only=False)
+        cfg = raw["hyper_parameters"]["config"]
+
+    data = cfg.get("data") or {}
+    backbone = (cfg.get("model") or {}).get("backbone") or {}
+    return float(data.get("cutoff", backbone.get("cutoff", 5.0)))

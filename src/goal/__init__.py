@@ -21,7 +21,12 @@ from __future__ import annotations
 # We restore the pre-3.14 behaviour by making ``_check_help`` swallow the
 # eager validation failure.  The help text is still validated when ``--help``
 # is invoked for real, so users see exactly the same diagnostics.
+import os as _os
 import sys as _sys
+
+#: Absolute path to the Hydra configs bundled with the package
+#: (``goal/configs``: ``ml/`` experiments, ``md/`` simulations, presets).
+CONFIGS_DIR: str = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "configs")
 
 if _sys.version_info >= (3, 14):
     import argparse as _argparse

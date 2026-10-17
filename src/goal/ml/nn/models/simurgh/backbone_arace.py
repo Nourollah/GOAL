@@ -48,8 +48,13 @@ from goal.ml.data.graph import AtomicGraph, NodeFeatures
 from goal.ml.nn.blocks.ace_block import AraceRound, normalise_addon_config
 from goal.ml.nn.blocks.artisans import (
     _AracePairArtisan,
+    _AraceRarePairArtisan,
     enumerate_element_pairs,
+    log_pair_routing,
     pair_label,
+    parse_pair_counts,
+    resolve_n_elements,
+    route_element_pairs,
 )
 from goal.ml.nn.blocks.embedding import AtomicNumberEmbedding
 from goal.ml.nn.blocks.fragment_interaction import FragmentGeometry
@@ -171,9 +176,30 @@ class SimurghAraceBackbone(nn.Module):
 
         # Normalise the artisan sub-config (may arrive as an OmegaConf
         # DictConfig) to a plain dict.
-        artisan_cfg: dict[str, typing.Any] = {
-            str(k): v for k, v in dict(artisan or {}).items()
-        }
+        artisan_cfg: dict[str, typing.Any] = {str(k): v for k, v in dict(artisan or {}).items()}
+        # ``n_elements: auto`` → max(Z)+1 rows in the element-conditioning
+        # tables; absent → the legacy 120 (see resolve_n_elements).
+        if "n_elements" in artisan_cfg:
+            artisan_cfg["n_elements"] = resolve_n_elements(
+                artisan_cfg["n_elements"], self._elements
+            )
+        # Frequency routing — identical layout and semantics to
+        # AraceBackbone; see goal.ml.nn.blocks.artisans.route_element_pairs.
+        rare_cfg: dict[str, typing.Any] = dict(artisan_cfg.pop("rare_artisan", {}) or {})
+        rare_pair_enabled: bool = bool(rare_cfg.get("enabled", False))
+        min_pair_frequency: float = float(rare_cfg.get("min_pair_frequency", 0.01))
+        rare_pair_embed_dim: int = int(rare_cfg.get("pair_embed_dim", 16))
+        pair_counts: dict[tuple[int, int], int] | None = parse_pair_counts(
+            artisan_cfg.pop("pair_counts", None)
+        )
+        if rare_pair_enabled and pair_counts is None:
+            raise ValueError(
+                "artisan.rare_artisan.enabled is true but no artisan.pair_counts "
+                "were provided.  train.py computes them from the training set; "
+                "outside it, pass them explicitly or disable routing — routing "
+                "without counts would dedicate every pair and silently do nothing."
+            )
+
         architecture: str = str(artisan_cfg.pop("architecture", "equivariant"))
         if architecture != "equivariant":
             raise ValueError(
@@ -182,9 +208,7 @@ class SimurghAraceBackbone(nn.Module):
             )
         self._artisan_kwargs: dict[str, typing.Any] = artisan_cfg
 
-        hidden_irreps: Irreps = Irreps(
-            artisan_cfg.get("hidden_irreps", "16x0e + 16x1o + 16x2e")
-        )
+        hidden_irreps: Irreps = Irreps(artisan_cfg.get("hidden_irreps", "16x0e + 16x1o + 16x2e"))
         self._irreps_hidden: Irreps = hidden_irreps
 
         # Optional add-on sub-configs.  Both may arrive as OmegaConf
@@ -209,16 +233,37 @@ class SimurghAraceBackbone(nn.Module):
         )
 
         # Shared bank (or None → each round builds its own).
+        all_pairs: tuple[tuple[int, int], ...] = tuple(enumerate_element_pairs(self._elements))
+        self._dedicated_pairs, self._rare_pairs = route_element_pairs(
+            all_pairs, pair_counts if rare_pair_enabled else None, min_pair_frequency
+        )
+        log_pair_routing(
+            "SimurghAraceBackbone",
+            self._elements,
+            all_pairs,
+            self._dedicated_pairs,
+            rare_pair_enabled,
+            min_pair_frequency,
+        )
+
         shared_bank: nn.ModuleDict | None = None
+        shared_rare: _AraceRarePairArtisan | None = None
         if self._share_artisan_weights:
             shared_bank = nn.ModuleDict(
                 {
                     f"z{a}_z{b}": _AracePairArtisan(
                         irreps_node=hidden_irreps, cutoff=self._cutoff, **artisan_cfg
                     )
-                    for a, b in enumerate_element_pairs(self._elements)
+                    for a, b in self._dedicated_pairs
                 }
             )
+            if rare_pair_enabled and self._rare_pairs:
+                shared_rare = _AraceRarePairArtisan(
+                    irreps_node=hidden_irreps,
+                    cutoff=self._cutoff,
+                    pair_embed_dim=rare_pair_embed_dim,
+                    **artisan_cfg,
+                )
 
         self.rounds: nn.ModuleList = nn.ModuleList(
             AraceRound(
@@ -230,6 +275,11 @@ class SimurghAraceBackbone(nn.Module):
                 avg_num_neighbors=self._avg_num_neighbors,
                 fragment_interaction_config=self._fragment_cfg,
                 adaptive_gate_config=self._adaptive_gate_cfg,
+                pair_counts=pair_counts,
+                rare_pair_enabled=rare_pair_enabled,
+                min_pair_frequency=min_pair_frequency,
+                rare_pair_embed_dim=rare_pair_embed_dim,
+                rare_artisan=shared_rare,
             )
             for _ in range(self._num_rounds)
         )
@@ -256,7 +306,7 @@ class SimurghAraceBackbone(nn.Module):
         self.last_aux_loss: torch.Tensor | None = None
         self.last_gate_scores: list[torch.Tensor | None] = []
 
-        n_pairs: int = len(enumerate_element_pairs(self._elements))
+        n_pairs: int = len(self._dedicated_pairs) + (1 if self._rare_pairs else 0)
         addons: list[str] = []
         if self._fragment_cfg is not None:
             addons.append(f"fragment_interaction({self._fragment_cfg})")
@@ -295,8 +345,7 @@ class SimurghAraceBackbone(nn.Module):
             mode = "dataset"
         if mode not in ("learned", "dataset", "provided"):
             raise ValueError(
-                f"atomic_energies.mode must be 'learned', 'dataset' or "
-                f"'provided', got {mode!r}."
+                f"atomic_energies.mode must be 'learned', 'dataset' or 'provided', got {mode!r}."
             )
         if mode == "learned":
             self.atomic_energies = nn.Parameter(
@@ -310,9 +359,7 @@ class SimurghAraceBackbone(nn.Module):
                 f"atomic_energies.mode={mode!r} requires 'values' to be a "
                 "{Z: e_Z} dict (train.py injects it for mode='dataset')."
             )
-        buf: torch.Tensor = torch.zeros(
-            num_elements_table, dtype=torch.get_default_dtype()
-        )
+        buf: torch.Tensor = torch.zeros(num_elements_table, dtype=torch.get_default_dtype())
         for z_key, e_val in dict(values).items():
             z: int = int(z_key)
             if not 0 <= z < num_elements_table:
@@ -378,18 +425,32 @@ class SimurghAraceBackbone(nn.Module):
         """Update the aggregation normaliser on every round in place."""
         self._avg_num_neighbors = float(value) if value is not None else None
         for rnd in self.rounds:
-            typing.cast(AraceRound, rnd).ace_block.set_avg_num_neighbors(
-                self._avg_num_neighbors
-            )
+            typing.cast(AraceRound, rnd).ace_block.set_avg_num_neighbors(self._avg_num_neighbors)
+
+    @property
+    def dedicated_pairs(self) -> tuple[tuple[int, int], ...]:
+        """Pairs that own a dedicated artisan."""
+        return self._dedicated_pairs
+
+    @property
+    def rare_pairs(self) -> tuple[tuple[int, int], ...]:
+        """Pairs routed to the shared rare artisan (empty when routing is off)."""
+        return self._rare_pairs
 
     def gates(self) -> dict[str, torch.Tensor]:
-        """Snapshot of every artisan gate, keyed ``round{L}/{pair}``."""
+        """Snapshot of every artisan gate, keyed ``round{L}/{pair}``.
+
+        With routing on, the shared rare artisan reports under
+        ``round{L}/rare`` — one curve for every pair below the threshold.
+        """
         result: dict[str, torch.Tensor] = {}
         for round_idx, rnd in enumerate(self.rounds):
             layer = typing.cast(AraceRound, rnd).artisan_layer
             for (a, b), key in zip(layer._pairs, layer._pair_keys):
                 artisan = typing.cast(_AracePairArtisan, layer.artisans[key])
                 result[f"round{round_idx}/{pair_label(a, b)}"] = artisan.gate.detach()
+            if layer.rare_artisan is not None:
+                result[f"round{round_idx}/rare"] = layer.rare_artisan.gate.detach()
         return result
 
     # ------------------------------------------------------------------
@@ -429,6 +490,28 @@ class SimurghAraceBackbone(nn.Module):
         )
 
     def forward(self, graph: AtomicGraph) -> NodeFeatures:
+        """Run every ARACE round and sum the per-round energies onto the atoms.
+
+        Side channels for ``GOALModule`` are refreshed on every call:
+        ``last_aux_loss`` (adaptive-gate loss, or ``None``),
+        ``last_gate_scores`` (detached, one entry per round) and
+        ``last_round_energies`` (detached ``(L, B)`` per-round totals).
+
+        Parameters
+        ----------
+        graph : AtomicGraph
+            Batched graph with ``pos`` (Å), ``atomic_numbers``,
+            ``edge_index`` and, when the fragment channel is enabled,
+            ``fragment_index``.  If ``graph.pos`` does not require grad it
+            is replaced by a detached, grad-enabled copy.
+
+        Returns
+        -------
+        NodeFeatures
+            ``node_feats`` — ``(N, irreps_hidden.dim)`` final equivariant
+            features; ``node_energies`` — ``(N,)`` invariant
+            ``scale · Σ_rounds e_round + E0(Z)``.
+        """
         # Re-derive edge geometry from positions so the autograd graph
         # links energy back to ``graph.pos`` — the energy/forces heads
         # call ``torch.autograd.grad(energy, graph.pos)`` themselves.
@@ -495,9 +578,7 @@ class SimurghAraceBackbone(nn.Module):
         batch: torch.Tensor = (
             graph.batch
             if graph.batch is not None
-            else torch.zeros(
-                graph.num_atoms, dtype=torch.long, device=node_energies.device
-            )
+            else torch.zeros(graph.num_atoms, dtype=torch.long, device=node_energies.device)
         )
         self.last_round_energies = scatter(
             scale_v * layer_energies, batch, dim=1, reduce="sum"

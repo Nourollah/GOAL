@@ -91,6 +91,4 @@ def test_non_conservative_warns(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cf, "HAS_UPET", True)
     monkeypatch.setattr(cf, "UPETCalculator", MagicMock())
     with pytest.warns(UserWarning, match="ENERGY CONSERVATION"):
-        cf.CalculatorFactory.create(
-            "upet", model="pet-mad-s", non_conservative=True
-        )
+        cf.CalculatorFactory.create("upet", model="pet-mad-s", non_conservative=True)

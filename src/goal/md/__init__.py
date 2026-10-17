@@ -8,8 +8,9 @@ Usage patterns
 **Config-first (recommended)**::
 
     from hydra import compose, initialize_config_dir
+    from goal import CONFIGS_DIR
     from goal.md.core.simulation import simulate_from_config
-    with initialize_config_dir(config_dir="configs/"):
+    with initialize_config_dir(config_dir=CONFIGS_DIR):
         cfg = compose("md/simulations/langevin_with_model")
     result = simulate_from_config(cfg)
 

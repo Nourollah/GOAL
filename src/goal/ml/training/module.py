@@ -12,17 +12,19 @@ Compatible with Lightning 2.6+ features including:
 
 from __future__ import annotations
 
+import re
 import typing
 import warnings
 
 import lightning as L
 import torch
 from omegaconf import DictConfig
+from torch import nn
 
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.training.ema import EMAWrapper
 from goal.ml.training.loss import CompositeLoss
-from goal.ml.training.metrics import PROG_BAR_METRICS, mlip_metrics
+from goal.ml.training.metrics import PROG_BAR_METRICS, metric_section, mlip_metrics
 
 
 class GOALModule(L.LightningModule):
@@ -73,6 +75,12 @@ class GOALModule(L.LightningModule):
         self.config: DictConfig = config
         self._compile_model: bool = compile_model
         self.save_hyperparameters(ignore=["backbone", "head", "loss"])
+
+        #: Backbone buffers (``"scale"``, ``"atomic_energies"``) whose freshly
+        #: built values must survive a checkpoint restore.  ``goal-train``
+        #: fills this when a resumed run recomputes those statistics
+        #: (``dataset_stats.recompute``); empty means restore everything.
+        self.keep_fresh_buffers: set[str] = set()
 
         # EMA — keeps a shadow copy of weights for evaluation.
         # Lightning 2.6 provides EMAWeightAveraging callback as an alternative,
@@ -159,33 +167,70 @@ class GOALModule(L.LightningModule):
                     dynamic=compile_cfg.get("dynamic", None),
                 )
 
+    #: Artisan classes that own learnable gate scalars, mapped to the
+    #: attribute holding them (``gate``: 0-d parameter, ``gates``: 1-d).
+    #: Matched by class *name* along the MRO rather than ``isinstance``:
+    #: a model rebuilt from a checkpoint's frozen source carries copies of
+    #: these classes from the snapshot, which ``isinstance`` against the
+    #: live classes would reject.
+    GATED_ARTISAN_CLASSES: typing.ClassVar[dict[str, str]] = {
+        "PotentialArtisan": "gate",  # legacy SimurghArtisanBank
+        "RarePotentialArtisan": "gates",  # legacy shared rare-pair artisan
+        "_AracePairArtisan": "gate",  # ARACE family (+ _AraceRarePairArtisan)
+    }
+
+    def _gated_artisans(self) -> list[tuple[nn.Module, str]]:
+        """``(module, attribute)`` for every gate-carrying artisan in the backbone.
+
+        Built once — the module tree does not change after construction —
+        and the gates themselves are read live in :meth:`forward`.
+        """
+        cached: list[tuple[nn.Module, str]] | None = self.__dict__.get("_gated_artisan_cache")
+        if cached is None:
+            cached = []
+            for mod in self.backbone.modules():
+                for cls in type(mod).__mro__:
+                    attr: str | None = self.GATED_ARTISAN_CLASSES.get(cls.__name__)
+                    if attr is not None:
+                        if isinstance(getattr(mod, attr, None), nn.Parameter):
+                            cached.append((mod, attr))
+                        break
+            self.__dict__["_gated_artisan_cache"] = cached
+        return cached
+
+    def _gate_values(self) -> torch.Tensor | None:
+        """All artisan gates as one live (grad-enabled) 1-D tensor, or ``None``."""
+        gates: list[torch.Tensor] = [
+            getattr(mod, attr).reshape(-1) for mod, attr in self._gated_artisans()
+        ]
+        return torch.cat(gates) if gates else None
+
     def forward(self, graph: AtomicGraph) -> dict[str, torch.Tensor]:
         """Run backbone -> head pipeline, or backbone alone for monolithic models."""
         if self.head is None:
-            return self.backbone(graph)
-        features: typing.Any = self.backbone(graph)
-        predictions: dict[str, torch.Tensor] = self.head(features, graph)
-        # Inject gate values (live, grad-enabled) for GateRegLoss.
-        # Duck-typed so non-SIMURGH backbones are silently skipped.
-        # We read the raw Parameter rather than .gates() (which detaches).
-        if hasattr(self.backbone, "artisan_bank") and hasattr(self.backbone.artisan_bank, "experts"):
-            gate_list: list[torch.Tensor] = [
-                expert.gate  # type: ignore[union-attr]
-                for expert in self.backbone.artisan_bank.artisans.values()
-            ]
-            if gate_list:
-                predictions["gate_values"] = torch.stack(gate_list)
+            predictions: dict[str, torch.Tensor] = self.backbone(graph)
+        else:
+            features: typing.Any = self.backbone(graph)
+            predictions = self.head(features, graph)
+        # Inject gate values (live, grad-enabled) for GateRegLoss — the raw
+        # Parameters, not ``.gates()`` (which detaches).  Every SIMURGH
+        # family is covered, modular and monolithic; backbones without
+        # artisans are silently skipped and ``gate_reg`` stays 0.
+        gate_values: torch.Tensor | None = self._gate_values()
+        if gate_values is not None:
+            predictions["gate_values"] = gate_values
 
         # Adaptive-depth-gate side channels (ARACE add-on).  Duck-typed,
         # so every other backbone is silently skipped; both attributes are
         # ``None`` unless ``model.backbone.adaptive_gate`` is configured.
         # ``last_aux_loss`` keeps its autograd graph — :meth:`_with_aux_loss`
         # adds it to the training total.
+        # A monolithic model that reports these itself keeps its own values.
         aux_loss: torch.Tensor | None = getattr(self.backbone, "last_aux_loss", None)
-        if aux_loss is not None:
+        if aux_loss is not None and "aux_loss" not in predictions:
             predictions["aux_loss"] = aux_loss
         round_gates: typing.Any = getattr(self.backbone, "last_gate_scores", None)
-        if round_gates:
+        if round_gates and "gate_scores" not in predictions:
             populated: list[torch.Tensor] = [g for g in round_gates if g is not None]
             if populated:
                 predictions["gate_scores"] = torch.stack(populated, dim=0)  # (L, N)
@@ -311,13 +356,22 @@ class GOALModule(L.LightningModule):
     # ------------------------------------------------------------------
     #
     # Everything a run logs lands in one of a few W&B / TensorBoard
-    # sections, chosen by the text before the first ``/``:
+    # sections, chosen by the text before the first ``/``.  Which section
+    # a given name belongs to is decided in one place — the table in
+    # :mod:`goal.ml.training.metrics` — and this module only prepends the
+    # split:
     #
-    #   train/      val/      — the metrics you actually watch: energy and
-    #                           force MAE/RMSE, cosine similarity, Newton
-    #                           violation, per-round energies, and the
-    #                           loss total plus its physics components.
-    #   train_gate/ val_gate/  — every gate diagnostic:
+    #   {train,val,test}/         the run's verdict: the loss ``total``,
+    #                             plus any loss component that is neither
+    #                             energy nor forces (``stress``, ...).
+    #   {train,val,test}_energy/  the energy loss term, ``energy_mae_per_atom``,
+    #                             ``energy_rmse_per_atom`` and the per-round
+    #                             decomposition ``energy_round_{L}``.
+    #   {train,val,test}_forces/  the forces loss term, ``forces_mae``,
+    #                             ``forces_rmse``, ``forces_cosine_similarity``,
+    #                             ``forces_magnitude_mae`` and the Newton
+    #                             violation (``newton_violation{,_x,_y,_z}``).
+    #   {train,val,test}_gate/    every gate diagnostic:
     #                             gate_mean_round_{L}   adaptive depth gate
     #                             aux_loss              its sparsity penalty
     #                             gate_reg              L2 on artisan gates
@@ -326,20 +380,34 @@ class GOALModule(L.LightningModule):
     #                             artisan_load/{pair}   load balance (val
     #                             artisan_load_variance only — see below)
     #
-    # Gate curves are numerous — one per round, plus one per element pair
-    # per round — and they are for occasional inspection, not for judging
-    # a run.  Keeping them in their own section is what stops them from
-    # burying ``val/forces_mae`` in a wall of panels.
-
-    #: Loss labels that belong in the gate section rather than next to the
-    #: physics losses.  ``total`` deliberately stays in ``train/`` — it is
-    #: the whole loss, including these components.
-    GATE_LOSS_LABELS: typing.ClassVar[frozenset[str]] = frozenset({"aux_loss", "gate_reg"})
+    # Energy and forces are split apart because they live on different
+    # scales and answer different questions — a per-atom energy MAE panel
+    # sitting next to a force cosine similarity is two unrelated readings
+    # sharing a row.  Gate curves are in their own section because they
+    # are numerous — one per round, plus one per element pair per round —
+    # and they are for occasional inspection, not for judging a run:
+    # keeping them apart is what stops them from burying
+    # ``val_forces/forces_mae`` in a wall of panels.
 
     @staticmethod
-    def _gate_prefix(prefix: str) -> str:
+    def _section(prefix: str, section: str | None) -> str:
+        """``("val/", "forces")`` → ``"val_forces/"``; ``None`` → ``"val/"``."""
+        base: str = prefix.rstrip("/")
+        return f"{base}_{section}/" if section else f"{base}/"
+
+    @classmethod
+    def _key(cls, prefix: str, name: str) -> str:
+        """Full logger key for one metric or loss label.
+
+        ``("val/", "forces_mae")`` → ``"val_forces/forces_mae"``,
+        ``("train/", "total")`` → ``"train/total"``.
+        """
+        return f"{cls._section(prefix, metric_section(name))}{name}"
+
+    @classmethod
+    def _gate_prefix(cls, prefix: str) -> str:
         """``"train/"`` → ``"train_gate/"``, ``"val/"`` → ``"val_gate/"``."""
-        return f"{prefix.rstrip('/')}_gate/"
+        return cls._section(prefix, "gate")
 
     def _log_artisan_gates(self, batch: AtomicGraph, prefix: str) -> None:
         """Log every artisan gate as ``{split}_gate/artisan/round{L}/{pair}``.
@@ -362,13 +430,13 @@ class GOALModule(L.LightningModule):
         gate_values: dict[str, torch.Tensor] = gates_fn()
         if not gate_values:
             return
-        artisan_prefix: str = f"{self._gate_prefix(prefix)}artisan/"
         self.log_dict(
-            {f"{artisan_prefix}{k}": v for k, v in gate_values.items()},
+            {self._key(prefix, f"artisan/{k}"): v for k, v in gate_values.items()},
             batch_size=batch.num_graphs,
             sync_dist=True,
             on_step=prefix.startswith("train"),
             on_epoch=True,
+            add_dataloader_idx=False,
         )
 
     # ------------------------------------------------------------------
@@ -383,34 +451,27 @@ class GOALModule(L.LightningModule):
         on_step: bool = True,
         prog_bar: bool = True,
     ) -> None:
-        """Log the loss breakdown, routing gate terms to the gate section.
+        """Log the loss breakdown, each term in its own section.
 
-        Physics components (and ``total``) keep the ``{prefix}`` section
-        and the progress bar; ``aux_loss`` / ``gate_reg`` move to
+        ``total`` (and any component that is neither energy nor forces)
+        keeps the plain ``{prefix}`` section; the ``energy`` / ``forces``
+        terms follow their metrics into ``{prefix}_energy/`` and
+        ``{prefix}_forces/``; ``aux_loss`` / ``gate_reg`` move to
         ``{prefix}_gate/`` and never reach the progress bar.
         """
-        physics: dict[str, torch.Tensor] = {}
-        gate: dict[str, torch.Tensor] = {}
+        grouped: dict[str | None, dict[str, torch.Tensor]] = {}
         for label, value in losses.items():
-            target = gate if label in self.GATE_LOSS_LABELS else physics
-            target[label] = value.detach()
+            grouped.setdefault(metric_section(label), {})[label] = value.detach()
 
-        self.log_dict(
-            {f"{prefix}{k}": v for k, v in physics.items()},
-            batch_size=batch.num_graphs,
-            sync_dist=True,
-            prog_bar=prog_bar,
-            on_step=on_step,
-            on_epoch=True,
-        )
-        if gate:
+        for section, values in grouped.items():
             self.log_dict(
-                {f"{self._gate_prefix(prefix)}{k}": v for k, v in gate.items()},
+                {f"{self._section(prefix, section)}{k}": v for k, v in values.items()},
                 batch_size=batch.num_graphs,
                 sync_dist=True,
-                prog_bar=False,
+                prog_bar=prog_bar and section != "gate",
                 on_step=on_step,
                 on_epoch=True,
+                add_dataloader_idx=False,
             )
 
     def _log_step_metrics(
@@ -418,24 +479,29 @@ class GOALModule(L.LightningModule):
         predictions: dict[str, torch.Tensor],
         batch: AtomicGraph,
         prefix: str,
+        prog_bar: bool = True,
     ) -> None:
         """Compute the standard MLIP diagnostic metrics and log them.
 
-        Headline metrics (per atom energy MAE, force cosine
-        similarity, Newton violation) are routed to the Lightning
-        progress bar; the rest go to loggers only.
+        Energy metrics land in ``{prefix}_energy/``, force metrics (the
+        Newton violation included) in ``{prefix}_forces/``.  Headline
+        metrics (per atom energy MAE, force cosine similarity, Newton
+        violation) are routed to the Lightning progress bar; the rest go
+        to loggers only.  ``prog_bar=False`` keeps a secondary evaluation
+        set (the OOD one) off the bar entirely.
         """
         is_train = prefix.startswith("train")
         metrics: dict[str, torch.Tensor] = mlip_metrics(predictions, batch)
         for name, value in metrics.items():
             self.log(
-                f"{prefix}{name}",
+                self._key(prefix, name),
                 value,
                 batch_size=batch.num_graphs,
                 sync_dist=True,
-                prog_bar=name in PROG_BAR_METRICS,
+                prog_bar=prog_bar and name in PROG_BAR_METRICS,
                 on_step=is_train,
                 on_epoch=True,
+                add_dataloader_idx=False,
             )
 
     def _log_round_energies(
@@ -462,12 +528,13 @@ class GOALModule(L.LightningModule):
             return
         for round_idx in range(layer_e.shape[0]):
             self.log(
-                f"{prefix}energy_round_{round_idx}",
+                self._key(prefix, f"energy_round_{round_idx}"),
                 layer_e[round_idx].detach().mean(),
                 batch_size=batch.num_graphs,
                 sync_dist=True,
                 on_step=prefix.startswith("train"),
                 on_epoch=True,
+                add_dataloader_idx=False,
             )
 
     def _log_gate_scores(
@@ -496,15 +563,15 @@ class GOALModule(L.LightningModule):
         gates: torch.Tensor | None = predictions.get("gate_scores", None)
         if gates is None or gates.dim() != 2:
             return
-        gate_prefix: str = self._gate_prefix(prefix)
         for round_idx in range(gates.shape[0]):
             self.log(
-                f"{gate_prefix}gate_mean_round_{round_idx}",
+                self._key(prefix, f"gate_mean_round_{round_idx}"),
                 gates[round_idx].detach().mean(),
                 batch_size=batch.num_graphs,
                 sync_dist=True,
                 on_step=prefix.startswith("train"),
                 on_epoch=True,
+                add_dataloader_idx=False,
             )
 
     @staticmethod
@@ -563,8 +630,52 @@ class GOALModule(L.LightningModule):
         if hasattr(self, "ema"):
             self.ema.update()
 
-    def validation_step(self, batch: AtomicGraph, batch_idx: int) -> None:
+    #: Section name per validation dataloader, used when the attached
+    #: datamodule publishes no ``val_split_names``.  Index 0 is the
+    #: primary (in-distribution) set, index 1 the secondary one — which
+    #: is the OOD/test split for every datamodule in this project.
+    VAL_SECTION_FALLBACK: typing.ClassVar[tuple[str, ...]] = ("val", "test")
+
+    def _val_prefix(self, dataloader_idx: int) -> str:
+        """Logger prefix for validation dataloader *dataloader_idx*.
+
+        With a single validation set this is always ``"val/"``.  When the
+        datamodule hands Lightning several validation dataloaders — the
+        ID set plus an OOD set monitored during training — each one needs
+        its own section so the two never average together, and the names
+        come from the datamodule's ``val_split_names`` (``["val",
+        "test"]``), falling back to :attr:`VAL_SECTION_FALLBACK`.
+        """
+        names: typing.Sequence[str] = self.VAL_SECTION_FALLBACK
+        trainer: typing.Any = getattr(self, "_trainer", None)
+        if trainer is not None:
+            published: typing.Any = getattr(
+                getattr(trainer, "datamodule", None), "val_split_names", None
+            )
+            if published:
+                names = list(published)
+        if dataloader_idx < len(names):
+            return f"{names[dataloader_idx]}/"
+        # More dataloaders than names: never silently merge sections.
+        return f"val{dataloader_idx}/"
+
+    def validation_step(
+        self,
+        batch: AtomicGraph,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
         """Single validation step -- uses EMA weights if available.
+
+        Runs for every validation dataloader the datamodule provides.
+        ``dataloader_idx == 0`` is the primary (in-distribution) set and
+        logs under ``val…/``; a second dataloader is the OOD set being
+        monitored during training and logs under ``test…/``, so the two
+        appear as separate curves in the same run and neither is mixed
+        into the other.  The secondary set stays off the progress bar and
+        skips the diagnostics that are either duplicates (the artisan
+        gates are parameters, identical for both sets) or expensive (the
+        artisan load balance runs an extra forward per artisan).
 
         Wraps the model forward in :func:`torch.enable_grad` because
         Lightning's default validation loop runs under
@@ -579,8 +690,15 @@ class GOALModule(L.LightningModule):
         """
         # Mirror the same stage on validation so val metrics use the
         # same per-component weighting as training (i.e. a 0-weight
-        # forces stage logs val/forces but with that 0 baked in).
+        # forces stage logs val_forces/forces but with that 0 baked in).
+        # The OOD set gets the same weights, which is what makes its loss
+        # directly comparable to the ID one epoch by epoch.  (A standalone
+        # ``trainer.test()`` run deliberately differs — see
+        # :meth:`test_step` — so only compare test/ curves within a phase.)
         self._maybe_advance_stage(self.current_epoch)
+
+        prefix: str = self._val_prefix(dataloader_idx)
+        primary: bool = dataloader_idx == 0
 
         with torch.enable_grad():
             if hasattr(self, "ema"):
@@ -591,16 +709,22 @@ class GOALModule(L.LightningModule):
 
             losses = self._with_aux_loss(self.loss(predictions, batch), predictions)
 
-        self._log_losses(losses, batch, prefix="val/")
-        self._log_step_metrics(predictions, batch, prefix="val/")
+        self._log_losses(losses, batch, prefix=prefix, prog_bar=primary)
+        self._log_step_metrics(predictions, batch, prefix=prefix, prog_bar=primary)
         # ARACE per-round energy decomposition (no-op for other backbones).
-        self._log_round_energies(predictions, batch, prefix="val/")
+        self._log_round_energies(predictions, batch, prefix=prefix)
         # ARACE adaptive-gate means per round (no-op when the gate is off).
-        self._log_gate_scores(predictions, batch, prefix="val/")
+        self._log_gate_scores(predictions, batch, prefix=prefix)
+
+        if not primary:
+            # Everything below is either identical for both evaluation
+            # sets (the artisan gates are parameters) or costs a full
+            # extra forward — no reason to pay for it twice per epoch.
+            return
 
         # Per-element-pair artisan gates → val_gate/artisan/… (also logged
         # every train step; see :meth:`_log_artisan_gates`).
-        self._log_artisan_gates(batch, prefix="val/")
+        self._log_artisan_gates(batch, prefix=prefix)
 
         # Artisan load-balance diagnostic (legacy ACE-first SIMURGH only —
         # the ARACE backbones do not expose ``compute_artisan_loads``, so
@@ -611,23 +735,24 @@ class GOALModule(L.LightningModule):
         if hasattr(self.backbone, "compute_artisan_loads"):
             loads: dict[str, torch.Tensor] = self.backbone.compute_artisan_loads(batch)
             load_var: torch.Tensor | None = loads.pop("load_variance", None)
-            load_prefix: str = f"{self._gate_prefix('val/')}artisan_load/"
             self.log_dict(
-                {f"{load_prefix}{k}": v for k, v in loads.items()},
+                {self._key(prefix, f"artisan_load/{k}"): v for k, v in loads.items()},
                 batch_size=batch.num_graphs,
                 sync_dist=True,
                 on_step=False,
                 on_epoch=True,
+                add_dataloader_idx=False,
             )
             if load_var is not None:
                 self.log(
-                    f"{self._gate_prefix('val/')}artisan_load_variance",
+                    self._key(prefix, "artisan_load_variance"),
                     load_var,
                     batch_size=batch.num_graphs,
                     sync_dist=True,
                     on_step=False,
                     on_epoch=True,
                     prog_bar=False,
+                    add_dataloader_idx=False,
                 )
 
     def test_step(self, batch: AtomicGraph, batch_idx: int) -> None:
@@ -641,6 +766,13 @@ class GOALModule(L.LightningModule):
         Stage weights are intentionally skipped here — the test loop always
         runs with the base loss weights so all components are reported at
         full weight regardless of which training stage the checkpoint is from.
+
+        Note this is *not* the path that produces the ``test…/`` curves
+        during training: those come from :meth:`validation_step` with a
+        second validation dataloader (``data.monitor_test_during_training``),
+        which mirrors the active stage weights.  The metrics (MAE, RMSE,
+        cosine similarity, Newton violation) are weight-independent and
+        therefore comparable across both paths; the loss values are not.
         """
 
         with torch.enable_grad():
@@ -795,6 +927,128 @@ class GOALModule(L.LightningModule):
                     "interval": "epoch",
                 },
             }
+
+    # ------------------------------------------------------------------
+    # EMA persistence
+    # ------------------------------------------------------------------
+    #
+    # ``EMAWrapper`` is a plain attribute, not a submodule, so its shadow
+    # tensors are absent from ``state_dict()`` and used to be lost on every
+    # resume — the run came back on the raw weights while validation and
+    # every packed archive report the EMA ones.  Over a crash/resume cycle
+    # that is a few hundred steps of re-convergence; over an extension of a
+    # finished run it throws away the averaged weights the run was judged on.
+
+    def on_save_checkpoint(self, checkpoint: dict[str, typing.Any]) -> None:
+        """Store the EMA shadow weights alongside the raw ones."""
+        if hasattr(self, "ema"):
+            checkpoint["goal_ema"] = self.ema.state_dict()
+
+    def on_load_checkpoint(self, checkpoint: dict[str, typing.Any]) -> None:
+        """Restore EMA shadow weights written by :meth:`on_save_checkpoint`.
+
+        Silently tolerates their absence: checkpoints written before EMA
+        was persisted, and runs that enable EMA on a resume, both leave
+        the shadow to re-initialise from the restored weights.
+
+        Lightning calls this hook *before* it loads the state dict, so the
+        re-initialisation cannot happen here — the parameters still hold
+        their random initial values.  It is deferred to
+        :meth:`_reseed_ema_if_pending`, which the fit / validate / test /
+        predict start hooks call once the weights are in place.
+        """
+        GOALModule._keep_fresh_buffers_on_load(self, checkpoint)
+        state: typing.Any = checkpoint.get("goal_ema")
+        if not hasattr(self, "ema"):
+            return
+        if state is None:
+            self._ema_reseed_pending = True
+            return
+        shadow: typing.Any = state.get("shadow")
+        expected: int = len(list(self.parameters()))
+        if not isinstance(shadow, list) or len(shadow) != expected:
+            found = len(shadow) if isinstance(shadow, list) else type(shadow).__name__
+            warnings.warn(
+                f"Checkpoint EMA state has {found} tensors but the model has "
+                f"{expected} parameters — discarding it.  The EMA will "
+                f"re-initialise from the restored weights.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self._ema_reseed_pending = True
+            return
+        self.ema.load_state_dict(state)
+
+    _BACKBONE_BUFFER_KEY: typing.ClassVar[re.Pattern[str]] = re.compile(
+        r"^backbone(?:\._orig_mod)?\.(\w+)$"
+    )
+
+    def _keep_fresh_buffers_on_load(self, checkpoint: dict[str, typing.Any]) -> None:
+        """Replace checkpoint entries named in :attr:`keep_fresh_buffers`.
+
+        Lightning loads ``checkpoint["state_dict"]`` right after this hook,
+        overwriting every buffer.  For a statistic the user asked to
+        recompute on resume (e.g. ``scale`` after switching datasets) the
+        checkpoint's copy is swapped for the module's current, freshly
+        computed value, so the new value is the one that trains.
+        """
+        keep: set[str] = set(getattr(self, "keep_fresh_buffers", None) or ())
+        if not keep:
+            return
+        saved: typing.Any = checkpoint.get("state_dict")
+        if not isinstance(saved, dict):
+            return
+        own: dict[str, torch.Tensor] = self.state_dict()
+        for key in list(saved):
+            match = GOALModule._BACKBONE_BUFFER_KEY.match(key)
+            if match and match.group(1) in keep and key in own:
+                saved[key] = own[key].detach().clone()
+
+    def _reseed_ema_if_pending(self) -> None:
+        """Re-initialise the EMA shadow from the current (restored) weights.
+
+        Without this a checkpoint with no usable ``goal_ema`` entry keeps
+        the shadow cloned from the *random* initial parameters in
+        ``__init__``, and every ``ema.average_parameters()`` evaluation
+        (validation, test) reports those instead of the trained model.
+        """
+        if not getattr(self, "_ema_reseed_pending", False) or not hasattr(self, "ema"):
+            return
+        self.ema.load_state_dict({"shadow": [p.detach().clone() for p in self.parameters()]})
+        self._ema_reseed_pending = False
+
+    def on_fit_start(self) -> None:
+        """Re-seed a pending EMA shadow before fitting starts.
+
+        Calls :meth:`_reseed_ema_if_pending`, so a checkpoint restored
+        without usable EMA state trains against an EMA cloned from the
+        restored weights rather than the random initial ones.
+        """
+        self._reseed_ema_if_pending()
+
+    def on_validation_start(self) -> None:
+        """Re-seed a pending EMA shadow before validation starts.
+
+        Calls :meth:`_reseed_ema_if_pending`, so ``ema.average_parameters()``
+        evaluates the restored weights, not the random initial ones.
+        """
+        self._reseed_ema_if_pending()
+
+    def on_test_start(self) -> None:
+        """Re-seed a pending EMA shadow before testing starts.
+
+        Calls :meth:`_reseed_ema_if_pending`, so ``ema.average_parameters()``
+        evaluates the restored weights, not the random initial ones.
+        """
+        self._reseed_ema_if_pending()
+
+    def on_predict_start(self) -> None:
+        """Re-seed a pending EMA shadow before prediction starts.
+
+        Calls :meth:`_reseed_ema_if_pending`, so the EMA shadow matches the
+        restored weights.
+        """
+        self._reseed_ema_if_pending()
 
     def on_before_optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
         """Gradient clipping before optimiser step."""

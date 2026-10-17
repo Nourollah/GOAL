@@ -38,9 +38,7 @@ def atomicgraph_to_atoms(graph: typing.Any) -> typing.Any:
     else:
         cell_np = np.zeros((3, 3))
     pbc_np = (
-        pbc.detach().cpu().numpy().reshape(-1)[:3]
-        if pbc is not None
-        else np.zeros(3, dtype=bool)
+        pbc.detach().cpu().numpy().reshape(-1)[:3] if pbc is not None else np.zeros(3, dtype=bool)
     )
 
     atoms = Atoms(numbers=z, positions=positions, cell=cell_np, pbc=pbc_np)

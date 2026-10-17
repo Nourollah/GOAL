@@ -1,0 +1,1394 @@
+########################################################
+# GOAL ML Experiment Configuration
+# Model  : NF_SIMURGH (Native Fragment SIMURGH) — monolithic ARACE
+#          rounds whose per-atom energies are pooled onto FRAGMENT
+#          VIRTUAL NODES, which then interact pairwise
+#          (see goal.ml.nn.models.simurgh.nf_simurgh)
+# Dataset: QM9 (134k drug-like molecules, B3LYP/6-31G(2df,p)),
+#          target U0 — internal energy at 0 K
+#
+# Self-contained config. Every parameter the project supports is
+# listed here — either set to its value for this experiment, or
+# documented in comments showing what else is available.
+# No other file needs to be opened to understand what is possible.
+#
+# EXPERIMENTAL. This is a research/ablation model.
+#
+# Derived from src/goal/configs/ml/nf_simurgh_gmd26_typecond.yaml — same model,
+# same artisan geometry, same virtual-node settings including
+# `vnode_type_conditioned: true`.
+#
+# ── QM9 IS A DIFFERENT KIND OF DATASET, AND THIS FILE SHOWS IT ───────
+#
+#  1. THERE ARE NO FORCES. QM9 is equilibrium geometries with computed
+#     properties, not trajectories. Everything force-shaped is therefore
+#     gone from this file and not merely zero-weighted:
+#       * `losses` declares energy + gate_reg only;
+#       * the stage curriculum collapses to one stage (its whole point
+#         was phasing forces in);
+#       * checkpoint_manager.top_k.metric and early_stopping.monitor
+#         select on val_energy/energy_mae_per_atom. Leaving them on
+#         val_forces/forces_mae would crash at the first validation —
+#         EarlyStopping runs with strict: true and that metric is never
+#         emitted, because goal.ml.training.metrics omits force metrics
+#         when the batch carries no force labels.
+#     The model still PREDICTS forces (-dE/dr by autograd), so
+#     val_forces/newton_violation is still logged. It costs nothing and
+#     is a free conservation check: it must stay at ~0.
+#
+#  2. 134k DISTINCT MOLECULES, NOT ONE. Every structure has its own
+#     composition, so the atomic-energy regression is a real per-element
+#     decomposition here (unlike a single-molecule set, where it can only
+#     produce a constant shift) — and the residual it leaves is the
+#     atomisation energy, which is what QM9 models actually learn.
+#
+#  3. FRAGMENTS MUST BE CUT. A QM9 molecule is one connected species, so
+#     `fragment_scheme: connected` returns K=1 for 100% of the corpus
+#     (measured), i.e. one virtual node, no pairs, and an interaction
+#     term identically zero on every batch. See the fragment_scheme
+#     block for the measured alternatives.
+#
+# This file deliberately does NOT inherit from, interpolate into, or
+# share keys with any other config. NF_SIMURGH's model namespace is its
+# own (`virtual_node:`, never `fragment_interaction:`), so neither file
+# can be pasted into the other and quietly half-work.
+########################################################
+
+# ─────────────────────────────────────────────────────
+# EXPERIMENT METADATA
+# ─────────────────────────────────────────────────────
+experiment:
+  name: "nf_simurgh_qm9"
+  description: "NF_SIMURGH (type-conditioned virtual nodes) on QM9 U0"
+  tags:
+    [
+      "simurgh",
+      "nf_simurgh",
+      "arace",
+      "qm9",
+      "property_prediction",
+      "experimental",
+      "type_conditioned",
+    ]
+
+seed: 42
+
+# task_name: used by Hydra to namespace the output directory.
+# Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
+task_name: "nf_simurgh_qm9"
+
+# run_name_suffix: optional descriptive tag appended to the run name.
+# null or "" → no suffix; any string → appended with "_".
+# Example: "u0" → 2026-06-02_18-30_qm9_nf_simurgh_u0
+run_name_suffix: "_u0" # prepend "_"; set to "" for no suffix
+
+# run_name: leaf of the log directory AND the W&B run name — always in sync.
+# Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
+run_name: ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}${run_name_suffix}
+
+# ─────────────────────────────────────────────────────
+# HYDRA OUTPUT DIRECTORY
+# ─────────────────────────────────────────────────────
+# Overrides Hydra's default outputs/YYYY-MM-DD/HH-MM-SS/ structure.
+# Mirrors what src/goal/configs/hydra/default.yaml set for the old multi-file system.
+# Result: logs/{task_name}/runs/{run_name}/
+hydra:
+  run:
+    dir: ${paths.log_dir}/${task_name}/runs/${run_name}
+  sweep:
+    dir: ${paths.log_dir}/${task_name}/multiruns/${run_name}
+    subdir: ${hydra.job.num}
+  job_logging:
+    handlers:
+      file:
+        filename: ${hydra.runtime.output_dir}/${task_name}.log
+
+# ─────────────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────────────
+# root_dir falls back to $PWD when PROJECT_ROOT is not set.
+# Override: PROJECT_ROOT=/your/path pixi run train ...
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT,${oc.env:PWD}}
+  data_dir: ${paths.root_dir}/data
+  log_dir: ${paths.root_dir}/logs
+  output_dir: ${hydra:runtime.output_dir}
+
+# ─────────────────────────────────────────────────────
+# DATA
+# ─────────────────────────────────────────────────────
+# dataset_type options:
+#   "xyz"        — ExtXYZ files (.xyz, .extxyz)
+#   "hdf5"       — HDF5 pre-processed graphs (.h5, .hdf5)
+#   "lmdb"       — FairChem/OCP pickled-graph LMDB (.lmdb)
+#   "aselmdb"    — FairChem ASE-LMDB shards (.aselmdb): OMol25 et al.
+#   "trajectory" — ASE trajectory files (.traj, .db)
+#   "md17"       — MD17/rMD17 benchmark (goal.ml.data.benchmarks.md17)
+#   "qm9"        — QM9 quantum chemistry (goal.ml.data.benchmarks.qm9)
+#   "ani1"/"ani1x" — ANI-1/ANI-1x (goal.ml.data.benchmarks.ani1)
+#
+# Loading modes (mutually exclusive — use exactly one):
+#
+#   Mode 1 — single root, auto-split (tries train.xyz/val.xyz first;
+#             falls back to splitting by split_ratio):
+#     root: /path/to/data
+#     split_ratio: [0.8, 0.1, 0.1]
+#
+#   Mode 2 — explicit per-split file lists:
+#     train_paths: [/path/a.xyz, /path/b.xyz]
+#     val_paths:   [/path/val.xyz]
+#     test_paths:  [/path/test.xyz]   # optional
+#
+#   Mode 3 — merged multi-source, then auto-split:
+#     root: [/path/A, /path/B]
+#     split_ratio: [0.8, 0.1, 0.1]
+#     merge_strategy: "sequential"    # or "random"
+#
+#   Mode 4 — directory per split:
+#     train_dir: /path/train/
+#     val_dir:   /path/val/
+#     test_dir:  /path/test/          # optional
+# ─────────────────────────────────────────────────────
+data:
+  # A benchmark adapter from src/goal/ml/data/benchmarks/, not one of the core
+  # goal.ml.data.datasets loaders: it downloads QM9 through PyTorch
+  # Geometric, converts all 133,885 molecules to AtomicGraphs once, and
+  # caches them under `root` as a single .pt (~2 GB at this cutoff).
+  # That first conversion takes ~9 minutes; every run after it is a
+  # 14-second load.
+  dataset_type: qm9
+
+  root: ${paths.data_dir}/qm9
+
+  # ── Target ───────────────────────────────────────────────────────
+  # One of the 19 QM9 properties, by name or index. `u0` (index 7) is
+  # the internal energy at 0 K in eV — the right target for an
+  # interatomic potential, and the one that makes the atomic-energy
+  # baseline below do real work: subtracting Σ_Z n_Z e_Z from U0 leaves
+  # the atomisation energy.
+  #
+  # Alternatives, and why not:
+  #   u0_atom  (12) the atomisation energy directly. Equivalent target,
+  #                 but the reference subtraction then happens in the
+  #                 dataset instead of in the model, and the baseline
+  #                 machinery this model ships with goes unused.
+  #   homo/lumo/gap these are orbital energies, not extensive sums over
+  #                 atoms. A model whose output is Σ_i e_i + fragment
+  #                 corrections is the wrong shape for them; use a
+  #                 scalar head on a modular backbone instead.
+  #
+  # NOTE the adapter stores whichever target you pick in `graph.energy`,
+  # so nothing downstream needs to change — but the logged
+  # "energy_mae_per_atom" is then that property per atom, not an energy.
+  target: u0
+
+  # Measured range of u0 over the split: -16,440 … -6,232 eV.
+  # Median molecule is 18 atoms, largest is 29.
+
+  # ── Split ────────────────────────────────────────────────────────
+  # The dataset splits ITSELF, using the DimeNet++ protocol hard-coded
+  # in src/goal/ml/data/benchmarks/qm9.py: 110,000 train / 10,000 val / the
+  # remaining 13,885 test. Those sizes are module constants, NOT config
+  # keys — unlike MD17, `train_size` / `val_size` here would be
+  # forwarded to the dataset and raise TypeError. `seed` controls which
+  # molecules land where.
+  #
+  # data.split_ratio and data.split_seed do not apply and are not set.
+  seed: 42
+
+  dtype: float64 # u0 is ~-10^4 eV; chemical accuracy is 0.043 eV
+
+  # ── MONITOR THE TEST SET DURING TRAINING ─────────────────────────
+  # false: the 13,885 test molecules are a random draw from the same
+  # corpus as val, so logging them every epoch would draw a second copy
+  # of the same curve and pay an extra forward pass for it. Evaluate
+  # once at the end with goal-eval.
+  monitor_test_during_training: false
+
+  # Neighbour cutoff radius (Å). Must match model.backbone.cutoff.
+  # 5.0 is the QM9 convention and generous for molecules of ≤9 heavy
+  # atoms — mean degree comes out at 15.2 (see avg_num_neighbors).
+  cutoff: 5.0
+
+  # ── DataLoader ───────────────────────────────────────────────────
+  # 32 x ~18 atoms = ~580 atoms and ~8,950 edges per batch, which is
+  # 3,438 optimiser steps per epoch over the 110k training molecules.
+  #
+  # MEASURED peak CUDA memory for a full train step (forward + autograd
+  # forces + backward + AdamW), at precision "32":
+  #
+  #   batch_size   atoms   edges   peak
+  #        8         143    2,078   5.3 GiB
+  #       16         286    4,304  11.1 GiB
+  #       24         435    6,700  17.2 GiB
+  #       32         580    8,954  22.9 GiB   <- this file
+  #       48         867   13,406  34.2 GiB
+  #       64       ~1,150  ~17,900  OOM on a 48 GB card
+  #
+  # It is linear in EDGE count at ~2.6 MiB per edge — the equivariant
+  # tensor products keep a 144-channel feature per edge per round, and
+  # the force pass differentiates through all of it. Scale by your card:
+  # 32 needs ~24 GB. Halving it again is the first thing to try on a
+  # smaller GPU; `trainer.precision: bf16-mixed` roughly halves it too,
+  # at some risk to the autograd forces (which QM9 does not train on
+  # anyway, so it is a safer trade here than on MD17).
+  batch_size: 32
+
+  # num_workers: 0 IS THE RIGHT VALUE FOR THIS DATASET. All 133,885
+  # graphs are already built and resident in the parent process, so
+  # __getitem__ is a list index — there is no work to hand to a worker,
+  # and forking would copy ~2 GB of Python objects per worker (refcount
+  # touching defeats copy-on-write). It also keeps the lazily attached
+  # fragment labels in ONE process, so each molecule is decomposed once
+  # for the whole run instead of once per worker.
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: null
+
+  # Label keys do NOT apply: the adapter reads the PyG tensors itself.
+  # Setting energy_key/forces_key here would raise TypeError.
+
+  # ══ FRAGMENT LABELS — MANDATORY FOR THIS MODEL ═══════════════════
+  # NF_SIMURGH computes on fragment virtual nodes. Unlike the optional
+  # fragment channel of the other SIMURGH configs, this is not a feature
+  # that can be left off: with compute_fragment_index: false the model
+  # raises at the first batch rather than silently degrading to
+  # atom-level-only (which would be `monolithic_arace` wearing a
+  # different name, producing plausible numbers from the wrong model).
+  #
+  # Attached lazily on first access and kept on the in-memory graph, so
+  # the decomposition is paid once per molecule for the whole run — the
+  # ~26 s below lands in epoch 1 and never again.
+  compute_fragment_index: true
+
+  # Bond threshold for the distance-graph part of the decomposition (Å).
+  fragment_covalent_cutoff: 1.8
+
+  # ── fragment_scheme: HOW a structure is split ─────────────────────
+  #   connected        distance graph (no rdkit, PBC-correct, never fails)
+  #   rdkit_components components of the perceived molecule
+  #   rotatable        non-ring single bonds → CH3/CH2/COOH groups
+  #   brics            BRICS retrosynthetic rules
+  #   recap            RECAP cleavage rules
+  #   custom           cut exactly the bonds named in fragment_smarts
+  #
+  # Measured on 2,000 random training molecules, cold cache:
+  #
+  #   scheme      rdkit fails   median K   mean K   K>=2    molecules/s
+  #   connected        0/2000          1      1.0     0%         19,600
+  #   rotatable      116/2000          3      3.3    88%          4,200
+  #   brics          116/2000          2      2.5    82%          3,600
+  #   recap          116/2000          1      2.0    44%          2,800
+  #
+  # `connected` GIVES K=1 FOR EVERY MOLECULE IN QM9 — each entry is one
+  # covalently bonded species. It would run the model with its
+  # interaction term pinned at exactly zero.
+  #
+  # `rotatable` is the choice: it decomposes 88% of the corpus, the most
+  # of any scheme here, at 0.24 ms per molecule paid once. `recap`
+  # leaves more than half the corpus undivided and is the wrong tool on
+  # molecules this small.
+  fragment_scheme: rotatable
+
+  # Total charge handed to rdkit's bond perception. QM9 is neutral
+  # closed-shell throughout.
+  fragment_charge: 0
+
+  # "fallback" — warn ONCE and use `connected` for that structure
+  # "raise"    — stop the run
+  #
+  # `fallback`, where the GMD config used `raise`. That config had one
+  # homologous series and could guarantee perception worked. Here 5.8%
+  # of molecules (116/2000 measured) defeat rdkit's valence assignment —
+  # strained rings, unusual nitrogen environments — and `raise` would
+  # abort a 110k-molecule run on the first of them. Those molecules fall
+  # back to `connected`, i.e. K=1: they contribute through the atom-level
+  # ARACE rounds exactly as before and add nothing to the fragment
+  # channel. A coarser label, not a wrong one.
+  #
+  # Expect a burst of UserWarnings early in the first epoch — 45
+  # distinct ones on this split, since goal.ml.data.fragments warns once
+  # per distinct rdkit message and those differ by atom index. They stop
+  # once every molecule has been decomposed; they are not repeated per
+  # epoch.
+  fragment_on_failure: fallback
+
+  # SMARTS whose matched atoms must stay in one fragment. Works with
+  # every scheme. null = no constraint.
+  fragment_keep_groups: null
+
+  # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`, so
+  # inert here.
+  fragment_smarts: null
+
+# ─────────────────────────────────────────────────────
+# MODEL
+# ─────────────────────────────────────────────────────
+# backbone.name options:
+#   "nf_simurgh"         — NF_SIMURGH: ARACE rounds + fragment virtual
+#                          nodes, monolithic (this file). EXPERIMENTAL.
+#   "monolithic_arace"   — SIMURGH ARACE monolithic, no virtual nodes.
+#                          The direct baseline for this file. No QM9
+#                          config for it exists yet; copy this one,
+#                          change backbone.name, and delete the whole
+#                          virtual_node: block (it is not a key that
+#                          backbone understands).
+#   "simurgh_arace"      — DEFAULT: same ARACE rounds, modular
+#                          (backbone + head; see src/goal/configs/ml/simurgh_gmd26.yaml)
+#   "simurgh"            — legacy ACE-dressing-first artisan-bank model
+#                          (alias: "simurgh_ace_first")
+#   "simurgh_monolithic" — legacy SIMURGH without backbone/head split
+#   "hyperspec"          — E(3)-equivariant GNN (HyperSpec)
+#   "invariant_gnn"      — invariant SchNet-like GNN
+#   "monolithic_example" — minimal reference monolithic model
+#
+# head.name options (set null for monolithic backbones):
+#   "energy_forces"  — energy + autograd forces F=-∂E/∂r (conservative)
+#   "dual_forces"    — energy + forces with selectable mode
+#   "direct_forces"  — energy + direct equivariant force projection
+#   "energy"         — energy only (no forces)
+#   "stress"         — energy + virial stress (periodic systems)
+#   "dipole"         — dipole moment from learned partial charges
+#   "scalar"         — generic per-structure scalar (HOMO, LUMO, ...)
+#   "multi"          — run multiple heads simultaneously
+#   null             — monolithic backbone handles output directly
+#
+# WHAT THIS MODEL DOES, in one pass:
+#   1. ARACE rounds, unchanged   → e_atom (N,), h (N, irreps)
+#   2. E_base[k] = Σ_{i∈k} e_atom[i]        exact, a plain index_add
+#   3. s_k = pool_{i∈k} h_i[l=0] ‖ log1p(n_k)      fragment scalars
+#   4. attention over fragment pairs, MODULATED BY CENTROID DISTANCE
+#   5. E_int[k] = MLP(context_k)             zero-init: starts at zero
+#   6. E = Σ_k (E_base[k] + E_int[k]) = Σ_i e_atom[i] + Σ_k E_int[k]
+#   7. F = -∂E/∂r via autograd
+#
+# Step 2 is why this is safe: summation is associative, so the fragment
+# pooling reproduces the atom-level energy exactly, by construction, not
+# because a residual happens to stay small. The ONLY new physics is the
+# step-5 correction — and it starts at exactly zero, so at
+# initialisation this model IS monolithic_arace, numerically.
+# ─────────────────────────────────────────────────────
+model:
+  backbone:
+    name: nf_simurgh
+
+    # Neighbour cutoff radius (Å) — must match data.cutoff.
+    cutoff: ${data.cutoff}
+
+    # ── Elements ────────────────────────────────────────────────────
+    # UNLIKE EVERY OTHER SIMURGH CONFIG, THIS ONE MUST BE SET BY HAND.
+    # train.py auto-extracts elements from the training set only for a
+    # hard-coded list of backbone names (simurgh, simurgh_ace_first,
+    # simurgh_arace, simurgh_monolithic, monolithic_arace) — see
+    # src/goal/ml/cli/train.py. "nf_simurgh" is not in that list, and
+    # adding it is a change to shared code this model does not make.
+    #
+    # GETTING THIS WRONG IS SILENT: an edge whose element pair has no
+    # artisan is zero-masked, so it contributes exactly zero energy and
+    # nothing warns. Set it to the elements actually present.
+    #
+    # QM9 is H, C, N, O, F and nothing else — verified over the corpus,
+    # not taken from the paper. 5 elements = 15 unordered pairs per
+    # round, 30 artisans over two rounds, 13.0 M parameters.
+    elements: [1, 6, 7, 8, 9]
+
+    # ── Atomic-energy baseline ──────────────────────────────────────
+    #   "learned"  — nn.Parameter, zero-init, jointly optimised.
+    #   "dataset"  — least-squares regression on the training set
+    #                (leave values: null; train.py injects them).
+    #   "provided" — hand-set isolated-atom DFT values (eV).
+    #
+    # "dataset" here, where the GMD config hard-codes values, and this is
+    # the setting that makes QM9 learnable at all:
+    #
+    #   * U0 runs from -16,440 to -6,232 eV, and essentially all of that
+    #     variation is "how many C, N, O, F atoms are there". Without the
+    #     baseline the network spends its capacity counting atoms.
+    #   * Subtracting the regressed Σ_Z n_Z e_Z leaves the ATOMISATION
+    #     energy — the quantity QM9 models are actually judged on.
+    #   * 110,000 molecules over 5 elements is a heavily over-determined,
+    #     well-conditioned system, so unlike a single-molecule set the
+    #     coefficients here are a genuine per-element decomposition.
+    #
+    # Cost: two passes over the training split, which is already built
+    # and resident in memory — seconds, not the hours the same thing
+    # would take on a lazily-decoded corpus.
+    atomic_energies:
+      mode: dataset
+      values: null # train.py injects the regression result
+      compute_from_dataset: true
+
+    # Multiplicative gain on the interaction energy.
+    # null = 1.0 for "learned" mode, auto-computed for "dataset"/"provided".
+    # The fragment correction sits INSIDE this scale, alongside the
+    # artisan energy: `scale` maps the network's dimensionless
+    # interaction output onto the physical spread of (E - baseline), and
+    # the correction is an interaction energy in exactly that sense.
+    #
+    # Left null so train.py computes std(E - baseline)/mean(n_atoms)
+    # over the 110k training molecules — a seconds-long pass here. It
+    # prints [stats] scale=0.060848 on this split: the per-atom spread
+    # of the atomisation energy. A number orders of magnitude larger
+    # means the baseline did not do its job.
+    scale: null
+
+    # ── ARACE stacking (identical to monolithic_arace) ──────────────
+    # Each round = one artisan layer (per-element-pair equivariant
+    # artisans on edges) + one ACE block (edge → node aggregation with
+    # equivariant linear + residual + RMS norm):
+    #   nodes → edges (artisan) → nodes (ACE) → edges (artisan) → ...
+    num_rounds: 2 # number of artisan + ACE rounds
+
+    # true  → one artisan bank shared by every round (fewer params)
+    # false → independent bank per round (default, more expressive)
+    share_artisan_weights: false
+
+    # Initial node features: atomic-number embedding lookup projected
+    # into the artisans' equivariant space. No separate
+    # environment-dressing phase.
+    embedding_dim: 32
+    num_elements: 120 # embedding table size; must exceed max(Z) in the data
+
+    # Mean neighbours per atom for the ACE aggregation normalisation
+    # (message_sum / sqrt(avg_num_neighbors), as in MACE).
+    # null = no normalisation. train.py auto-injects this only for
+    # "simurgh_arace", so set a number here to enable it.
+    #
+    # 15.2445 = mean degree at cutoff 5.0 Å, measured over 5,000 QM9
+    # molecules. Depends on data.cutoff — re-measure if you change it.
+    avg_num_neighbors: 15.2445
+
+    # ── Equivariant pair artisans (primary learning component) ──────
+    # One artisan per unordered element pair per layer. Architecture must
+    # be "equivariant" — ARACE is equivariant throughout; invariants
+    # appear only in each layer's scalar readout.
+    artisan:
+      architecture: "equivariant"
+      hidden_irreps: "16x0e + 16x1o + 16x2e" # node/pair equivariant width
+      num_layers: 1 # 1 = TP only; >1 adds residual EquivLinear+Norm layers
+      num_rbf: 8 # Bessel radial basis functions
+      radial_hidden: 32 # radial MLP hidden width
+      n_scalar_out: 16 # invariant scalars before the energy MLP
+      final_hidden: 16 # energy MLP hidden width
+      element_conditioned: true # modulate TP weights by destination element
+      n_elements: auto # conditioning-table rows = max(Z)+1 of the elements (absent → legacy 120)
+
+      # ── RARE-PAIR ROUTING ─────────────────────────────────────────
+      # The artisan bank is QUADRATIC in the element count, and because
+      # of the zero-masking schedule every artisan costs both parameters
+      # AND a full-edge forward pass on every step. Measured at 0.867 M
+      # parameters per pair with the artisan settings above.
+      #
+      # Routing keeps a dedicated artisan for the pairs that carry the
+      # training set and folds everything else into ONE shared artisan
+      # conditioned on a learned element embedding — rare pairs, and the
+      # pairs that never occur at all, whose frequency is zero.
+      #
+      # THE SHARED ARTISAN IS BUILT ONLY IF SOMETHING IS ROUTED TO IT.
+      # When every pair clears the threshold the bank is bit-for-bit the
+      # bank it was before routing existed: same modules, same parameter
+      # count, same state-dict keys. No idle expert sitting on
+      # parameters that never see an edge.
+      #
+      # That is deliberate, and it is why `elements` above is a CONTRACT.
+      # The model declares the chemistry it covers; a structure built
+      # from anything else is out of distribution, and its foreign edges
+      # match no artisan. Better to have that boundary stated than to
+      # have a catch-all quietly return a plausible number for a
+      # molecule the model was never trained on.
+      #
+      # min_pair_frequency is a FRACTION OF TOTAL DIRECTED EDGES, not a
+      # count — frequencies sum to 1, so at most 1/f pairs can be
+      # dedicated. Measured on OMol25 at a 6 Å cutoff (3,081 possible
+      # pairs over 78 elements, of which only 970 ever occur):
+      #
+      #   min_pair_frequency   dedicated   params   edges covered
+      #              1e-2            9      ~8 M       91.3%
+      #              1e-3           27     ~24 M       97.2%
+      #              1e-4          114    ~100 M       99.1%
+      #              5e-5          163    ~142 M       99.5%
+      #              1e-5          313    ~272 M       99.9%
+      #              unrouted     3,081   2,671 M      100%
+      #
+      # 5e-5 covers 99.5% of the edges with a dedicated expert and turns
+      # an untrainable bank into a 142 M one. On a small element set
+      # every pair clears it, nothing is routed, and no rare artisan is
+      # built — the setting costs nothing there.
+      # OFF by default. At these element counts nothing would fall below
+      # the threshold anyway — the bank is 15 pairs, all of them common —
+      # so switching it on would build no rare artisan and only add a
+      # pass over the training split to count pairs. Turn it on when the
+      # element set grows; see src/goal/configs/ml/nf_simurgh_omol25.yaml, where
+      # 2,628 pairs make it the difference between 2.3 B parameters and
+      # 84 M.
+      rare_artisan:
+        enabled: false
+        min_pair_frequency: 5.0e-5
+        pair_embed_dim: 16 # element-embedding width in the shared artisan
+
+      # Counted over the training split by train.py and written back into
+      # the run's saved config.yaml — routing decides WHICH artisan
+      # modules exist, so a checkpoint trained with it cannot load into a
+      # model rebuilt from a config that lost the counts.
+      #
+      # Set it by hand to skip that pass ({"Zlo_Zhi": directed_edges},
+      # or a list of [Z_lo, Z_hi, count] triples).
+      pair_counts: null
+
+    # ══ VIRTUAL NODES ═══════════════════════════════════════════════
+    # NF_SIMURGH's own namespace. Deliberately NOT called `fragment_ca`,
+    # `fragment_interaction`, or anything the other SIMURGH configs use,
+    # so the two cannot be pasted into each other and quietly half-work.
+    #
+    # EVERY KEY HERE IS A HYPERPARAMETER OF A MECHANISM THAT ALWAYS
+    # RUNS. None of them switches the virtual-node machinery off; there
+    # is no such switch, and the model raises if you invent one
+    # (`use_fragments`, `enable_virtual_nodes`, `init_zero`, ...).
+    # NF_SIMURGH without virtual nodes is `monolithic_arace`, which
+    # already exists — run that instead.
+    virtual_node:
+      # ── node construction (REPRESENTATION only) ───────────────────
+      # NEVER applies to E_base: the fragment ENERGY pooling is always
+      # an exact sum, by construction, and is not configurable.
+      #
+      # "mean"      — default. Stays scale-consistent across fragments of
+      #               very different atom counts, which is what lets the
+      #               model generalise to fragment sizes it never saw.
+      # "sum"       — size-extensive but unbounded out of distribution.
+      # "attention" — learned per-atom weights within each fragment.
+      pooling: "mean"
+
+      # Concatenate log1p(n_atoms_k). This resolves the mean-vs-sum
+      # tension by providing BOTH: the mean answers "what does this stuff
+      # look like", the size scalar answers "how much of it is there",
+      # without sum's unbounded OOD scaling. false only for ablations.
+      use_size_scalar: true
+
+      # Width of the fragment scalar s_k.
+      n_scalar: 16
+
+      # ── virtual-node radial basis ─────────────────────────────────
+      # A SEPARATE primitive instance from the atom-level one: same
+      # BesselBasis / PolynomialEnvelope classes, fragment-appropriate
+      # cutoff and basis count.
+      vnode_num_rbf: 8
+      vnode_radial_hidden: 32
+
+      # Separation (Å) at which the interaction envelope reaches zero.
+      # Larger than the atom cutoff (data.cutoff: 5.0) — that gap is the
+      # entire point: fragment pairs beyond 5 Å are exactly the ones
+      # atom-level message passing cannot see.
+      #
+      # 10.0, not the GMD file's 15.0. QM9 molecules have at most 9 heavy
+      # atoms and span roughly 5-8 Å, so at 15 Å the envelope would be
+      # flat across every separation that actually occurs and its radial
+      # basis would be resolving empty space.
+      #
+      # Note the pair SET is not truncated at this radius — all ordered
+      # k != l inside a structure are enumerated, and only the smooth
+      # envelope decays. Truncating the set would make the attention
+      # denominator jump as a fragment crossed the boundary, putting a
+      # discontinuity in E and therefore a wrong F.
+      vnode_cutoff: 10.0
+
+      # ── virtual-node interaction ──────────────────────────────────
+      n_heads: 4 # attention heads; context_k is their concatenation
+      final_hidden: 16 # interaction-energy MLP hidden width
+      dropout: 0.0 # inside the attention-logit MLP; 0.0 disables
+
+      # Safety cap on K. Pair enumeration is O(K²), so a structure
+      # decomposed into many tiny fragments (a gas of single atoms) gets
+      # expensive. `rotatable` on QM9 reaches K=9 at most (measured), so
+      # this is slack, not a live constraint.
+      vnode_max_fragments: 512
+
+      # NOTE: there is no `init_zero` key. Zero-init of the correction
+      # readout is a design invariant — it is what makes a fresh
+      # NF_SIMURGH numerically identical to monolithic_arace, and the
+      # reduction test depends on it — not a configurable option.
+
+      # ── l>0 pooled invariants ─────────────────────────────────────
+      # STAGING: remove once Stage 2 is validated.
+      # Feeds the attention-logit MLP contractions of the pooled l=1 /
+      # l=2 channels against the inter-fragment direction:
+      #   norm    ‖mu_k‖
+      #   axial   mu_k · r_hat,  mu_l · r_hat
+      #   mutual  mu_k · mu_l
+      #   quad    r_hat^T Q_k r_hat
+      # With axial and mutual both on, the combination
+      # (3·axial_k·axial_l − mutual) — the angular part of the
+      # dipole-dipole tensor — is supplied explicitly, so the MLP is
+      # handed the correct functional form and only has to learn the
+      # radial dependence from rbf_kl.
+      pool_l1l2: false
+      l1l2_invariants: ["norm", "axial", "mutual", "quad"]
+
+      # ── equivariant virtual nodes (Stage 2) ───────────────────────
+      # STAGING: remove once Stage 2 is validated.
+      # Pools the FULL irreps per fragment into equivariant virtual
+      # nodes, runs exactly one round of CG-coupled fragment-fragment
+      # message passing against the fragment-fragment direction, and
+      # collapses to an invariant scalar only at the final readout.
+      # Additive to the Stage 1 correction rather than replacing it, so
+      # both paths keep receiving gradient (DDP static-graph contract)
+      # and the flag isolates Stage 2's own contribution.
+      vnode_equivariant: false
+      vnode_irreps: "16x0e + 16x1o + 16x2e"
+      vnode_sh_lmax: 2
+
+      # ── virtual-node type conditioning ────────────────────────────
+      # Conditions s_k on a pooled learned element embedding so ONE
+      # fragment module specialises by fragment chemistry — the same
+      # idea as element_conditioned on the artisans. This is the
+      # continuous, DDP-safe alternative to routing fragments to
+      # separate experts: a top-k router would be discontinuous in the
+      # positions, making E jump and F wrong near switching boundaries.
+      # Turn on only if the diagnostics suggest specialisation is
+      # missing.
+      #
+      # ══ ON by inheritance from nf_simurgh_gmd26_typecond.yaml ══
+      # and it matters more here than anywhere.
+      #
+      # QM9's whole design is chemical diversity at fixed size: molecules
+      # with the SAME heavy-atom count and the same fragment-size
+      # multiset differ only in which elements sit where. So
+      # `use_size_scalar` — log1p(n_atoms) per fragment — is close to
+      # uninformative across this corpus, and without type conditioning
+      # the only composition signal reaching a virtual node is whatever
+      # survives in the pooled l=0 features. A pooled learned element
+      # embedding supplies it directly.
+      #
+      # Cost: +1,088 parameters (a 120x8 embedding table, plus 8 extra
+      # input columns on the fragment scalar MLP).
+      #
+      # Set false for the A/B against plain NF_SIMURGH on this dataset.
+      vnode_type_conditioned: true
+
+  # ── Task head ──────────────────────────────────────────────────────
+  # Monolithic backbone — returns the property dict (energy + autograd
+  # forces + virtual-node diagnostics) directly; a task head is
+  # incompatible.
+  head: null
+
+# ─────────────────────────────────────────────────────
+# TRAINER
+# ─────────────────────────────────────────────────────
+# This section is passed directly to lightning.pytorch.Trainer.
+# trainer.max_epochs is authoritative — it controls how many epochs
+# Lightning runs. Do NOT set training.max_epochs; it has no effect.
+#
+# accelerator options: "cpu", "gpu", "mps", "tpu", "auto"
+# devices: integer or "auto"
+#
+# precision options:
+#   "32-true"   / "32"      — float32 (default, safest)
+#   "bf16-mixed"             — bfloat16 mixed (A100/H100/GH200, recommended)
+#   "16-mixed"               — float16 mixed (older GPUs)
+#   "64-true"   / "64"      — float64 (scientific computing)
+#
+# strategy options (simple strings for common cases):
+#   "auto"   — Lightning chooses based on hardware
+#   "ddp"    — DistributedDataParallel (model fits on one GPU)
+#   "fsdp"   — FullyShardedDataParallel (model larger than one GPU)
+#   "fsdp2"  — FSDP2 via ModelParallelStrategy (PyTorch 2.4+)
+#   "deepspeed_zero1/2/3"  — DeepSpeed ZeRO stages
+#   "deepspeed_zero3_offload" — DeepSpeed ZeRO-3 + CPU offload
+#
+# For multi-GPU: set devices=N and strategy="ddp" or "fsdp".
+# For multi-node: also set num_nodes=M.
+# ─────────────────────────────────────────────────────
+trainer:
+  _target_: lightning.pytorch.trainer.Trainer
+  default_root_dir: ${paths.output_dir}
+
+  # Epoch budget — max_epochs is THE authoritative epoch count.
+  #
+  # An epoch here is 3,438 optimiser steps (110k molecules / batch 32),
+  # so 150 epochs is ~516k steps. The GMD file's 1500 would be 5.2M
+  # steps and the cosine schedule would barely have started decaying by
+  # the time the model converged.
+  min_epochs: 5 # prevents premature early stopping
+  max_epochs: 150 # total epochs; scheduler T_max follows this value
+
+  accelerator: gpu # 110k molecules per epoch — CPU is not practical
+  devices: 1
+  num_nodes: 1
+  precision: "32" # use "bf16-mixed" on A100/H100 for ~2x speedup
+
+  # Strategy — "auto" works for single-GPU and CPU.
+  # For DDP: strategy: ddp (and set devices: N, accelerator: gpu)
+  # For FSDP: strategy: fsdp (and precision: bf16-mixed)
+  # For DeepSpeed: strategy: deepspeed_zero2 or deepspeed_zero3
+  # NOTE: when using a non-"auto" strategy, also configure the
+  # distributed section below to tune the strategy parameters.
+  strategy: auto
+
+  # Validation cadence
+  check_val_every_n_epoch: 1 # validate every N epochs
+  val_check_interval:
+    null # null = epoch-only; float(0,1] = fraction of epoch;
+    # int >= 1 = every N training batches
+
+  # Logging
+  # 50, not 1: at 3,438 steps per epoch, per-step logging writes
+  # hundreds of thousands of points per metric and dominates the
+  # logger upload.
+  log_every_n_steps: 50
+
+  # Gradient clipping — set null here; handled by training.gradient_clip
+  # (GOALModule.on_before_optimizer_step). Lightning refuses both at once.
+  gradient_clip_val: null
+  gradient_clip_algorithm: "norm"
+
+  # Gradient accumulation — simulate larger batch sizes
+  # e.g. accumulate_grad_batches=4, batch_size=8 → effective batch=32
+  accumulate_grad_batches: 1
+
+  # Validation sanity check before training starts
+  # 0 = skip entirely; -1 = run full validation set; N = run N batches
+  num_sanity_val_steps: 2
+
+  # Autograd-based force heads need gradient tape during eval/test.
+  # MUST be false — torch.enable_grad() inside step hooks only works
+  # when inference_mode=false. (Lightning 2.6+ default is true.)
+  inference_mode: false
+
+  # Misc
+  deterministic: false # true = reproducible but slower
+  detect_anomaly: false # true = raises on NaN/Inf (debug only)
+  enable_model_summary: true
+  enable_progress_bar: true
+  sync_batchnorm: false # true = sync BatchNorm across GPUs (DDP)
+
+# ─────────────────────────────────────────────────────
+# TRAINING HYPERPARAMETERS
+# ─────────────────────────────────────────────────────
+training:
+  # Gradient clipping — applied by GOALModule, not Lightning Trainer.
+  # 10.0 is conservative for equivariant networks; reduce to 1.0 if
+  # seeing explosive gradients in early training.
+  # 0.0 = disabled.
+  gradient_clip: 10.0
+
+  # Checkpoint output directory
+  checkpoint_dir: ${paths.output_dir}/checkpoints
+
+  # torch.compile (PyTorch 2.0+, requires CUDA for best effect)
+  # compile_model: true enables torch.compile on the backbone.
+  # mode options: "default", "reduce-overhead", "max-autotune"
+  #   Start with "default"; use "max-autotune" for final production runs.
+  compile_model: false
+  compile:
+    mode: "default"
+    fullgraph: false # true = compile entire graph (faster but stricter)
+    dynamic: null # null | true | false — dynamic shape support
+
+  # SLURM auto-requeue support.
+  # true = attach SLURMEnvironment plugin; SLURM restarts jobs on preemption.
+  slurm_mode: false
+
+  # ── Performance settings ─────────────────────────────────────────
+  performance:
+    # TF32 matmul precision (only effective on Ampere+ GPUs: A100, RTX 30xx+)
+    # "highest" — full float32 (default, safest, required for CPU)
+    # "high"    — TF32 tensor cores (~3x speedup, negligible precision loss)
+    # "medium"  — aggressive TF32
+    float32_matmul_precision: highest
+
+    # cuDNN algorithm auto-tuning (only with CUDA)
+    # true = faster after warmup, adds startup overhead
+    cudnn_benchmark: false
+
+    # Deterministic cuDNN (true = slower, fully reproducible)
+    cudnn_deterministic: false
+
+  # ── Optimiser ────────────────────────────────────────────────────
+  # AdamW with two parameter groups (equivariant params always get WD=0):
+  #   group 1 — TP layers, EquivariantLinear: weight_decay = 0.0 always
+  #   group 2 — MLP weights, gates, embeddings: weight_decay applies
+  #
+  # scheduler_type options:
+  #   "cosine_warmup"    — linear warmup then cosine decay (recommended)
+  #   "cosine"           — cosine decay from epoch 0
+  #   "reduce_on_plateau"— halve LR when val/total stops improving
+  #
+  # Scheduler T_max = trainer.max_epochs (authoritative, not training.max_epochs).
+  optimizer:
+    # 0.005, half the GMD value: an epoch here is 3,438 steps rather
+    # than a few hundred, so the same LR covers far more ground before
+    # the cosine decay takes hold.
+    lr: 0.005
+    weight_decay: 1.0e-5
+    amsgrad: true
+    min_lr: 1.0e-7
+    scheduler_type: cosine_warmup
+    # 2 epochs = ~6,900 steps of warmup, far more in absolute terms than
+    # the GMD file's ten epochs were.
+    warmup_epochs: 2 # linear warmup duration (cosine_warmup only)
+    scheduler: # reduce_on_plateau settings
+      patience: 50
+      factor: 0.5
+
+  # ── Exponential Moving Average ───────────────────────────────────
+  # Shadow weights used for validation and testing.
+  # decay=0.99 → half-life ≈ 69 steps; 0.999 → ≈ 693 steps.
+  # Disable to use Lightning's native EMAWeightAveraging callback instead
+  # (configure it in the callbacks section below).
+  # 0.999 rather than 0.99: with 3,438 steps per epoch a 69-step
+  # half-life averages over 2% of an epoch, which is barely an average.
+  ema:
+    enabled: true
+    decay: 0.999
+
+  # ── Position noise augmentation ─────────────────────────────────
+  # Adds Gaussian noise σ to atom positions at each training step.
+  # Improves force generalisation; 0.005 Å is conservative.
+  # 0.0 = disabled.
+  position_noise_std: 0.0
+
+  # ── Stage curriculum ─────────────────────────────────────────────
+  # Training proceeds through stages with different loss weights.
+  # Stage i runs for epochs_i epochs; the last stage with epochs=null
+  # runs until training ends (early stopping or max_epochs).
+  #
+  # loss_weights override the per-component weights in `losses` below
+  # for the duration of that stage. Labels not declared in `losses`
+  # are silently skipped (forward-declaration is allowed).
+  #
+  # ONE STAGE, because QM9 has no forces.
+  #
+  # The GMD file's three-stage curriculum exists to phase force
+  # supervision in after the energy surface settles — energy only, then
+  # energy + forces, then a heavier force weight. With no force labels
+  # there is nothing to phase in, and a curriculum whose stages differ
+  # only in a weight that is never used would be theatre. The stage
+  # machinery still runs (the progress bar prints the stage name and the
+  # active weights), it simply has one entry.
+  stages:
+    - name: "energy"
+      epochs: null # open-ended — runs to max_epochs
+      loss_weights:
+        energy: 1.0
+        gate_reg: 1.0e-4
+
+  # ── Loss functions ────────────────────────────────────────────────
+  # Declares which loss components exist and their base weights.
+  # Base weights apply when no stage is active OR between stages.
+  # Stage loss_weights above override these during training.
+  #
+  # fn options: "mse", "mae", "rmse", "huber", "smooth_l1"
+  #   mae  — robust to outliers, recommended for atomistic data
+  #   mse  — penalises large errors harder
+  #   rmse — sqrt(mse), same units as mae
+  #
+  # Composite fn (multiple sub-losses per property):
+  #   fn:
+  #     - name: mse
+  #       weight: 4.0
+  #     - name: mae
+  #       weight: 1.0
+  #
+  # normalize_by_n_atoms: true = divide force loss by atom count per structure.
+  #   Removes size dependence. Essential for multi-molecule datasets where
+  #   large molecules would otherwise dominate the gradient.
+  #   false = flat mean over all atoms (old behaviour; large mols dominate).
+  #
+  # Available built-in losses (name field):
+  #   "energy"          — per-atom energy MAE/MSE
+  #   "forces"          — atomic forces MAE/MSE
+  #   "stress"          — virial stress (periodic systems)
+  #   "newton"          — Newton violation penalty (force conservation)
+  #   "gate_reg"        — L2 on artisan gate params (prevents expert collapse)
+  #   "dipole"          — dipole moment
+  #   "scalar_property" — generic scalar, set property_name
+  # NOTE `EnergyLoss` divides by the atom count unconditionally — the
+  # `normalize_by_n_atoms` flag below only reaches the FORCES loss. So
+  # the energy objective, and the logged energy_mae_per_atom, are both
+  # per-atom. Published QM9 numbers are per MOLECULE: multiply by the
+  # mean atom count (~18) before comparing.
+  losses:
+    - name: energy
+      fn: mae
+      weight: 1.0
+      normalize_by_n_atoms: true
+
+    - name: gate_reg
+      fn: mse
+      weight: 1.0e-4
+
+    # NO "forces" ENTRY — QM9 has no force labels, and declaring the loss
+    # would make it read a `forces` attribute the batch does not carry.
+    #
+    # NO "newton" ENTRY either. The GMD configs carry a commented-out one
+    # and list `newton` in every stage's loss_weights, which makes
+    # train.py warn that the label is undeclared and will be ignored —
+    # there is no `newton` loss in LOSS_REGISTRY to declare (available:
+    # charge, dipole, energy, forces, gate_reg, scalar_property, stress).
+    # Newton violation is a logged METRIC: the model still predicts
+    # forces by autograd, so {split}_forces/newton_violation appears
+    # every epoch and should sit at ~0. It is the one force-shaped
+    # number worth watching on this dataset.
+
+  # Strict stage label validation.
+  # false = silently skip unknown stage labels (default, allows forward-decl)
+  # true  = raise ValueError if a stage names a label not in losses above
+  strict_stage_labels: false
+
+# ─────────────────────────────────────────────────────
+# CHECKPOINTING
+# ─────────────────────────────────────────────────────
+# Three independent checkpoint pools managed by GOALCheckpointManager:
+#
+#   pool 1 — top_k: best K checkpoints by validation metric.
+#     Keeps the K lowest (mode=min) or highest (mode=max) metric values.
+#     When a new checkpoint beats the worst in the pool, the worst is
+#     deleted and replaced. A checkpoint worse than all K is not saved.
+#
+#   pool 2 — interval: last N checkpoints at fixed epoch intervals.
+#     Saves every `every_n_epochs` epochs; keeps only the last `keep_last_n`.
+#     When saving the (N+1)th, the oldest is deleted first.
+#
+#   pool 3 — last: always overwrite last.ckpt after every epoch.
+#     Never deleted. Used exclusively for crash recovery / auto-resume.
+#
+# metric options (any metric logged at validation time — note the
+# section prefix: force curves live in val_forces/, energy curves in
+# val_energy/, and only the loss total is in plain val/):
+#   "val_forces/forces_mae"               — force MAE (min)
+#   "val_forces/forces_cosine_similarity" — force direction similarity (max)
+#   "val_energy/energy_mae_per_atom"      — per-atom energy MAE (min)
+#   "val/total"                           — total weighted loss (min)
+#
+# ON QM9 THE METRIC MUST BE AN ENERGY ONE. The GMD configs select on
+# "val_forces/forces_mae"; that metric is never emitted here, because
+# goal.ml.training.metrics omits every force metric when the batch
+# carries no force labels. GOALCheckpointManager would then never see
+# its monitor, and EarlyStopping (strict: true) raises outright.
+#
+# "val_energy/energy_mae_per_atom" is the selection metric below —
+# per ATOM, so multiply by ~18 to compare with published per-molecule
+# QM9 MAEs.
+#
+# Atomic writes (write .tmp then os.replace) prevent corrupted files.
+# Pool state is persisted to checkpoint_state.json for correct resume.
+# ─────────────────────────────────────────────────────
+checkpoint_manager:
+  _target_: goal.ml.training.callbacks.checkpoint_manager.GOALCheckpointManager
+  dirpath: ${paths.output_dir}/checkpoints
+
+  top_k:
+    enabled: true
+    k: 5
+    metric: "val_energy/energy_mae_per_atom"
+    mode: "min" # "min" for error metrics, "max" for similarity metrics
+
+  interval:
+    enabled: true
+    every_n_epochs: 2
+    keep_last_n: 5
+
+  last:
+    enabled: true
+    filename: "last.ckpt"
+
+  # ── Self-contained .simurgh archives ─────────────────────────────
+  # A .simurgh archive bundles weights, config and the FROZEN MODEL
+  # SOURCE so a run can be reloaded without the repo at that commit.
+  # NF_SIMURGH is a single self-contained file that imports only
+  # stable primitives and blocks, so it packs cleanly.
+  #   save_archive     — write one alongside the best checkpoint
+  #   archive_interval — also write one at every interval checkpoint
+  #                      (costs disk; useful for long research runs)
+  save_archive: true
+  archive_interval: false
+
+# ─────────────────────────────────────────────────────
+# CALLBACKS
+# ─────────────────────────────────────────────────────
+# Each callback is enabled/disabled inline here.
+# GOALCheckpointManager above is always active for SIMURGH experiments.
+#
+# Available Lightning callbacks (enable by uncommenting):
+#
+#   EarlyStopping — stop when metric plateaus.
+#   BackboneFinetuning — gradual layer unfreezing for fine-tuning.
+#   EMAWeightAveraging — Lightning's native EMA (alternative to training.ema).
+#     If using this, set training.ema.enabled: false to avoid double EMA.
+#   GradientAccumulationScheduler — ramp up accumulation during training.
+#   StochasticWeightAveraging — SWA (alternative to EMA; mutually exclusive).
+#   ThroughputMonitor — log samples/sec to identify data bottlenecks.
+#   RichModelSummary — print model architecture summary.
+#   GOALRichProgressBar — stage-aware progress bar (always active via code).
+#   LearningRateMonitor — log LR per epoch (always active via code).
+# ─────────────────────────────────────────────────────
+callbacks:
+  # Stage-aware progress bar (prepends "[stage_name epoch/total]" prefix)
+  rich_progress_bar:
+    _target_: goal.ml.training.callbacks.progress.GOALRichProgressBar
+
+  # Model architecture summary at startup
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: 1 # nesting depth to display (-1 = all)
+
+  # Early stopping — uncomment to enable:
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    # Check right after validation, not at the end of the training epoch:
+    # a run resumed from a checkpoint saved after validation first closes
+    # that finished epoch with no metrics logged, which strict mode rejects.
+    check_on_train_epoch_end: false
+    monitor: "val_energy/energy_mae_per_atom"
+
+    # ── min_delta IS IN THE METRIC'S OWN UNITS ───────────────────────
+    # val_energy/energy_mae_per_atom is reported in eV/atom, so the
+    # inherited 1.0e-4 meant "an epoch only counts as an improvement if
+    # it beats the best by 1e-4 eV/atom". Late in training the
+    # per-epoch gain is far below that, so EVERY epoch scores as
+    # stalled and the run stops while the curve is still descending —
+    # on rMD17 aspirin that ended a 3,000-epoch budget at ~970 with
+    # val_forces/forces_mae still falling.
+    #
+    # 0.0 = any improvement counts, which is what you want when the
+    # metric is a slowly converging error. Set a positive value only if
+    # you know the noise floor of your validation set and want to stop
+    # inside it.
+    min_delta: 0.0
+
+    # Counted in epochs.
+    # 200 (200 epochs) is deliberately generous: this is a
+    # divergence guard, not a convergence detector. To remove the guard
+    # entirely, comment out this whole block — checkpoint_manager.top_k
+    # still keeps the best weights.
+    patience: 200
+
+    mode: "min"
+    strict: true # crash if monitor not found in metrics
+    check_finite: true # stop if monitor becomes NaN or Inf
+    stopping_threshold: null # stop immediately if metric < threshold
+    divergence_threshold: null # stop if metric > threshold (diverging)
+
+  # Backbone finetuning (for transfer learning from pretrained models):
+  # backbone_finetuning:
+  #   _target_: lightning.pytorch.callbacks.BackboneFinetuning
+  #   unfreeze_backbone_at_epoch: 10
+  #   backbone_initial_ratio_lr: 0.1
+  #   should_align: true
+  #   verbose: true
+
+  # Lightning native EMA (alternative to training.ema; disable training.ema first):
+  # ema_weight_averaging:
+  #   _target_: lightning.pytorch.callbacks.EMAWeightAveraging
+  #   decay: 0.999
+
+  # Dynamic gradient accumulation ramp-up:
+  # grad_accumulation:
+  #   _target_: lightning.pytorch.callbacks.GradientAccumulationScheduler
+  #   scheduling: {0: 1, 10: 2, 20: 4}  # epoch: accumulation_steps
+
+  # Stochastic Weight Averaging (mutually exclusive with EMA):
+  # swa:
+  #   _target_: lightning.pytorch.callbacks.StochasticWeightAveraging
+  #   swa_lrs: 1.0e-4
+  #   swa_epoch_start: 0.75  # start SWA at this fraction of max_epochs
+  #   annealing_epochs: 10
+  #   annealing_strategy: cos
+
+  # Throughput monitor (logs samples/sec — useful for profiling):
+  # throughput_monitor:
+  #   _target_: lightning.pytorch.callbacks.ThroughputMonitor
+  #   window_size: 100   # rolling window size (batches)
+
+# ─────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────
+# ── LOGGER SECTIONS (what lands where in W&B / TensorBoard) ─────────
+# The text before the first "/" is the section a curve is filed under:
+#
+#   {split}/         total (the weighted loss), plus any loss component
+#                    that is neither energy nor forces
+#   {split}_energy/  the energy loss term, energy_mae_per_atom,
+#                    energy_rmse_per_atom, energy_round_{L}
+#   {split}_forces/  the forces loss term, forces_mae, forces_rmse,
+#                    forces_cosine_similarity, forces_magnitude_mae,
+#                    newton_violation and its _x/_y/_z components
+#   {split}_gate/    every gate diagnostic (gate_mean_round_{L},
+#                    aux_loss, gate_reg, artisan/…) — numerous, for
+#                    occasional inspection, never on the progress bar
+#
+# {split} is train, val (the in-distribution set) or test (the
+# out-of-distribution set: logged every validation epoch when
+# data.monitor_test_during_training is on, otherwise only by an explicit
+# trainer.test() run).  Select on val_*, read test_*.
+#
+# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+#
+# Multiple loggers can be active simultaneously.
+# Metrics are logged to all enabled loggers.
+#
+# CSV is always available (no external dependencies).
+# W&B requires: wandb login (or WANDB_API_KEY env var)
+# TensorBoard: view with: tensorboard --logdir logs/
+# MLflow: requires mlflow server; view with: mlflow ui
+# Neptune: requires NEPTUNE_API_TOKEN env var
+# Aim: view with: aim up (creates .aim folder in repo)
+# Comet: requires COMET_API_TOKEN env var
+#
+# Uncomment logger blocks to activate them.
+# ─────────────────────────────────────────────────────
+logger:
+  # CSV logger — always enabled as fallback
+  csv:
+    _target_: lightning.pytorch.loggers.csv_logs.CSVLogger
+    save_dir: "${paths.output_dir}"
+    name: "csv_logs"
+    prefix: ""
+
+  # Weights & Biases (recommended for research tracking):
+  wandb:
+    _target_: lightning.pytorch.loggers.wandb.WandbLogger
+    name: ${run_name} # format: YYYY-MM-DD_HH-MM-SS_qm9_nf_simurgh
+    project: "goal"
+    entity: null # null = your default W&B entity
+    save_dir: "${paths.output_dir}"
+    offline: false
+    id: null # set to resume a specific W&B run
+    log_model: false # true = upload checkpoints to W&B
+    group: ""
+    tags: ["simurgh", "nf_simurgh", "qm9", "experimental"]
+
+  # TensorBoard:
+  # tensorboard:
+  #   _target_: lightning.pytorch.loggers.tensorboard.TensorBoardLogger
+  #   save_dir: "${paths.output_dir}/tensorboard"
+  #   name: "tb_logs"
+  #   log_graph: false
+  #   default_hp_metric: true
+
+  # MLflow:
+  # mlflow:
+  #   _target_: lightning.pytorch.loggers.mlflow.MLFlowLogger
+  #   experiment_name: "simurgh-qm9"
+  #   tracking_uri: "http://localhost:5000"
+  #   tags: null
+
+  # Neptune:
+  # neptune:
+  #   _target_: lightning.pytorch.loggers.neptune.NeptuneLogger
+  #   api_key: ${oc.env:NEPTUNE_API_TOKEN}
+  #   project: "your-workspace/goal"
+  #   log_model_checkpoints: true
+
+  # Aim (local, no cloud):
+  # aim:
+  #   _target_: aim.pytorch_lightning.AimLogger
+  #   repo: ${paths.log_dir}/aim
+  #   experiment: "simurgh-qm9"
+  #   system_tracking_interval: 10   # seconds; null = disable system metrics
+  #   log_system_params: true
+  #   capture_terminal_logs: false   # avoid console log loop
+
+  # Comet:
+  # comet:
+  #   _target_: lightning.pytorch.loggers.comet.CometLogger
+  #   api_key: ${oc.env:COMET_API_TOKEN}
+  #   project_name: "goal-simurgh"
+  #   offline: false
+
+# ─────────────────────────────────────────────────────
+# DISTRIBUTED TRAINING
+# ─────────────────────────────────────────────────────
+# Configure the selected strategy here.
+# trainer.strategy selects which strategy to use.
+# Parameters below tune the selected strategy.
+#
+# DDP (trainer.strategy: "ddp"):
+#   Use when model fits on one GPU. Replicates model across GPUs.
+#   Multi-GPU: trainer.devices=4, trainer.accelerator=gpu, strategy.name=ddp
+#   Multi-node: trainer.num_nodes=4 additionally
+#
+# FSDP (trainer.strategy: "fsdp"):
+#   Use when model does not fit on one GPU. Shards params + grads + opt states.
+#   Recommended precision: bf16-mixed on A100/H100.
+#   FSDP2 (trainer.strategy: "fsdp2"): next-gen FSDP with per-param sharding,
+#   native torch.compile support, FP8 compatibility (PyTorch 2.4+).
+#
+# DeepSpeed (trainer.strategy: "deepspeed_zero1/2/3"):
+#   ZeRO-1: optimizer state partitioning only (lowest overhead)
+#   ZeRO-2: + gradient partitioning (~8x memory vs DDP)
+#   ZeRO-3: + parameter partitioning (maximum memory savings)
+#   ZeRO-3 + offload: move params/optimizer to CPU RAM (extremely slow)
+#   Requires: pip install deepspeed
+#
+# 32-GPU example:
+#   trainer.devices: 8
+#   trainer.num_nodes: 4
+#   trainer.strategy: "ddp"
+# ─────────────────────────────────────────────────────
+strategy:
+  name: auto # "auto", "ddp", "fsdp", "fsdp2", "deepspeed_zero1/2/3"
+
+  # DDP options (active when name: "ddp")
+  find_unused_parameters: false # true only for frozen backbone layers
+  static_graph: false # true for fixed computation graphs (faster)
+  gradient_as_bucket_view: true # shares grad storage with DDP buckets
+  bucket_cap_mb: 25 # gradient all-reduce bucket size (MB)
+  process_group_backend: nccl # "nccl" for GPU, "gloo" for CPU
+
+  # FSDP / FSDP2 options (active when name: "fsdp" or "fsdp2")
+  auto_wrap_policy: size # "size", "transformer", or null (whole model)
+  size_based_min_params: 1000000 # wrap modules with > N params (FSDP)
+  # size_based_min_params: 500000  # smaller threshold for FSDP2
+  activation_checkpointing: true # recompute activations in backward (~40% mem savings)
+  cpu_offload: false # offload params to CPU RAM (last resort, very slow)
+  sharding_strategy: full_shard # "full_shard" | "shard_grad_op" | "no_shard"
+  state_dict_type: full # "full" | "sharded" | "local"
+
+  # DeepSpeed options (active when name: "deepspeed_*")
+  stage: 3 # ZeRO stage (1, 2, or 3)
+  offload_optimizer: false # move optimizer states to CPU
+  offload_parameters: false # move parameters to CPU (ZeRO-3 only)
+  overlap_comm: true # overlap communication with computation
+  contiguous_gradients: true # contiguous gradient buffer (reduces fragmentation)
+  allgather_bucket_size: 200000000 # all-gather bucket (bytes)
+  reduce_bucket_size: 200000000 # reduce bucket (bytes)
+  logging_level: 30 # 30=WARNING, 20=INFO, 10=DEBUG
+
+# ─────────────────────────────────────────────────────
+# PERFORMANCE
+# ─────────────────────────────────────────────────────
+# Global PyTorch performance settings applied before training.
+# See training.performance for the per-run settings consumed by train.py.
+# These are documented here for reference — the code reads from training.performance.
+#
+# float32_matmul_precision:
+#   "highest" — full float32 (default; required for CPU and pre-Ampere GPUs)
+#   "high"    — TF32 tensor cores on Ampere+ GPUs (~3x speedup)
+#   "medium"  — more aggressive TF32
+#
+# torch.compile:
+#   Set training.compile_model: true to enable.
+#   mode: "default" → start here; "max-autotune" → production runs.
+#   fullgraph: true → compile entire graph (faster inference, stricter).
+
+# ─────────────────────────────────────────────────────
+# RESUME / EXTEND
+# ─────────────────────────────────────────────────────
+# An INTERRUPTED run picks itself up with nothing set here: on launch,
+# training.checkpoint_dir/last.ckpt is loaded if it exists, and the
+# GOALCheckpointManager pools are restored from checkpoint_state.json.
+#
+# This block is for continuing a run that ALREADY FINISHED. Raise the
+# budget and point resume.from at the old run's checkpoints:
+#
+#   goal-train --config-name <this file> \
+#       trainer.max_epochs=3000 \
+#       resume.from=logs/<task_name>/runs/<old_run>/checkpoints
+#
+# The continued run writes its own checkpoints under its own output
+# directory; the old run's files are read for pool ranking but never
+# deleted. A launch with nothing left to train (max_epochs already
+# reached) exits immediately — which is what stops SLURM from requeueing
+# a completed job.
+resume:
+  # Run directory, checkpoint directory, or .ckpt file to continue from.
+  # null = this run's own training.checkpoint_dir (plain auto-resume).
+  from: null
+
+  # What to do with the restored LR schedule when max_epochs changes.
+  # Lightning restores T_max / base_lrs / last_epoch from the checkpoint,
+  # so the new budget never reaches the scheduler on its own — and since
+  # CosineAnnealingLR is periodic with period 2*T_max, the LR would climb
+  # BACK UP its curve over the added epochs, undoing the run.
+  #   stretch — re-aim the schedule at the new budget: the LR lands where
+  #             a run configured with the new max_epochs from the start
+  #             would be at this epoch, and keeps annealing down.
+  #   restart — fresh cosine cycle over the added epochs only, from
+  #             training.optimizer.lr (SGDR-style warm restart).
+  #   keep    — leave the restored schedule as-is (the old behaviour;
+  #             only for reproducing a pre-existing resume).
+  lr_schedule: stretch
+
+# Dataset statistics derived from the training set before the model is built
+# (elements, atomic reference energies, scale, avg_num_neighbors, pair_counts).
+# goal-train records them in checkpoints/config.yaml, with the dataset they
+# came from, and reuses them when this run is resumed or extended — they are
+# not recomputed, and the model is rebuilt exactly as trained even if the
+# training data has changed since (a change is reported).
+dataset_stats:
+  # Reuse the values recorded with the checkpoint on resume / extension.
+  reuse: true
+  # Statistics to derive again anyway, or "all": elements, atomic_energies,
+  # scale, avg_num_neighbors, pair_counts.  An explicit value under
+  # model.backbone is kept; otherwise it is computed from the current data.
+  # scale / atomic_energies / avg_num_neighbors can always be changed;
+  # elements / pair_counts shape the model, so they only work on resume if
+  # the result still matches the checkpoint.
+  recompute: []
+
+# ckpt_path: legacy alias for resume.from — still honoured, and the key
+# goal-eval reads to pick a checkpoint to evaluate.
+ckpt_path: null
+
+# ─────────────────────────────────────────────────────
+# HYPERPARAMETER SEARCH
+# ─────────────────────────────────────────────────────
+# Uncomment one block to enable hyperparameter optimisation.
+# Run with: goal-tune (uses the tune entry point, not goal-train)
+#
+# ── Lightning Tuner (no extra deps) ─────────────────
+# hparams_search:
+#   method: tuner
+#   tuner:
+#     lr_find: true
+#     min_lr: 1.0e-8
+#     max_lr: 1.0
+#     num_training_steps: 100
+#     lr_find_mode: exponential    # "exponential" or "linear"
+#     auto_apply: true
+#     scale_batch_size: false      # auto-find max batch size
+#
+# ── Ray Tune (pip install 'ray[tune]' optuna) ───────
+# hparams_search:
+#   method: ray
+#   num_samples: 20
+#   max_epochs: 100
+#   metric: "val_energy/energy_mae_per_atom"
+#   mode: min
+#   scheduler: asha                # "asha" or "pbt"
+#   grace_period: 10               # min epochs before pruning
+#   search_algorithm: optuna       # null=random, "optuna", "hyperopt"
+#   search_space:
+#     training.optimizer.lr:
+#       type: loguniform
+#       lower: 1.0e-5
+#       upper: 1.0e-2
+#     training.optimizer.weight_decay:
+#       type: loguniform
+#       lower: 1.0e-8
+#       upper: 1.0e-3
+#     training.ema.decay:
+#       type: uniform
+#       lower: 0.99
+#       upper: 0.9999
+#
+# ── W&B Sweep (wandb required) ──────────────────────
+# hparams_search:
+#   method: wandb
+#   project: goal
+#   entity: null
+#   sweep_method: bayes            # "bayes", "grid", "random"
+#   metric: "val_energy/energy_mae_per_atom"
+#   mode: min
+#   count: 20
+#   early_terminate:
+#     type: hyperband
+#     min_iter: 10
+#     eta: 3
+#   parameters:
+#     training.optimizer.lr:
+#       distribution: log_uniform_values
+#       min: 1.0e-5
+#       max: 1.0e-2
+hparams_search: null

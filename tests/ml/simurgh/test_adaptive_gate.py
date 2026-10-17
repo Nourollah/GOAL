@@ -174,7 +174,9 @@ class TestAdaptiveGateSoftMode:
 
         # 3 blocks (0e, 1o, 2e) → 3 independent gates that genuinely differ.
         assert len(block_means) == 3
-        assert (block_means[0] - block_means[1]).abs().max().item() > 1e-6, (
+        assert (
+            block_means[0] - block_means[1]
+        ).abs().max().item() > 1e-6, (
             "per-irrep gates are identical — no more expressive than one gate"
         )
 
@@ -239,9 +241,9 @@ class TestAdaptiveGateHardMode:
 
         h_next, _, gate_scores = gate(h_new=h_new, h_prev=h_prev, training=False)
         open_mask = gate_scores > gate.hard_threshold
-        assert bool(open_mask.any()) and bool((~open_mask).any()), (
-            "test needs both open and closed atoms to be meaningful"
-        )
+        assert bool(open_mask.any()) and bool(
+            (~open_mask).any()
+        ), "test needs both open and closed atoms to be meaningful"
 
         assert torch.equal(h_next[open_mask], h_new[open_mask])
         assert torch.equal(h_next[~open_mask], h_prev[~open_mask])
@@ -352,10 +354,7 @@ class TestAdaptiveGateEquivariance:
         assert e_diff < 1e-5, f"Energy not invariant with the gate: {e_diff:.3e}"
 
         f_diff = (
-            (out1["forces"].detach() - out0["forces"].detach() @ rotation.T)
-            .abs()
-            .max()
-            .item()
+            (out1["forces"].detach() - out0["forces"].detach() @ rotation.T).abs().max().item()
         )
         assert f_diff < 1e-4, f"Forces not equivariant with the gate: {f_diff:.3e}"
 
@@ -378,10 +377,7 @@ class TestAdaptiveGateEquivariance:
         assert e_diff < 1e-5, f"Energy not invariant with both add-ons: {e_diff:.3e}"
 
         f_diff = (
-            (out1["forces"].detach() - out0["forces"].detach() @ rotation.T)
-            .abs()
-            .max()
-            .item()
+            (out1["forces"].detach() - out0["forces"].detach() @ rotation.T).abs().max().item()
         )
         assert f_diff < 1e-4, f"Forces not equivariant with both add-ons: {f_diff:.3e}"
 

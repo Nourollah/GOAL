@@ -1,0 +1,14 @@
+# Use a trained ML model from goal.ml
+#
+# `checkpoint` accepts a .simurgh archive, a checkpoint directory written
+# by GOALCheckpointManager, or a bare .ckpt file.  Cutoff, dtype, EMA
+# weights and fragment labels are all taken from the checkpoint itself.
+_target_: goal.md.core.calculator_factory.CalculatorFactory.create
+_convert_: none
+
+key: goal_model
+checkpoint: ??? # Path to model checkpoint (archive, directory or .ckpt)
+select: best # checkpoint directories only: best | last | epoch=N | <name>.ckpt
+use_ema: true # load the EMA weights when the checkpoint has them
+device: cpu
+head: null

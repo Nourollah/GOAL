@@ -1,0 +1,191 @@
+# @package _global_
+########################################################
+# GOAL fine-tuning config — MACE foundation model
+#
+#   goal-train --config-name finetune/mace
+#
+# Fine-tunes a pre-trained MACE-MP model in-process, through the SAME
+# GOALModule + Lightning trainer + GOALCheckpointManager as native models.
+# The backbone `mace_finetune` is a monolithic nn.Module returning
+# {energy, forces, num_atoms}, so `head: null`.
+#
+# Requires mace-torch in a standalone venv (mace pins e3nn==0.4.4; see the
+# "MACE (mace-torch)" note in pyproject.toml). Run this config with that
+# interpreter.
+########################################################
+
+experiment:
+  name: "finetune_mace"
+  description: "MACE-MP head-only fine-tuning"
+  tags: ["finetune", "mace"]
+
+seed: 42
+task_name: "finetune_mace"
+run_name_suffix: ""
+run_name: ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}${run_name_suffix}
+
+hydra:
+  run:
+    dir: ${paths.log_dir}/${task_name}/runs/${run_name}
+  sweep:
+    dir: ${paths.log_dir}/${task_name}/multiruns/${run_name}
+    subdir: ${hydra.job.num}
+  job_logging:
+    handlers:
+      file:
+        filename: ${hydra.runtime.output_dir}/${task_name}.log
+
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT,${oc.env:PWD}}
+  data_dir: ${paths.root_dir}/data
+  log_dir: ${paths.root_dir}/logs
+  output_dir: ${hydra:runtime.output_dir}
+
+# ─────────────────────────────────────────────────────
+# DATA
+# data.cutoff MUST equal the MACE checkpoint's r_max so the neighbour list
+# matches the pretrained model (mace-mp-0 medium/large: 6.0 Å; small: ~5.0 Å).
+# ─────────────────────────────────────────────────────
+data:
+  dataset_type: xyz
+  root: ${paths.data_dir}/finetune
+  split_ratio: [0.9, 0.1]
+  split_seed: 42
+  cutoff: 6.0
+  batch_size: 8
+  num_workers: 0
+  pin_memory: false
+  energy_key: energy
+  forces_key: forces
+  # Remap custom label keys (MACE/FairChem-style; overrides the two lines above):
+  # key_mapping: {energy: REF_energy, forces: REF_forces, stress: virial}
+
+# ─────────────────────────────────────────────────────
+# MODEL — MACE fine-tune backbone (monolithic → head: null)
+# ─────────────────────────────────────────────────────
+model:
+  backbone:
+    name: mace_finetune
+    checkpoint: "mace-mp-0-medium" # variant name or path to a .model/.pt
+    strategy: head_only # head_only | full | lora
+    #  head_only — freeze all but readouts (fastest/most stable, < ~5000 structures)
+    #  full      — train everything; use a much SMALLER lr (≈1e-5, see below)
+    #  lora      — freeze base, inject LoRA into every nn.Linear (needs `peft`)
+    lora_rank: 4 # only used if strategy: lora
+    lora_alpha: 16.0
+    lora_target_modules: null # null = all nn.Linear
+    dtype: float64 # MACE-MP foundation models are float64
+    reestimate_e0s: true # re-baseline atomic energies to THIS dataset
+    device: cpu
+  head: null # monolithic backbone returns the property dict
+
+# ─────────────────────────────────────────────────────
+# TRAINER
+# ─────────────────────────────────────────────────────
+trainer:
+  _target_: lightning.pytorch.trainer.Trainer
+  default_root_dir: ${paths.output_dir}
+  min_epochs: 1
+  max_epochs: 100
+  accelerator: auto
+  devices: 1
+  num_nodes: 1
+  precision: "64" # match the float64 foundation model
+  strategy:
+    auto # for a partly-frozen backbone under DDP,
+    # set strategy.find_unused_parameters: true
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 1
+  gradient_clip_val: null
+  accumulate_grad_batches: 1
+  num_sanity_val_steps: 2
+  inference_mode: false # REQUIRED — autograd forces need grad in eval
+
+training:
+  gradient_clip: 10.0
+  checkpoint_dir: ${paths.output_dir}/checkpoints
+  compile_model: false
+  slurm_mode: false
+  performance:
+    float32_matmul_precision: highest
+    cudnn_benchmark: false
+    cudnn_deterministic: false
+
+  # ── Optimiser ──
+  # head_only: lr ≈ 1e-4 is a good start.
+  # full     : use a MUCH smaller lr (≈1e-5) to avoid catastrophic forgetting.
+  optimizer:
+    lr: 1.0e-4
+    weight_decay: 1.0e-6
+    amsgrad: true
+    min_lr: 1.0e-7
+    scheduler_type: cosine
+    scheduler:
+      patience: 25
+      factor: 0.5
+
+  ema:
+    enabled: true
+    decay: 0.99
+
+  losses:
+    - name: energy
+      fn: mae
+      weight: 1.0
+      normalize_by_n_atoms: true
+    - name: forces
+      fn: mae
+      weight: 10.0
+      normalize_by_n_atoms: true
+
+  strict_stage_labels: false
+
+# ─────────────────────────────────────────────────────
+# CHECKPOINTING — same manager as native training
+# ─────────────────────────────────────────────────────
+checkpoint_manager:
+  _target_: goal.ml.training.callbacks.checkpoint_manager.GOALCheckpointManager
+  dirpath: ${paths.output_dir}/checkpoints
+  top_k:
+    enabled: true
+    k: 3
+    metric: "val_forces/forces_mae"
+    mode: "min"
+  interval:
+    enabled: true
+    every_n_epochs: 5
+    keep_last_n: 3
+  last:
+    enabled: true
+    filename: "last.ckpt"
+  save_archive: true
+  archive_interval: false
+
+# ─────────────────────────────────────────────────────
+# CALLBACKS
+# foundation_e0 re-baselines the MACE atomic energies to this dataset before
+# training (reads training.data via the datamodule). Essential — foundation
+# E0s are fit to MPTrj, not your data.
+# ─────────────────────────────────────────────────────
+callbacks:
+  foundation_e0:
+    _target_: goal.ml.training.callbacks.foundation.FoundationE0Callback
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: 1
+
+logger:
+  csv:
+    _target_: lightning.pytorch.loggers.csv_logs.CSVLogger
+    save_dir: "${paths.output_dir}"
+    name: "csv_logs"
+    prefix: ""
+
+# For a frozen/partly-frozen backbone under DDP, set find_unused_parameters: true.
+strategy:
+  name: auto
+  find_unused_parameters: false
+
+auto_resume: false
+ckpt_path: null
+hparams_search: null

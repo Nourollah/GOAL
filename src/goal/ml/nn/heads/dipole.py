@@ -56,6 +56,31 @@ class DipoleHead(nn.Module):
         features: NodeFeatures,
         graph: AtomicGraph,
     ) -> dict[str, torch.Tensor]:
+        """Predict per-atom charges and the resulting dipole moment.
+
+        A scalar readout maps ``features.node_feats`` to one partial
+        charge per atom; the dipole of each graph is then
+        ``mu = sum_i q_i * r_i`` using ``graph.pos`` directly (no
+        centring on the centre of charge or mass, so it is
+        origin-dependent unless the graph is charge-neutral).
+
+        Parameters
+        ----------
+        features : NodeFeatures
+            Backbone output; only ``node_feats`` ``(N, irreps_in.dim)``
+            is read.
+        graph : AtomicGraph
+            Input graph providing ``pos`` ``(N, 3)`` in Å and ``batch``
+            ``(N,)`` (all atoms are assigned to graph 0 when ``batch`` is
+            ``None``).
+
+        Returns
+        -------
+        dict[str, Tensor]
+            ``'dipole'`` ``(B, 3)`` in e·Å, ``'charges'`` ``(N,)`` in e,
+            ``'total_charge'`` ``(B,)`` in e (for a neutrality loss) and
+            ``'num_atoms'`` ``(B,)`` (float atom counts per graph).
+        """
         # Per-atom partial charges
         charges: torch.Tensor = self.readout(features.node_feats).squeeze(-1)  # (N,)
 

@@ -60,16 +60,22 @@ from goal.ml.nn.blocks.ace_block import normalise_addon_config
 from goal.ml.nn.blocks.adaptive_gate import AdaptiveDepthGate
 from goal.ml.nn.blocks.artisans import (
     _AracePairArtisan,
+    _AraceRarePairArtisan,
     _PairRMSNorm,
     cosine_cutoff,
     enumerate_element_pairs,
+    log_pair_routing,
     pair_label,
+    parse_pair_counts,
+    resolve_n_elements,
+    route_element_pairs,
 )
+from goal.ml.nn.blocks.embedding import AtomicNumberEmbedding
 from goal.ml.nn.blocks.fragment_interaction import (
     EquivariantFragmentInteraction,
     FragmentGeometry,
 )
-from goal.ml.nn.blocks.embedding import AtomicNumberEmbedding
+from goal.ml.nn.blocks.symmetric_contraction import SymmetricContraction
 from goal.ml.nn.models.simurgh.geometry import differentiable_edges
 from goal.ml.nn.primitives.linear import EquivariantLinear
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
@@ -116,7 +122,20 @@ class AraceBlock(nn.Module):
     artisans : nn.ModuleDict, optional
         Pre-built artisan bank to **share** across blocks
         (``share_artisan_weights=True``).  When ``None`` the block
-        builds its own independent bank.
+        builds its own independent bank.  With routing on it must hold
+        the *dedicated* pairs only.
+    pair_counts : mapping, optional
+        ``{(Z_A, Z_B): directed_edge_count}`` over the training set.
+        Required for routing; ``None`` dedicates every pair.
+    rare_pair_enabled : bool
+        Turn frequency routing on.  Needs ``pair_counts``.
+    min_pair_frequency : float
+        Share-of-edges threshold for a dedicated artisan; see
+        :func:`~goal.ml.nn.blocks.artisans.route_element_pairs`.
+    rare_pair_embed_dim : int
+        Element-embedding width inside the shared rare artisan.
+    rare_artisan : _AraceRarePairArtisan, optional
+        Pre-built rare artisan to **share** across blocks.
     avg_num_neighbors : float, optional
         Mean neighbour count used to normalise the edge → node
         aggregation.  ``None`` disables normalisation.
@@ -141,12 +160,25 @@ class AraceBlock(nn.Module):
         avg_num_neighbors: float | None = None,
         fragment_interaction_config: dict[str, typing.Any] | None = None,
         adaptive_gate_config: dict[str, typing.Any] | None = None,
+        pair_counts: typing.Mapping[tuple[int, int], int] | None = None,
+        rare_pair_enabled: bool = False,
+        min_pair_frequency: float = 0.01,
+        rare_pair_embed_dim: int = 16,
+        rare_artisan: _AraceRarePairArtisan | None = None,
+        correlation: int | None = None,
+        num_elements: int = 120,
     ) -> None:
         super().__init__()
         self.irreps_node: Irreps = Irreps(irreps_node)
         self._cutoff: float = float(cutoff)
-        self._pairs: tuple[tuple[int, int], ...] = tuple(enumerate_element_pairs(elements))
+        all_pairs: tuple[tuple[int, int], ...] = tuple(enumerate_element_pairs(elements))
+        self._pairs, self._rare_pairs = route_element_pairs(
+            all_pairs,
+            pair_counts if rare_pair_enabled else None,
+            min_pair_frequency,
+        )
         self._pair_keys: list[str] = [f"z{a}_z{b}" for a, b in self._pairs]
+        self._rare_enabled: bool = bool(rare_pair_enabled)
 
         kwargs: dict[str, typing.Any] = dict(artisan_kwargs or {})
         if artisans is not None:
@@ -154,21 +186,73 @@ class AraceBlock(nn.Module):
         else:
             self.artisans = nn.ModuleDict(
                 {
-                    key: _AracePairArtisan(
-                        irreps_node=self.irreps_node, cutoff=cutoff, **kwargs
-                    )
+                    key: _AracePairArtisan(irreps_node=self.irreps_node, cutoff=cutoff, **kwargs)
                     for key in self._pair_keys
                 }
             )
 
-        first = typing.cast(_AracePairArtisan, self.artisans[self._pair_keys[0]])
-        if first.irreps_hidden != self.irreps_node:
+        # Built only when the threshold actually routes something.  The
+        # declared ``elements`` list is the model's supported chemistry,
+        # and a shared artisan with no pairs assigned to it would be
+        # parameters that never see an edge — so a bank whose every pair
+        # clears the threshold is exactly the bank it was before routing
+        # existed.
+        self.rare_artisan: _AraceRarePairArtisan | None = None
+        if self._rare_enabled and self._rare_pairs:
+            self.rare_artisan = rare_artisan or _AraceRarePairArtisan(
+                irreps_node=self.irreps_node,
+                cutoff=cutoff,
+                pair_embed_dim=rare_pair_embed_dim,
+                **kwargs,
+            )
+
+        reference: _AracePairArtisan | None = (
+            typing.cast(_AracePairArtisan, self.artisans[self._pair_keys[0]])
+            if self._pair_keys
+            else self.rare_artisan
+        )
+        if reference is None:
             raise ValueError(
-                f"Artisan hidden_irreps ({first.irreps_hidden}) must equal the "
+                "AraceBlock has neither a dedicated artisan nor a rare one. "
+                "Either `elements` is empty, or min_pair_frequency routed every "
+                "pair to a rare artisan that was not enabled."
+            )
+        if reference.irreps_hidden != self.irreps_node:
+            raise ValueError(
+                f"Artisan hidden_irreps ({reference.irreps_hidden}) must equal the "
                 f"node irreps ({self.irreps_node}) so the ACE aggregation and "
                 "residual are well-typed."
             )
-        self.irreps_edge: Irreps = first.irreps_edge
+        self.irreps_edge: Irreps = reference.irreps_edge
+
+        # ── Many-body contraction (MACE's A → B step) ─────────────────
+        # The edge sum below produces the one-particle basis A_i.  Left
+        # alone, a round is a two-body message and a stack of rounds is a
+        # plain equivariant MPNN.  A symmetric contraction raises the
+        # body order *within* a round: B_i = Σ_n W_n[Z_i] · CG_n(A_i),
+        # with per-element couplings, which is the ingredient MACE
+        # credits for its rMD17 accuracy.
+        #
+        # ``None`` builds nothing and the round is bit-for-bit what it
+        # was before this existed.  1/2/3 are the supported orders;
+        # 3 is MACE's standard.
+        #
+        # SIZED BY THE DECLARED ELEMENTS, not by ``num_elements``.  The
+        # coupling table is indexed by atomic number, so it only has to
+        # span the elements the model declares — and the difference is
+        # not marginal: on a three-element molecule a 120-row table is
+        # 27 M parameters against 5.4 M, forty times more rows than can
+        # ever be gathered.  ``num_elements`` still sizes the *embedding*
+        # table, which is cheap.
+        self._contraction_elements: int = max(int(z) for z in elements) + 1
+        self.symmetric_contraction: SymmetricContraction | None = None
+        if correlation is not None:
+            self.symmetric_contraction = SymmetricContraction(
+                irreps_in=self.irreps_node,
+                irreps_out=self.irreps_node,
+                correlation=int(correlation),
+                num_elements=self._contraction_elements,
+            )
 
         # ACE block: aggregate edges → nodes, then linear + residual + norm.
         self.ace_linear: EquivariantLinear = EquivariantLinear(
@@ -248,6 +332,28 @@ class AraceBlock(nn.Module):
             )
         return h_new, gate_scores, aux_loss
 
+    def _contract(
+        self,
+        agg: torch.Tensor,
+        atomic_numbers: torch.Tensor,
+    ) -> torch.Tensor:
+        """Raise the body order of the aggregated basis, when configured.
+
+        Applied to ``agg`` — the one-particle basis A_i — and before the
+        linear + residual, which is where MACE puts it.  A no-op that
+        returns its input when ``correlation`` was not set.
+        """
+        if self.symmetric_contraction is None:
+            return agg
+        # Clamped for the same reason ``_AracePairArtisan`` clamps its
+        # element conditioning: with rare-pair routing on, an atom whose
+        # element is outside the declared list can reach this block, and
+        # the coupling table has no row for it.  It borrows the last
+        # row rather than raising from inside a tensor gather.
+        return self.symmetric_contraction(
+            agg, atomic_numbers.clamp(0, self._contraction_elements - 1)
+        )
+
     def forward(
         self,
         h: torch.Tensor,
@@ -306,11 +412,20 @@ class AraceBlock(nn.Module):
                 artisan = typing.cast(_AracePairArtisan, self.artisans[key])
                 h_p, e_p = artisan(dummy_feats, dummy_feats, dummy_sh, dummy_dist, dummy_z)
                 dummy_sum = dummy_sum + 0.0 * (h_p.sum() + e_p.sum())
+            if self.rare_artisan is not None:
+                h_p, e_p = self.rare_artisan(
+                    dummy_feats,
+                    dummy_feats,
+                    dummy_sh,
+                    dummy_dist,
+                    dummy_z,
+                    torch.zeros(1, 2, dtype=torch.long, device=device),
+                )
+                dummy_sum = dummy_sum + 0.0 * (h_p.sum() + e_p.sum())
             agg: torch.Tensor = torch.zeros_like(h) + dummy_sum
+            agg = self._contract(agg, atomic_numbers)
             h_local_empty: torch.Tensor = self.ace_norm(self.ace_linear(agg) + h)
-            h_new, gate_scores, aux_loss = self._apply_addons(
-                h, h_local_empty, fragment_geometry
-            )
+            h_new, gate_scores, aux_loss = self._apply_addons(h, h_local_empty, fragment_geometry)
             return h_new, e_atom + dummy_sum, gate_scores, aux_loss
 
         edge_lengths = edge_lengths.to(dtype)
@@ -325,9 +440,11 @@ class AraceBlock(nn.Module):
         h_pair_total: torch.Tensor = torch.zeros(
             E, self.irreps_node.dim, device=device, dtype=dtype
         )
+        claimed: torch.Tensor = torch.zeros(E, device=device, dtype=dtype)
         for (a, b), key in zip(self._pairs, self._pair_keys):
             artisan = typing.cast(_AracePairArtisan, self.artisans[key])
             mask: torch.Tensor = ((z_lo == a) & (z_hi == b)).to(dtype)
+            claimed = claimed + mask
             mask_col: torch.Tensor = mask.unsqueeze(-1)
             feats_a: torch.Tensor = h[row] * mask_col
             feats_b: torch.Tensor = h[col] * mask_col
@@ -338,10 +455,30 @@ class AraceBlock(nn.Module):
             tapered: torch.Tensor = e_p * mask * cut_env
             e_atom = e_atom.index_add(0, row, 0.5 * tapered)
 
+        if self.rare_artisan is not None:
+            # Every edge matches exactly one pair and the dedicated masks
+            # are disjoint, so "claimed by nobody" IS the rare set — one
+            # test instead of one per rare pair.  It also catches pairs
+            # outside `elements` entirely, which previously contributed a
+            # silent zero.
+            rare_mask: torch.Tensor = (1.0 - claimed).clamp_min(0.0)
+            rare_col: torch.Tensor = rare_mask.unsqueeze(-1)
+            h_p, e_p = self.rare_artisan(
+                h[row] * rare_col,
+                h[col] * rare_col,
+                edge_sh.to(dtype) * rare_col,
+                edge_lengths * rare_mask,
+                z_col,
+                torch.stack([z_lo, z_hi], dim=-1),
+            )
+            h_pair_total = h_pair_total + h_p * rare_col
+            e_atom = e_atom.index_add(0, row, 0.5 * (e_p * rare_mask * cut_env))
+
         # ----- ACE block: aggregate edge features onto destination nodes.
         agg = torch.zeros_like(h)
         agg = agg.index_add(0, col, h_pair_total)
         agg = agg * self.agg_norm_scale.to(dtype)
+        agg = self._contract(agg, atomic_numbers)
         h_local: torch.Tensor = self.ace_norm(self.ace_linear(agg) + h)
 
         # ----- Optional add-ons (fragment branch, then depth gate).
@@ -401,6 +538,7 @@ class AraceBackbone(nn.Module):
         avg_num_neighbors: float | None = None,
         fragment_interaction: dict[str, typing.Any] | None = None,
         adaptive_gate: dict[str, typing.Any] | None = None,
+        correlation: int | None = None,
     ) -> None:
         super().__init__()
         if num_rounds < 1:
@@ -411,17 +549,41 @@ class AraceBackbone(nn.Module):
         self._cutoff: float = float(cutoff)
 
         artisan_cfg: dict[str, typing.Any] = dict(artisan or {})
+        if "n_elements" in artisan_cfg:
+            artisan_cfg["n_elements"] = resolve_n_elements(
+                artisan_cfg["n_elements"], self._elements
+            )
         architecture: str = str(artisan_cfg.pop("architecture", "equivariant"))
         if architecture != "equivariant":
             raise ValueError(
                 "The ARACE variant is equivariant throughout; "
                 f"artisan.architecture must be 'equivariant', got '{architecture}'."
             )
-        self._artisan_kwargs: dict[str, typing.Any] = artisan_cfg
 
-        hidden_irreps: Irreps = Irreps(
-            artisan_cfg.get("hidden_irreps", "16x0e + 16x1o + 16x2e")
+        # Frequency routing.  Popped before the rest of the sub-config is
+        # forwarded to `_AracePairArtisan`, which would reject the keys.
+        # Same layout and names as the legacy backbone's `artisan_config`,
+        # so one spelling covers both model families:
+        #   artisan.rare_artisan.{enabled, min_pair_frequency, pair_embed_dim}
+        #   artisan.pair_counts   (injected by train.py)
+        rare_cfg: dict[str, typing.Any] = dict(artisan_cfg.pop("rare_artisan", {}) or {})
+        rare_pair_enabled: bool = bool(rare_cfg.get("enabled", False))
+        min_pair_frequency: float = float(rare_cfg.get("min_pair_frequency", 0.01))
+        rare_pair_embed_dim: int = int(rare_cfg.get("pair_embed_dim", 16))
+        pair_counts: dict[tuple[int, int], int] | None = parse_pair_counts(
+            artisan_cfg.pop("pair_counts", None)
         )
+        if rare_pair_enabled and pair_counts is None:
+            raise ValueError(
+                "artisan.rare_artisan.enabled is true but no artisan.pair_counts "
+                "were provided.  train.py computes them from the training set; "
+                "outside it, pass them explicitly or disable routing — routing "
+                "without counts would dedicate every pair and silently do nothing."
+            )
+        self._artisan_kwargs: dict[str, typing.Any] = artisan_cfg
+        self._rare_pair_enabled: bool = rare_pair_enabled
+
+        hidden_irreps: Irreps = Irreps(artisan_cfg.get("hidden_irreps", "16x0e + 16x1o + 16x2e"))
         self._irreps_hidden: Irreps = hidden_irreps
 
         # Optional add-on sub-configs — normalised the same way as in the
@@ -442,17 +604,40 @@ class AraceBackbone(nn.Module):
             Irreps(f"{embedding_dim}x0e"), hidden_irreps
         )
 
+        # Routing decided once, here, so every round agrees on it (and so
+        # a shared bank holds exactly the dedicated pairs).
+        all_pairs: tuple[tuple[int, int], ...] = tuple(enumerate_element_pairs(self._elements))
+        self._dedicated_pairs, self._rare_pairs = route_element_pairs(
+            all_pairs, pair_counts if rare_pair_enabled else None, min_pair_frequency
+        )
+        log_pair_routing(
+            "AraceBackbone",
+            self._elements,
+            all_pairs,
+            self._dedicated_pairs,
+            rare_pair_enabled,
+            min_pair_frequency,
+        )
+
         # Shared bank (or None → each block builds its own).
         shared_bank: nn.ModuleDict | None = None
+        shared_rare: _AraceRarePairArtisan | None = None
         if share_artisan_weights:
             shared_bank = nn.ModuleDict(
                 {
                     f"z{a}_z{b}": _AracePairArtisan(
                         irreps_node=hidden_irreps, cutoff=cutoff, **artisan_cfg
                     )
-                    for a, b in enumerate_element_pairs(self._elements)
+                    for a, b in self._dedicated_pairs
                 }
             )
+            if rare_pair_enabled and self._rare_pairs:
+                shared_rare = _AraceRarePairArtisan(
+                    irreps_node=hidden_irreps,
+                    cutoff=cutoff,
+                    pair_embed_dim=rare_pair_embed_dim,
+                    **artisan_cfg,
+                )
 
         self.blocks: nn.ModuleList = nn.ModuleList(
             AraceBlock(
@@ -464,12 +649,23 @@ class AraceBackbone(nn.Module):
                 avg_num_neighbors=avg_num_neighbors,
                 fragment_interaction_config=self._fragment_cfg,
                 adaptive_gate_config=self._adaptive_gate_cfg,
+                pair_counts=pair_counts,
+                rare_pair_enabled=rare_pair_enabled,
+                min_pair_frequency=min_pair_frequency,
+                rare_pair_embed_dim=rare_pair_embed_dim,
+                rare_artisan=shared_rare,
+                correlation=correlation,
+                num_elements=num_elements,
             )
             for _ in range(self._num_rounds)
         )
-        self.irreps_edge: Irreps = typing.cast(
-            AraceBlock, self.blocks[0]
-        ).irreps_edge
+        self._correlation: int | None = correlation
+        if correlation is not None:
+            print(
+                f"[AraceBackbone] many-body contraction: correlation={correlation} "
+                f"per round (MACE-style A → B)"
+            )
+        self.irreps_edge: Irreps = typing.cast(AraceBlock, self.blocks[0]).irreps_edge
 
     # ------------------------------------------------------------------
     # Introspection
@@ -505,14 +701,36 @@ class AraceBackbone(nn.Module):
         """Whether the adaptive depth gate is active in every block."""
         return self._adaptive_gate_cfg is not None
 
+    @property
+    def correlation(self) -> int | None:
+        """Body order of the per-round contraction, or ``None`` when off."""
+        return self._correlation
+
+    @property
+    def rare_pairs(self) -> tuple[tuple[int, int], ...]:
+        """Pairs routed to the shared rare artisan (empty when routing is off)."""
+        return self._rare_pairs
+
+    @property
+    def dedicated_pairs(self) -> tuple[tuple[int, int], ...]:
+        """Pairs that own a dedicated artisan."""
+        return self._dedicated_pairs
+
     def gates(self) -> dict[str, torch.Tensor]:
-        """Snapshot of every artisan gate, keyed ``layer{L}/{pair}``."""
+        """Snapshot of every artisan gate, keyed ``layer{L}/{pair}``.
+
+        With routing on, the shared rare artisan reports under
+        ``layer{L}/rare`` — one curve standing for every pair below the
+        frequency threshold.
+        """
         result: dict[str, torch.Tensor] = {}
         for layer_idx, block in enumerate(self.blocks):
             blk = typing.cast(AraceBlock, block)
             for (a, b), key in zip(blk._pairs, blk._pair_keys):
                 artisan = typing.cast(_AracePairArtisan, blk.artisans[key])
                 result[f"layer{layer_idx}/{pair_label(a, b)}"] = artisan.gate.detach()
+            if blk.rare_artisan is not None:
+                result[f"layer{layer_idx}/rare"] = blk.rare_artisan.gate.detach()
         return result
 
     # ------------------------------------------------------------------
@@ -676,8 +894,7 @@ class MonolithicArace(nn.Module):
             mode = "dataset"
         if mode not in ("learned", "dataset", "provided"):
             raise ValueError(
-                f"atomic_energies.mode must be 'learned', 'dataset' or "
-                f"'provided', got {mode!r}."
+                f"atomic_energies.mode must be 'learned', 'dataset' or 'provided', got {mode!r}."
             )
         if mode == "learned":
             self.atomic_energies = nn.Parameter(
@@ -690,9 +907,7 @@ class MonolithicArace(nn.Module):
                     f"atomic_energies.mode={mode!r} requires 'values' to be a "
                     "{Z: e_Z} dict (train.py injects it for mode='dataset')."
                 )
-            buf: torch.Tensor = torch.zeros(
-                num_elements_table, dtype=torch.get_default_dtype()
-            )
+            buf: torch.Tensor = torch.zeros(num_elements_table, dtype=torch.get_default_dtype())
             for z_key, e_val in dict(values).items():
                 buf[int(z_key)] = float(e_val)
             self.register_buffer("atomic_energies", buf)
@@ -800,9 +1015,7 @@ class MonolithicArace(nn.Module):
         )
 
         scale_v: torch.Tensor = self.scale.to(node_energies.dtype)
-        baseline: torch.Tensor = self.atomic_energies[graph.atomic_numbers].to(
-            node_energies.dtype
-        )
+        baseline: torch.Tensor = self.atomic_energies[graph.atomic_numbers].to(node_energies.dtype)
         node_total: torch.Tensor = scale_v * node_energies + baseline  # (N,)
 
         batch: torch.Tensor = (

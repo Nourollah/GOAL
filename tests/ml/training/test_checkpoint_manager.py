@@ -46,7 +46,7 @@ def _make_manager(
         top_k=(
             top_k
             if top_k is not None
-            else {"enabled": True, "k": 5, "metric": "val/forces_mae", "mode": "min"}
+            else {"enabled": True, "k": 5, "metric": "val_forces/forces_mae", "mode": "min"}
         ),
         interval=(
             interval
@@ -65,7 +65,7 @@ def _run_epochs(
     manager: GOALCheckpointManager,
     metric_values: list[float],
     tmp_path: Path,
-    metric: str = "val/forces_mae",
+    metric: str = "val_forces/forces_mae",
 ) -> None:
     """Simulate validation epochs with the given metric values (epoch 0, 1, 2, ...)."""
     for epoch, val in enumerate(metric_values):
@@ -86,7 +86,7 @@ class TestTopKPool:
         metric_values = [float(20 - i) * 0.1 for i in range(20)]  # 2.0, 1.9, ..., 0.1
         manager = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 5, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 5, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": False},
             last={"enabled": False},
         )
@@ -104,7 +104,7 @@ class TestTopKPool:
         metric_values = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
         manager = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 5, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 5, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": False},
             last={"enabled": False},
         )
@@ -121,7 +121,7 @@ class TestTopKPool:
         metric_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.9]
         manager = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 5, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 5, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": False},
             last={"enabled": False},
         )
@@ -223,7 +223,7 @@ class TestLastPool:
             last={"enabled": True, "filename": "last.ckpt"},
         )
         for epoch in range(10):
-            trainer = _make_trainer({"val/forces_mae": 0.5}, epoch, str(tmp_path))
+            trainer = _make_trainer({"val_forces/forces_mae": 0.5}, epoch, str(tmp_path))
             manager.on_validation_epoch_end(trainer, MagicMock())
             assert (tmp_path / "last.ckpt").exists(), f"last.ckpt missing after epoch {epoch}"
 
@@ -237,7 +237,7 @@ class TestLastPool:
         )
         call_count = 0
         for epoch in range(5):
-            trainer = _make_trainer({"val/forces_mae": 0.5}, epoch, str(tmp_path))
+            trainer = _make_trainer({"val_forces/forces_mae": 0.5}, epoch, str(tmp_path))
             original_side_effect = trainer.save_checkpoint.side_effect
 
             def counting_save(path, _epoch=epoch, _orig=original_side_effect):
@@ -266,7 +266,7 @@ class TestAtomicWrites:
             interval={"enabled": False},
             last={"enabled": True, "filename": "last.ckpt"},
         )
-        trainer = _make_trainer({"val/forces_mae": 0.5}, 0, str(tmp_path))
+        trainer = _make_trainer({"val_forces/forces_mae": 0.5}, 0, str(tmp_path))
 
         tmp_files_seen: list[str] = []
         original_replace = os.replace
@@ -293,7 +293,7 @@ class TestAtomicWrites:
             interval={"enabled": False},
             last={"enabled": True, "filename": "last.ckpt"},
         )
-        trainer = _make_trainer({"val/forces_mae": 0.5}, 0, str(tmp_path))
+        trainer = _make_trainer({"val_forces/forces_mae": 0.5}, 0, str(tmp_path))
 
         # Patch os.replace to fail after the tmp file is written
         with patch(
@@ -319,7 +319,7 @@ class TestStatePersistence:
     def test_state_json_written_after_each_epoch(self, tmp_path: Path) -> None:
         """checkpoint_state.json is written after each validation epoch."""
         manager = _make_manager(tmp_path)
-        trainer = _make_trainer({"val/forces_mae": 0.5}, 0, str(tmp_path))
+        trainer = _make_trainer({"val_forces/forces_mae": 0.5}, 0, str(tmp_path))
         manager.on_validation_epoch_end(trainer, MagicMock())
         assert (tmp_path / "checkpoint_state.json").exists()
 
@@ -328,7 +328,7 @@ class TestStatePersistence:
         # Run 10 epochs
         manager1 = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 3, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 3, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": True, "every_n_epochs": 2, "keep_last_n": 3},
             last={"enabled": True, "filename": "last.ckpt"},
         )
@@ -340,7 +340,7 @@ class TestStatePersistence:
         # Instantiate a fresh manager (simulating a crash + resume)
         manager2 = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 3, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 3, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": True, "every_n_epochs": 2, "keep_last_n": 3},
             last={"enabled": True, "filename": "last.ckpt"},
         )
@@ -360,7 +360,7 @@ class TestStatePersistence:
         # Run 6 epochs
         manager1 = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 3, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 3, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": False},
             last={"enabled": False},
         )
@@ -370,7 +370,7 @@ class TestStatePersistence:
         # Resume and run 3 more epochs
         manager2 = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 3, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 3, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": False},
             last={"enabled": False},
         )
@@ -385,7 +385,7 @@ class TestStatePersistence:
         """When checkpoint_state.json is missing, manager starts with empty pools."""
         manager = GOALCheckpointManager(
             dirpath=str(tmp_path),
-            top_k={"enabled": True, "k": 5, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 5, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": True, "every_n_epochs": 2, "keep_last_n": 5},
             last={"enabled": True, "filename": "last.ckpt"},
         )
@@ -407,7 +407,12 @@ class TestMetricMode:
         """Passing an invalid mode string raises ValueError."""
         with pytest.raises(ValueError, match="must be 'min' or 'max'"):
             GOALCheckpointManager(
-                top_k={"enabled": True, "k": 5, "metric": "val/forces_mae", "mode": "neither"}
+                top_k={
+                    "enabled": True,
+                    "k": 5,
+                    "metric": "val_forces/forces_mae",
+                    "mode": "neither",
+                }
             )
 
     def test_mode_min_mismatch_warns(self) -> None:
@@ -417,19 +422,19 @@ class TestMetricMode:
                 top_k={
                     "enabled": True,
                     "k": 5,
-                    "metric": "val/forces_cosine_similarity",
+                    "metric": "val_forces/forces_cosine_similarity",
                     "mode": "min",
                 }
             )
 
     def test_mode_max_mismatch_warns(self) -> None:
-        """mode='max' for a min-type metric (val/forces_mae) warns."""
+        """mode='max' for a min-type metric (val_forces/forces_mae) warns."""
         with pytest.warns(UserWarning, match="typically minimised"):
             GOALCheckpointManager(
                 top_k={
                     "enabled": True,
                     "k": 5,
-                    "metric": "val/forces_mae",
+                    "metric": "val_forces/forces_mae",
                     "mode": "max",
                 }
             )
@@ -441,7 +446,7 @@ class TestMetricMode:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             GOALCheckpointManager(
-                top_k={"enabled": True, "k": 5, "metric": "val/forces_mae", "mode": "min"}
+                top_k={"enabled": True, "k": 5, "metric": "val_forces/forces_mae", "mode": "min"}
             )
 
     def test_unknown_metric_no_warning(self) -> None:
@@ -470,24 +475,24 @@ class TestPoolIndependence:
         #            But epoch 0 is also in top-k → must NOT be deleted
         manager = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 1, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 1, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": True, "every_n_epochs": 2, "keep_last_n": 1},
             last={"enabled": False},
         )
 
         # Epoch 0: value=0.1 — saved to top-k; also an interval epoch (0 % 2 == 0)
-        trainer0 = _make_trainer({"val/forces_mae": 0.1}, 0, str(tmp_path))
+        trainer0 = _make_trainer({"val_forces/forces_mae": 0.1}, 0, str(tmp_path))
         manager.on_validation_epoch_end(trainer0, MagicMock())
 
         top_k_path_after_e0 = manager.top_k_pool[0][1]
 
         # Epoch 1: skipped by interval; value=0.5 (worse than pool) → not saved to top-k
-        trainer1 = _make_trainer({"val/forces_mae": 0.5}, 1, str(tmp_path))
+        trainer1 = _make_trainer({"val_forces/forces_mae": 0.5}, 1, str(tmp_path))
         manager.on_validation_epoch_end(trainer1, MagicMock())
 
         # Epoch 2: interval save at epoch 2; interval pool at cap (1) → evict epoch 0
         #          But epoch 0 is in top-k → file must survive
-        trainer2 = _make_trainer({"val/forces_mae": 0.9}, 2, str(tmp_path))
+        trainer2 = _make_trainer({"val_forces/forces_mae": 0.9}, 2, str(tmp_path))
         manager.on_validation_epoch_end(trainer2, MagicMock())
 
         assert Path(
@@ -504,22 +509,22 @@ class TestPoolIndependence:
         #          But epoch 0 is still in interval pool → file must survive
         manager = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 1, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 1, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": True, "every_n_epochs": 2, "keep_last_n": 5},
             last={"enabled": False},
         )
 
-        trainer0 = _make_trainer({"val/forces_mae": 0.5}, 0, str(tmp_path))
+        trainer0 = _make_trainer({"val_forces/forces_mae": 0.5}, 0, str(tmp_path))
         manager.on_validation_epoch_end(trainer0, MagicMock())
 
         interval_path_e0 = manager.interval_pool[0] if manager.interval_pool else None
 
         # Epoch 1: no interval
-        trainer1 = _make_trainer({"val/forces_mae": 0.9}, 1, str(tmp_path))
+        trainer1 = _make_trainer({"val_forces/forces_mae": 0.9}, 1, str(tmp_path))
         manager.on_validation_epoch_end(trainer1, MagicMock())
 
         # Epoch 2: better top-k and new interval → top-k evicts epoch 0 file
-        trainer2 = _make_trainer({"val/forces_mae": 0.1}, 2, str(tmp_path))
+        trainer2 = _make_trainer({"val_forces/forces_mae": 0.1}, 2, str(tmp_path))
         manager.on_validation_epoch_end(trainer2, MagicMock())
 
         if interval_path_e0 is not None:
@@ -535,12 +540,12 @@ class TestPoolIndependence:
         #          Now epoch 0 should finally be deleted
         manager = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 1, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 1, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": True, "every_n_epochs": 2, "keep_last_n": 1},
             last={"enabled": False},
         )
 
-        trainer0 = _make_trainer({"val/forces_mae": 0.5}, 0, str(tmp_path))
+        trainer0 = _make_trainer({"val_forces/forces_mae": 0.5}, 0, str(tmp_path))
         manager.on_validation_epoch_end(trainer0, MagicMock())
 
         # Find the epoch-0 file (it's in both top-k and interval)
@@ -553,13 +558,13 @@ class TestPoolIndependence:
         # What matters: the interval file is deleted when evicted from both pools.
 
         # Epoch 1: nothing special
-        trainer1 = _make_trainer({"val/forces_mae": 0.9}, 1, str(tmp_path))
+        trainer1 = _make_trainer({"val_forces/forces_mae": 0.9}, 1, str(tmp_path))
         manager.on_validation_epoch_end(trainer1, MagicMock())
 
         # Epoch 2: better than current top-k (0.1 < 0.5) AND new interval epoch
         # → top-k evicts epoch-0-top-k file (but only if not in interval)
         # → interval evicts epoch-0-interval file (but only if not in top-k)
-        trainer2 = _make_trainer({"val/forces_mae": 0.1}, 2, str(tmp_path))
+        trainer2 = _make_trainer({"val_forces/forces_mae": 0.1}, 2, str(tmp_path))
         manager.on_validation_epoch_end(trainer2, MagicMock())
 
         # After epoch 2: epoch-0's interval file evicted (interval pool capacity=1)
@@ -571,3 +576,63 @@ class TestPoolIndependence:
             assert not Path(
                 e0_interval_path
             ).exists(), "Interval-only file should be deleted once evicted from both pools"
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — pre-split metric names still resolve
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyMetricNames:
+    """Energy and force curves moved out of ``{split}/`` into
+    ``{split}_energy/`` and ``{split}_forces/``.  A config written against
+    the old key would otherwise silently stop saving top-k checkpoints, so
+    the old name is translated to the sectioned one."""
+
+    def test_old_key_is_translated(self, tmp_path: Path) -> None:
+        manager = _make_manager(
+            tmp_path,
+            top_k={"enabled": True, "k": 2, "metric": "val/forces_mae", "mode": "min"},
+            interval={"enabled": False},
+            last={"enabled": False},
+        )
+        _run_epochs(manager, [0.5, 0.4], tmp_path, metric="val_forces/forces_mae")
+
+        assert manager.top_k_metric == "val_forces/forces_mae"
+        saved = sorted(f.name for f in tmp_path.glob("*.ckpt"))
+        assert len(saved) == 2, saved
+
+    def test_unknown_key_is_still_skipped(self, tmp_path: Path) -> None:
+        """The alias must not paper over a genuine typo."""
+        manager = _make_manager(
+            tmp_path,
+            top_k={"enabled": True, "k": 2, "metric": "val/force_mae", "mode": "min"},
+            interval={"enabled": False},
+            last={"enabled": False},
+        )
+        _run_epochs(manager, [0.5], tmp_path, metric="val_forces/forces_mae")
+
+        assert manager.top_k_metric == "val/force_mae"
+        assert list(tmp_path.glob("*.ckpt")) == []
+
+    def test_total_needs_no_translation(self, tmp_path: Path) -> None:
+        """``total`` never moved — it is still in the plain section."""
+        from goal.ml.training.callbacks.checkpoint_manager import _legacy_key
+
+        assert _legacy_key("val/total") is None
+        assert _legacy_key("val/forces_mae") == "val_forces/forces_mae"
+        assert _legacy_key("val/energy_mae_per_atom") == "val_energy/energy_mae_per_atom"
+        # Already sectioned, or not a metric key at all.
+        assert _legacy_key("val_forces/forces_mae") is None
+        assert _legacy_key("forces_mae") is None
+
+    def test_mode_mismatch_warning_matches_on_the_leaf_name(self) -> None:
+        with pytest.warns(UserWarning, match="typically minimised"):
+            GOALCheckpointManager(
+                top_k={
+                    "enabled": True,
+                    "k": 5,
+                    "metric": "test_energy/energy_mae_per_atom",
+                    "mode": "max",
+                }
+            )

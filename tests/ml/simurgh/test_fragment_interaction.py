@@ -153,7 +153,7 @@ class TestFragmentIndexComputation:
         first = compute_fragment_index(positions, numbers)
         second = compute_fragment_index(positions, numbers)
         assert torch.equal(first, second)
-        present = set(int(v) for v in first.unique())
+        present = {int(v) for v in first.unique()}
         assert present == set(range(int(first.max()) + 1))
 
     def test_periodic_molecule_across_boundary_stays_one_fragment(self) -> None:
@@ -208,7 +208,7 @@ class TestFragmentIndexBatching:
 
         labels = batch.fragment_index
         assert int(labels.max()) + 1 == 4
-        assert set(int(v) for v in labels.unique()) == {0, 1, 2, 3}
+        assert {int(v) for v in labels.unique()} == {0, 1, 2, 3}
         assert torch.equal(labels[:5], torch.zeros(5, dtype=torch.long))
         assert torch.equal(labels[5:8], torch.ones(3, dtype=torch.long))
         assert torch.equal(labels[8:11], torch.full((3,), 2, dtype=torch.long))
@@ -221,9 +221,9 @@ class TestFragmentIndexBatching:
 
         for frag in batch.fragment_index.unique():
             graphs_touched = batch.batch[batch.fragment_index == frag].unique()
-            assert graphs_touched.numel() == 1, (
-                f"fragment {int(frag)} spans graphs {graphs_touched.tolist()}"
-            )
+            assert (
+                graphs_touched.numel() == 1
+            ), f"fragment {int(frag)} spans graphs {graphs_touched.tolist()}"
 
     def test_unlabelled_graphs_carry_no_field(self) -> None:
         graph = _build_graph(*_methane_positions(), cutoff=CUTOFF)
@@ -264,9 +264,7 @@ def _round_inputs(
     from e3nn.o3 import spherical_harmonics
 
     torch.manual_seed(seed)
-    h: torch.Tensor = torch.randn(
-        graph.pos.shape[0], rnd.irreps_node.dim, dtype=torch.float64
-    )
+    h: torch.Tensor = torch.randn(graph.pos.shape[0], rnd.irreps_node.dim, dtype=torch.float64)
     edge_sh: torch.Tensor = spherical_harmonics(
         rnd.irreps_edge, graph.edge_vectors, normalize=True, normalization="component"
     )
@@ -284,9 +282,7 @@ def _geometry(module: EquivariantFragmentInteraction, graph: AtomicGraph):
 def _standalone_module(**overrides) -> EquivariantFragmentInteraction:
     torch.manual_seed(11)
     cfg = {**ACTIVE_FRAGMENT_CONFIG, **overrides}
-    return EquivariantFragmentInteraction(
-        irreps_node=HIDDEN_IRREPS, cutoff=CUTOFF, **cfg
-    ).double()
+    return EquivariantFragmentInteraction(irreps_node=HIDDEN_IRREPS, cutoff=CUTOFF, **cfg).double()
 
 
 # ----------------------------------------------------------------------
@@ -384,9 +380,9 @@ class TestSingleFragment:
             fragment_geometry=_geometry(enabled.fragment_interaction, graph),
         )[0]
 
-        assert torch.allclose(h_frag, h_plain, atol=1e-10), (
-            f"max deviation {float((h_frag - h_plain).abs().max()):.3e}"
-        )
+        assert torch.allclose(
+            h_frag, h_plain, atol=1e-10
+        ), f"max deviation {float((h_frag - h_plain).abs().max()):.3e}"
 
 
 # ----------------------------------------------------------------------
@@ -491,9 +487,9 @@ class TestTwoFragments:
         )
         batched = module(torch.cat([h_a, h_b]), _geometry(module, batched_graph))
 
-        assert torch.allclose(alone, batched[:3], atol=1e-12), (
-            "graph A's correction changed when graph B joined the batch"
-        )
+        assert torch.allclose(
+            alone, batched[:3], atol=1e-12
+        ), "graph A's correction changed when graph B joined the batch"
 
 
 # ----------------------------------------------------------------------
@@ -551,14 +547,17 @@ class TestFragmentInteractionEquivariance:
         probe = torch.randn(8, 3, dtype=torch.float64)
         sh_irreps = Irreps("1x0e + 1x1o + 1x2e")
         sh_floor = (
-            spherical_harmonics(
-                sh_irreps, probe @ rotation.T, normalize=True, normalization="component"
+            (
+                spherical_harmonics(
+                    sh_irreps, probe @ rotation.T, normalize=True, normalization="component"
+                )
+                - spherical_harmonics(sh_irreps, probe, normalize=True, normalization="component")
+                @ sh_irreps.D_from_matrix(rotation).double().T
             )
-            - spherical_harmonics(
-                sh_irreps, probe, normalize=True, normalization="component"
-            )
-            @ sh_irreps.D_from_matrix(rotation).double().T
-        ).abs().max().item()
+            .abs()
+            .max()
+            .item()
+        )
 
         delta = module(h, _geometry(module, _labelled_graph(positions, numbers)))
         delta_rot = module(
@@ -589,10 +588,7 @@ class TestFragmentInteractionEquivariance:
         assert e_diff < 1e-5, f"Energy not invariant: {e_diff:.3e}"
 
         f_diff = (
-            (out1["forces"].detach() - out0["forces"].detach() @ rotation.T)
-            .abs()
-            .max()
-            .item()
+            (out1["forces"].detach() - out0["forces"].detach() @ rotation.T).abs().max().item()
         )
         assert f_diff < 1e-4, f"Forces not equivariant: {f_diff:.3e}"
 
@@ -605,9 +601,7 @@ class TestFragmentInteractionEquivariance:
 
         shift = torch.tensor([3.7, -1.2, 0.8], dtype=torch.float64)
         out0 = _run(backbone, Batch.from_data_list([_labelled_graph(positions, numbers)]))
-        out1 = _run(
-            backbone, Batch.from_data_list([_labelled_graph(positions + shift, numbers)])
-        )
+        out1 = _run(backbone, Batch.from_data_list([_labelled_graph(positions + shift, numbers)]))
 
         e_diff = (out0["energy"] - out1["energy"]).abs().max().item()
         assert e_diff < 1e-8, f"Energy not translation invariant: {e_diff:.3e}"

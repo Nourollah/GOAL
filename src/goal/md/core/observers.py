@@ -36,6 +36,7 @@ class TrajectoryObserver:
         self._traj.write()
 
     def close(self) -> None:
+        """Close the underlying ASE trajectory file (also called by ``__del__``)."""
         self._traj.close()
 
     def __del__(self) -> None:

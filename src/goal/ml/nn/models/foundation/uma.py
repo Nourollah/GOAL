@@ -175,6 +175,33 @@ class UMAFinetune(FoundationModelBackbone):
     # ------------------------------------------------------------------
 
     def forward(self, graph: AtomicGraph) -> dict[str, torch.Tensor]:
+        """Run UMA and adapt its output to GOAL's ``{energy, forces, num_atoms}``.
+
+        The graph is converted to a FairChem-style batch dict (positions
+        detached and cast to ``self.torch_dtype``, plus the per-graph
+        ``dataset`` embedding name from ``head``), the wrapped model is
+        evaluated under ``torch.enable_grad()``, and its ``energy`` /
+        ``forces`` are cast back to ``graph.pos.dtype``.  Forces are
+        whatever the upstream model returns; no autograd is done here.
+
+        Parameters
+        ----------
+        graph : AtomicGraph
+            Batched input graph; reads ``pos`` ``(N, 3)``, ``z`` ``(N,)``,
+            ``edge_index`` ``(2, E)``, ``batch`` ``(N,)`` and optional
+            ``cell``.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            ``'energy'`` ``(B,)`` in eV, ``'forces'`` ``(N, 3)`` in eV/Å
+            and ``'num_atoms'`` ``(B,)`` (float atom counts per graph).
+
+        Raises
+        ------
+        KeyError
+            If the upstream output lacks ``'energy'`` or ``'forces'``.
+        """
         data = self._adapt_input(graph)
         with torch.enable_grad():
             raw = self._model(data)
@@ -191,15 +218,21 @@ class UMAFinetune(FoundationModelBackbone):
         """
         device = graph.pos.device
         n_atoms = graph.pos.shape[0]
-        batch = graph.batch if getattr(graph, "batch", None) is not None else torch.zeros(
-            n_atoms, dtype=torch.long, device=device
+        batch = (
+            graph.batch
+            if getattr(graph, "batch", None) is not None
+            else torch.zeros(n_atoms, dtype=torch.long, device=device)
         )
         num_graphs = int(batch.max().item()) + 1 if n_atoms > 0 else 1
         return {
             "pos": graph.pos.detach().to(self.torch_dtype),
             "atomic_numbers": graph.z.to(torch.long),
             "edge_index": graph.edge_index.to(torch.long),
-            "cell": (graph.cell.to(self.torch_dtype) if getattr(graph, "cell", None) is not None else None),
+            "cell": (
+                graph.cell.to(self.torch_dtype)
+                if getattr(graph, "cell", None) is not None
+                else None
+            ),
             "batch": batch,
             "natoms": scatter(
                 torch.ones(n_atoms, dtype=torch.long, device=device), batch, dim=0, reduce="sum"
@@ -225,8 +258,10 @@ class UMAFinetune(FoundationModelBackbone):
         energy = energy.to(target_dtype).reshape(-1)
         forces = forces.to(target_dtype)
         device = graph.pos.device
-        batch = graph.batch if getattr(graph, "batch", None) is not None else torch.zeros(
-            graph.pos.shape[0], dtype=torch.long, device=device
+        batch = (
+            graph.batch
+            if getattr(graph, "batch", None) is not None
+            else torch.zeros(graph.pos.shape[0], dtype=torch.long, device=device)
         )
         num_atoms = scatter(
             torch.ones(graph.pos.shape[0], device=device, dtype=energy.dtype),

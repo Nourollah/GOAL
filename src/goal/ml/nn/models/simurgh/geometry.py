@@ -20,7 +20,6 @@ non-periodic systems ``S_ij`` is zero and the shift term vanishes.
 
 from __future__ import annotations
 
-
 import torch
 
 from goal.ml.data.graph import AtomicGraph

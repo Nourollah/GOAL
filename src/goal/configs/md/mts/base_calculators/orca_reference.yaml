@@ -1,0 +1,9 @@
+# ORCA as reference (base) calculator for MTS
+_target_: goal.md.core.calculator_factory.CalculatorFactory.create
+_convert_: none
+
+key: orca
+orca_path: ??? # ABSOLUTE path to the orca executable (a bare `orca` may be the GNOME screen reader)
+keywords: "EnGrad wB97M-V def2-TZVPD RIJCOSX TightSCF DEFGRID3"
+charge: 0
+multiplicity: 1

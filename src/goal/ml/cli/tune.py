@@ -11,64 +11,32 @@ Supports three modes, selected automatically from the config:
 
 Usage::
 
-    # Basic: find optimal LR
-    goal-tune hparams_search=basic
+    # Default: the shipped ARACE search (src/goal/configs/ml/simurgh_gmd26_hpo.yaml)
+    goal-tune
 
-    # Advanced: Ray Tune with ASHA + Optuna
-    goal-tune hparams_search=ray_tune
-
-    # W&B Sweeps: Bayesian optimisation
-    goal-tune hparams_search=wandb_sweep
+    # Any experiment + a generic preset, merged at the top level.  The
+    # presets live in goal/configs/hparams_search/, one level above the
+    # experiment configs, so put goal/configs on the search path (like the
+    # debug presets of goal-train):
+    goal-tune --config-dir src/goal/configs --config-name simurgh_gmd26 +hparams_search@_global_=basic
+    goal-tune --config-dir src/goal/configs --config-name simurgh_gmd26 +hparams_search@_global_=ray_tune
+    goal-tune --config-dir src/goal/configs --config-name simurgh_gmd26 +hparams_search@_global_=wandb_sweep
 """
 
 from __future__ import annotations
 
 import typing
-from pathlib import Path
 
 import hydra
 import lightning as L
-import torch
-from lightning import Callback
-from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig, OmegaConf
 
-from goal.ml.cli import CONFIGS_DIR
+from goal.ml.cli import CONFIGS_ML_DIR
+from goal.ml.cli.builders import build_head, build_loss
 from goal.ml.data.datamodule import GOALDataModule
-from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
-from goal.ml.training.loss import CompositeLoss, WeightedLoss
+from goal.ml.registry import BACKBONE_REGISTRY
+from goal.ml.training.loss import CompositeLoss
 from goal.ml.training.module import GOALModule
-
-
-def _build_loss(cfg: DictConfig) -> CompositeLoss:
-    """Construct the composite loss from config."""
-    losses: list[WeightedLoss] = []
-    for loss_cfg in cfg.training.losses:
-        loss_cls: typing.Any = LOSS_REGISTRY.get(loss_cfg.name)
-        fn_spec: typing.Any = loss_cfg.get("fn", "mse")
-
-        if isinstance(fn_spec, str):
-            losses.append(
-                WeightedLoss(
-                    loss_cls(loss_fn=fn_spec),
-                    weight=loss_cfg.weight,
-                    label=loss_cfg.name,
-                )
-            )
-        else:
-            for sub in fn_spec:
-                sub_name: str = sub["name"] if isinstance(sub, dict) else sub.name
-                sub_weight: float = float(sub["weight"] if isinstance(sub, dict) else sub.weight)
-                fn_label: str = sub_name.rsplit(".", 1)[-1]
-                losses.append(
-                    WeightedLoss(
-                        loss_cls(loss_fn=sub_name),
-                        weight=sub_weight,
-                        label=f"{loss_cfg.name}_{fn_label}",
-                        group=loss_cfg.name,
-                    )
-                )
-    return CompositeLoss(losses)
 
 
 def _build_components(cfg: DictConfig) -> tuple[typing.Any, typing.Any, CompositeLoss]:
@@ -78,12 +46,8 @@ def _build_components(cfg: DictConfig) -> tuple[typing.Any, typing.Any, Composit
         k: v for k, v in cfg.model.backbone.items() if k != "name"
     }
     backbone: typing.Any = backbone_cls(**backbone_kwargs)
-
-    head_cls: typing.Any = HEAD_REGISTRY.get(cfg.model.head.name)
-    head_kwargs: dict[str, typing.Any] = {k: v for k, v in cfg.model.head.items() if k != "name"}
-    head: typing.Any = head_cls(**head_kwargs)
-
-    loss: CompositeLoss = _build_loss(cfg)
+    head: typing.Any = build_head(cfg, backbone)  # None for monolithic (head: null)
+    loss: CompositeLoss = build_loss(cfg)
     return backbone, head, loss
 
 
@@ -132,7 +96,7 @@ def _ray_train_fn(config: dict[str, typing.Any], base_cfg: DictConfig) -> None:
     report(val_metrics)
 
 
-@hydra.main(version_base=None, config_path=CONFIGS_DIR, config_name="train")
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_gmd26_hpo")
 def tune(cfg: DictConfig) -> None:
     """GOAL hyperparameter tuning entry point.
 
@@ -142,9 +106,12 @@ def tune(cfg: DictConfig) -> None:
     hp_cfg: DictConfig | None = cfg.get("hparams_search")
     if hp_cfg is None:
         raise ValueError(
-            "No hparams_search config found. Use:\n"
-            "  goal-tune hparams_search=basic     # Lightning Tuner\n"
-            "  goal-tune hparams_search=ray_tune   # Ray Tune"
+            "No hparams_search section in this config. Either run the shipped "
+            "search (`goal-tune`, config simurgh_gmd26_hpo) or attach a preset:\n"
+            "  goal-tune --config-dir src/goal/configs --config-name <experiment> "
+            "+hparams_search@_global_=basic      # Lightning Tuner\n"
+            "  goal-tune --config-dir src/goal/configs --config-name <experiment> "
+            "+hparams_search@_global_=ray_tune   # Ray Tune"
         )
 
     method: str = hp_cfg.get("method", "tuner")

@@ -90,28 +90,44 @@ class DualCalculator(Calculator, abc.ABC):
 
         super().calculate(atoms, properties, system_changes)
 
-        # Compute with both
-        base_results = self.compute_base(self.atoms)
-        ml_results = self.compute_ml(self.atoms)
-
-        # Update state
-        self.state.base_forces = base_results.get("forces")
-        self.state.base_energy = base_results.get("energy")
-        self.state.ml_forces = ml_results.get("forces")
-        self.state.ml_energy = ml_results.get("energy")
-
-        # Compute error metrics
-        self._compute_errors()
-
-        # Decide which to use
+        # Decide first, so the expensive base calculator runs only when
+        # this step needs it: on base steps, and on the re-calibration
+        # steps a subclass asks for through ``reference_needed``.
         active = self.decide_calculator(self.atoms)
         self.state.active_calculator = active
 
+        base_results: dict[str, typing.Any] | None = None
+        if active == "base" or self.reference_needed(active):
+            base_results = self.compute_base(self.atoms)
+            self.state.metrics["base_calls"] = self.state.metrics.get("base_calls", 0) + 1
+        ml_results = self.compute_ml(self.atoms)
+        self.state.metrics["ml_calls"] = self.state.metrics.get("ml_calls", 0) + 1
+
+        # Update state.  A step without a reference clears the base fields
+        # so a stale reference from an older geometry is never compared
+        # against the current ML prediction.
+        self.state.base_forces = base_results.get("forces") if base_results else None
+        self.state.base_energy = base_results.get("energy") if base_results else None
+        self.state.ml_forces = ml_results.get("forces")
+        self.state.ml_energy = ml_results.get("energy")
+
+        # Compute error metrics (only when a reference was computed)
+        self._compute_errors()
+
         # Return results from active calculator
-        if active == "base":
+        if active == "base" and base_results is not None:
             self.results.update(base_results)
         else:
             self.results.update(ml_results)
+
+    def reference_needed(self, active: str) -> bool:
+        """Whether to also run the base calculator on an ``"ml"`` step.
+
+        The default never does: once the ML model is active the base
+        (e.g. QM) calculator is skipped entirely.  Subclasses override
+        this to request periodic re-calibration points.
+        """
+        return False
 
     def _compute_errors(self) -> None:
         """Compute force RMSE and energy MAE."""
@@ -135,4 +151,6 @@ class DualCalculator(Calculator, abc.ABC):
             "energy_mae": self.state.energy_mae,
             "active_calculator": self.state.active_calculator,
             "ml_uncertainty": self.state.ml_uncertainty,
+            "base_calls": self.state.metrics.get("base_calls", 0),
+            "ml_calls": self.state.metrics.get("ml_calls", 0),
         }

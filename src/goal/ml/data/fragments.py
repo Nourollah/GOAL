@@ -7,16 +7,16 @@ exchange equivariant messages, and the result is handed back to every
 atom.  What counts as "one unit" is a modelling choice, so five schemes
 are available, selected by ``data.fragment_scheme``:
 
-=================== ================================================== =========
-scheme              splits on                                          needs rdkit
-=================== ================================================== =========
-``connected``       distance graph at ``covalent_cutoff``              no
+==================== ================================================= ===========
+scheme               splits on                                         needs rdkit
+==================== ================================================= ===========
+``connected``        distance graph at ``covalent_cutoff``             no
 ``rdkit_components`` connected components of the *perceived* molecule  yes
-``rotatable``       every non-ring single bond between heavy atoms     yes
-``brics``           BRICS retrosynthetic rules (``rdkit.Chem.BRICS``)   yes
-``recap``           RECAP cleavage rules (``rdkit.Chem.Recap``)         yes
-``custom``          your own SMARTS bond patterns (``smarts=``)         yes
-=================== ================================================== =========
+``rotatable``        every non-ring single bond between heavy atoms    yes
+``brics``            BRICS retrosynthetic rules (``rdkit.Chem.BRICS``) yes
+``recap``            RECAP cleavage rules (``rdkit.Chem.Recap``)       yes
+``custom``           your own SMARTS bond patterns (``smarts=``)       yes
+==================== ================================================= ===========
 
 Which to pick depends on what you want the module to model:
 
@@ -263,6 +263,60 @@ def compute_fragment_index(
     return labels.to(device)
 
 
+def attach_fragment_index(
+    graph: typing.Any,
+    covalent_cutoff: float = 1.8,
+    scheme: str = "connected",
+    charge: int = 0,
+    on_failure: str = "fallback",
+    smarts: typing.Sequence[str] | None = None,
+    keep_groups: typing.Sequence[str] | None = None,
+) -> typing.Any:
+    """Label *graph* with ``fragment_index`` in place, and return it.
+
+    The graph-level counterpart to :func:`compute_fragment_index`: it
+    reads the positions, species, cell and pbc off an ``AtomicGraph``
+    and writes the labels back onto it.  Already-labelled graphs are
+    left alone, so calling it twice costs nothing — which is what lets a
+    dataset holding its graphs in memory attach labels lazily on first
+    access and keep them for the rest of the run.
+
+    Shared by both dataset hierarchies: ``BaseAtomicDataset`` (the
+    ``goal.ml.data.datasets`` loaders) and ``BenchmarkDataset`` (the
+    ``goal.ml.data.benchmarks`` adapters), so the two cannot drift apart on
+    what a fragment label means.
+
+    Parameters
+    ----------
+    graph : AtomicGraph
+        Mutated in place; also returned for convenience.
+    covalent_cutoff, scheme, charge, on_failure, smarts, keep_groups
+        As in :func:`compute_fragment_index`.
+    """
+    if graph.get("fragment_index", None) is not None:
+        return graph
+
+    # PyG stores a single graph's cell as ``(1, 3, 3)`` (see
+    # ``AtomicGraph.__init__``); the fragment code works in ``(3, 3)``.
+    cell: torch.Tensor | None = graph.get("cell", None)
+    if cell is not None and cell.dim() == 3 and cell.shape[0] == 1:
+        cell = cell.squeeze(0)
+
+    graph.fragment_index = compute_fragment_index(
+        positions=graph.pos,
+        atomic_numbers=graph.z,
+        covalent_cutoff=covalent_cutoff,
+        cell=cell,
+        pbc=graph.get("pbc", None),
+        scheme=scheme,
+        charge=charge,
+        on_failure=on_failure,
+        smarts=smarts,
+        keep_groups=keep_groups,
+    )
+    return graph
+
+
 def validate_fragment_config(
     scheme: str,
     smarts: typing.Sequence[str] | None = None,
@@ -421,7 +475,8 @@ def _rdkit_labels(
     # fragmentation, whatever the coordinates did in between.
     pairs = torch.stack([bond_src, bond_dst], dim=-1) if bond_src.numel() else None
     bond_key: tuple[tuple[int, int], ...] = (
-        tuple(sorted({(min(a, b), max(a, b)) for a, b in pairs.tolist()})) if pairs is not None
+        tuple(sorted({(min(a, b), max(a, b)) for a, b in pairs.tolist()}))
+        if pairs is not None
         else ()
     )
     key = (scheme, int(charge), elements, bond_key, smarts, keep_groups)
@@ -450,7 +505,19 @@ def _rdkit_labels(
     mol = Chem.MolFromXYZBlock(block)
     if mol is None:
         raise ValueError("rdkit could not read the structure as an XYZ block.")
-    rdDetermineBonds.DetermineBonds(mol, charge=int(charge))
+    # Perception writes its complaints straight to stderr from C++, where
+    # neither ``warnings`` nor logging can reach them.  On a corpus with a
+    # non-trivial failure rate (measured: ~7% of OMol25 rows) that is both
+    # a flood of unattributable lines and a real cost — 300 structures/s
+    # became 70 with the logger live.  Nothing is lost by blocking it:
+    # a failure still raises, and ``compute_fragment_index`` reports the
+    # exception message through ``_warn_once``.  ``BlockLogs`` restores
+    # whatever state was there on exit, so a caller who wants rdkit's
+    # chatter elsewhere keeps it.
+    from rdkit.rdBase import BlockLogs
+
+    with BlockLogs():
+        rdDetermineBonds.DetermineBonds(mol, charge=int(charge))
 
     # Atoms that must stay together, matched once and used twice: to veto
     # cuts inside a group, and to merge labels afterwards.
@@ -460,9 +527,7 @@ def _rdkit_labels(
     if protected:
         break_bonds = _drop_protected_bonds(mol, break_bonds, protected)
 
-    fragmented = (
-        Chem.FragmentOnBonds(mol, break_bonds, addDummies=False) if break_bonds else mol
-    )
+    fragmented = Chem.FragmentOnBonds(mol, break_bonds, addDummies=False) if break_bonds else mol
 
     labels = torch.zeros(n_atoms, dtype=torch.long)
     for group_idx, group in enumerate(Chem.GetMolFrags(fragmented)):
@@ -539,9 +604,7 @@ def _merge_by_groups(
 
     if not parent:
         return labels
-    return torch.tensor(
-        [find(int(v)) for v in labels.tolist()], dtype=torch.long
-    )
+    return torch.tensor([find(int(v)) for v in labels.tolist()], dtype=torch.long)
 
 
 def _scheme_break_bonds(

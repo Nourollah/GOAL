@@ -1,8 +1,0 @@
-# ML model for on-the-fly learning
-_target_: goal.md.core.calculator_factory.CalculatorFactory.create
-_convert_: none
-
-method: goal_model
-checkpoint: ??? # Initial model checkpoint
-device: cuda
-cutoff: 5.0

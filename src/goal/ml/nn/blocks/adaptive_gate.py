@@ -240,6 +240,7 @@ class AdaptiveDepthGate(nn.Module):
         return h_next, aux_loss, gate_scores
 
     def extra_repr(self) -> str:
+        """Summarise the gate sizes, threshold and aux-loss weight for ``repr``."""
         return (
             f"n_l0={self.n_l0}, n_scalar={self.n_scalar}, "
             f"n_gates={self.n_gates}, per_irrep={self.per_irrep}, "

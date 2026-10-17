@@ -358,6 +358,61 @@ class MTSSimulation:
             "energy_history": result.energy_history,
         }
 
+    @staticmethod
+    def _build_online_learner(cfg: typing.Any, mts_cfg: MTSConfig) -> Calculator:
+        """``QMLearnerCalculator`` from the ``base_calculator`` / ``ml_calculator``
+        / ``learner`` sections of an online-learning config."""
+        from goal.md.core.calculator_factory import CalculatorFactory
+        from goal.md.mts.dual_calculator.qm_ml_learner import (
+            AlwaysBasePolicy,
+            GOALOnlineFinetuner,
+            QMLearnerCalculator,
+            StepFractionPolicy,
+            ThresholdPolicy,
+        )
+
+        base_calc = CalculatorFactory.from_config(cfg.base_calculator, default_key="orca")
+        ml_calc = CalculatorFactory.from_config(cfg.ml_calculator, default_key="goal_model")
+
+        learner: dict[str, typing.Any] = dict(cfg.get("learner") or {})
+        policy_cfg: dict[str, typing.Any] = dict(learner.get("policy") or {})
+        policy_type: str = str(policy_cfg.pop("type", "threshold"))
+        policy: typing.Any
+        if policy_type == "threshold":
+            policy = ThresholdPolicy(**policy_cfg)
+        elif policy_type == "step_fraction":
+            policy_cfg.setdefault("total_steps", mts_cfg.total_steps * mts_cfg.mts_ratio)
+            policy = StepFractionPolicy(**policy_cfg)
+        elif policy_type == "always_base":
+            policy = AlwaysBasePolicy()
+        else:
+            raise ValueError(
+                f"learner.policy.type must be 'threshold', 'step_fraction' or "
+                f"'always_base', got {policy_type!r}."
+            )
+
+        fine_tuner = None
+        ft_cfg: dict[str, typing.Any] = dict(learner.get("fine_tuning") or {})
+        if ft_cfg and getattr(ml_calc, "module", None) is not None:
+            if getattr(ml_calc, "cutoff", None) is not None:
+                ft_cfg["cutoff"] = ml_calc.cutoff  # graphs come from the calculator
+            fine_tuner = GOALOnlineFinetuner(ml_calc, **ft_cfg)
+        elif ft_cfg:
+            logger.warning(
+                "learner.fine_tuning is set but %s is not a GOAL model; the ML "
+                "calculator will not be fine-tuned.",
+                type(ml_calc).__name__,
+            )
+
+        return QMLearnerCalculator(
+            base_calculator=base_calc,
+            ml_calculator=ml_calc,
+            policy=policy,
+            fine_tuner=fine_tuner,
+            eval_interval=int(learner.get("eval_interval", 100)),
+            data_buffer_size=int(learner.get("data_buffer_size", 5000)),
+        )
+
     def _run_with_ipi(self) -> dict[str, typing.Any]:
         """Delegate to i-pi's native engine (future compatibility stub)."""
         raise NotImplementedError(
@@ -400,26 +455,36 @@ class MTSSimulation:
         from goal.md.core.calculator_factory import CalculatorFactory
         from goal.md.core.molecule_factory import MoleculeFactory
 
+        if cfg.get("molecule") is None:
+            raise ValueError(
+                "An MTS config needs a top-level 'molecule:' section; got top-level "
+                f"keys {sorted(cfg.keys())}.  A config stored in a sub-directory must "
+                "start with '# @package _global_', otherwise Hydra nests it."
+            )
+
         # Molecule
-        mol_cfg = dict(cfg.get("molecule", {}))
-        method = mol_cfg.pop("method", "from_smiles")
-        atoms = MoleculeFactory.create(method, **mol_cfg)
-
-        # Fast calculator
-        fc = dict(cfg.get("fast_calculator", {}))
-        fast_key = fc.pop("type", fc.pop("key", "goal_model"))
-        fast_calc = CalculatorFactory.create(fast_key, **fc)
-
-        # Slow calculator (optional)
-        slow_calc = None
-        if "slow_calculator" in cfg and cfg.slow_calculator is not None:
-            sc = dict(cfg.slow_calculator)
-            slow_key = sc.pop("type", sc.pop("key", "orca"))
-            slow_calc = CalculatorFactory.create(slow_key, **sc)
+        atoms = MoleculeFactory.from_config(cfg.molecule, default_key="from_smiles")
 
         # MTS config
         mts_raw = dict(cfg.get("mts", {}))
         mts_cfg = MTSConfig(**{k: v for k, v in mts_raw.items() if hasattr(MTSConfig, k)})
+
+        if cfg.get("ml_calculator") is not None and cfg.get("base_calculator") is not None:
+            # Online-learning mode (online_learner.yaml): the force provider
+            # is a QMLearnerCalculator switching between base and ML itself,
+            # so there is no separate slow correction.
+            fast_calc = cls._build_online_learner(cfg, mts_cfg)
+            return cls(atoms=atoms, fast_calculator=fast_calc, config=mts_cfg)
+
+        # Fast calculator
+        fast_calc = CalculatorFactory.from_config(
+            cfg.get("fast_calculator", {}), default_key="goal_model"
+        )
+
+        # Slow calculator (optional)
+        slow_calc = None
+        if "slow_calculator" in cfg and cfg.slow_calculator is not None:
+            slow_calc = CalculatorFactory.from_config(cfg.slow_calculator, default_key="orca")
 
         return cls(
             atoms=atoms,

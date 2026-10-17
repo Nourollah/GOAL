@@ -66,6 +66,28 @@ class DirectForcesHead(nn.Module):
         features: NodeFeatures,
         graph: AtomicGraph,
     ) -> dict[str, torch.Tensor]:
+        """Predict total energy and direct (non-conservative) forces.
+
+        The energy is the per-graph sum of scalar-readout atomic
+        energies.  Forces are an equivariant linear projection of the
+        node features onto a single ``1x1o`` vector per atom; they are
+        *not* ``-dE/dr`` and no autograd is performed.
+
+        Parameters
+        ----------
+        features : NodeFeatures
+            Backbone output; only ``node_feats`` ``(N, irreps_in.dim)``
+            is read (``node_energies`` is ignored by this head).
+        graph : AtomicGraph
+            Input graph providing ``batch`` ``(N,)`` (all atoms are
+            assigned to graph 0 when ``batch`` is ``None``).
+
+        Returns
+        -------
+        dict[str, Tensor]
+            ``'energy'`` ``(B,)`` in eV, ``'forces'`` ``(N, 3)`` in eV/Å
+            and ``'num_atoms'`` ``(B,)`` (float atom counts per graph).
+        """
         node_feats: torch.Tensor = features.node_feats  # (N, irreps_in.dim)
 
         # Energy: scalar readout

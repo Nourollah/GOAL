@@ -39,9 +39,7 @@ def _butanoic_acid() -> tuple[torch.Tensor, torch.Tensor]:
         [list(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())],
         dtype=torch.float64,
     )
-    numbers = torch.tensor(
-        [a.GetAtomicNum() for a in mol.GetAtoms()], dtype=torch.long
-    )
+    numbers = torch.tensor([a.GetAtomicNum() for a in mol.GetAtoms()], dtype=torch.long)
     return positions, numbers
 
 
@@ -79,7 +77,7 @@ class TestEverySchemeReturnsAValidPartition:
         assert labels.dtype == torch.long
         assert labels.shape == (positions.shape[0],)
         # Contiguous 0..K-1, every label present, atom 0 in fragment 0.
-        assert set(int(v) for v in labels.unique()) == set(range(int(labels.max()) + 1))
+        assert {int(v) for v in labels.unique()} == set(range(int(labels.max()) + 1))
         assert int(labels[0]) == 0
 
     @pytest.mark.parametrize("scheme", FRAGMENT_SCHEMES)
@@ -148,9 +146,9 @@ class TestSchemesDifferAsTheirDefinitionsSay:
         for scheme in FRAGMENT_SCHEMES:
             labels = _any_scheme(positions, numbers, scheme)
             assert int(labels.max()) + 1 >= 2, f"{scheme} merged two molecules"
-            assert set(labels[:3].tolist()).isdisjoint(set(labels[3:].tolist())), (
-                f"{scheme} put atoms of different molecules in one fragment"
-            )
+            assert set(labels[:3].tolist()).isdisjoint(
+                set(labels[3:].tolist())
+            ), f"{scheme} put atoms of different molecules in one fragment"
 
 
 class TestPerceptionCaching:
@@ -285,9 +283,7 @@ class TestKeepGroups:
         positions, numbers = _butanoic_acid()
 
         plain = _labels(positions, numbers, scheme="rotatable")
-        kept = _labels(
-            positions, numbers, scheme="rotatable", keep_groups=["C(=O)O"]
-        )
+        kept = _labels(positions, numbers, scheme="rotatable", keep_groups=["C(=O)O"])
 
         # The carboxyl carbon, both oxygens and the acid H must coincide.
         from rdkit import Chem
@@ -307,8 +303,7 @@ class TestKeepGroups:
         positions, numbers = _butanoic_acid()
         assert int(_labels(positions, numbers, scheme="brics").max()) + 1 == 2
         assert (
-            int(_labels(positions, numbers, scheme="brics", keep_groups=["C(=O)O"]).max()) + 1
-            == 1
+            int(_labels(positions, numbers, scheme="brics", keep_groups=["C(=O)O"]).max()) + 1 == 1
         )
 
     def test_merges_even_when_the_scheme_never_cuts(self) -> None:
@@ -334,7 +329,7 @@ class TestKeepGroups:
     def test_partition_stays_valid(self) -> None:
         positions, numbers = _butanoic_acid()
         labels = _labels(positions, numbers, scheme="rotatable", keep_groups=["C(=O)O"])
-        assert set(int(v) for v in labels.unique()) == set(range(int(labels.max()) + 1))
+        assert {int(v) for v in labels.unique()} == set(range(int(labels.max()) + 1))
         assert labels.shape == (positions.shape[0],)
 
     def test_rejects_invalid_smarts_at_config_time(self) -> None:
@@ -353,9 +348,7 @@ class TestCustomScheme:
 
     def test_atom_mapped_pattern_selects_the_bond(self) -> None:
         positions, numbers = _butanoic_acid()
-        labels = _labels(
-            positions, numbers, scheme="custom", smarts=["[C:1](=O)-[O:2]"]
-        )
+        labels = _labels(positions, numbers, scheme="custom", smarts=["[C:1](=O)-[O:2]"])
         assert int(labels.max()) + 1 == 2
 
     def test_multiple_patterns_compose(self) -> None:

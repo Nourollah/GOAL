@@ -2,9 +2,9 @@
 
 Supports:
 - ML models trained in goal.ml (via checkpoint loading)
-- Quantum chemistry: ORCA, CP2K, Quantum ESPRESSO, VASP, PSI4
+- Quantum chemistry: ORCA, CP2K, Quantum ESPRESSO, VASP
 - Pretrained models: MACE, NequIP, FlashMD, UPET
-- Semi-empirical: xTB
+- Semi-empirical tight binding: GFN1/GFN2-xTB via tblite
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ from pathlib import Path
 import ase.calculators.calculator
 import torch
 
-from goal.md.calculators.base import GOALCalculatorNotFound, UnsupportedOperationError
+from goal.md.calculators.base import GOALCalculatorNotFound
 
 log = logging.getLogger(__name__)
 
 try:
-    from ase.calculators.orca import ORCA, OrcaProfile, OrcaTemplate
+    from ase.calculators.orca import ORCA, OrcaProfile
 
     HAS_ORCA = True
 except ImportError:
@@ -38,13 +38,21 @@ try:
 except ImportError:
     HAS_CP2K = False
 
+# Any failure, not just ImportError: an installed-but-broken flashmd stack
+# must not take ``import goal.md`` down with it.  (Seen with torch 2.14 /
+# Python 3.14: once torch_geometric is imported, metatensor-operations'
+# TorchScript compilation raises RuntimeError — so importing goal.ml before
+# goal.md broke the whole MD module.)
 try:
     from flashmd import get_pretrained
     from flashmd.ase import EnergyCalculator
 
     HAS_FLASHMD = True
-except ImportError:
+except Exception as _exc:  # noqa: BLE001
     HAS_FLASHMD = False
+    _FLASHMD_IMPORT_ERROR: Exception | None = _exc
+else:
+    _FLASHMD_IMPORT_ERROR = None
 
 try:
     from mace.calculators import MACECalculator, mace_mp
@@ -54,11 +62,11 @@ except ImportError:
     HAS_MACE = False
 
 try:
-    from xtb.ase.calculator import XTB
+    from tblite.ase import TBLite
 
-    HAS_XTB = True
+    HAS_TBLITE = True
 except ImportError:
-    HAS_XTB = False
+    HAS_TBLITE = False
 
 try:
     import nequip  # noqa: F401
@@ -101,12 +109,21 @@ try:
     from upet._version import UPET_AVAILABLE_MODELS as _UPET_MODEL_LIST
 except ImportError:  # pragma: no cover — exercised only without upet installed
     _UPET_MODEL_LIST = [
-        "pet-mad-xs", "pet-mad-s",
-        "pet-omat-xs", "pet-omat-s", "pet-omat-m", "pet-omat-l", "pet-omat-xl",
-        "pet-oam-l", "pet-oam-xl",
-        "pet-omad-xs", "pet-omad-s", "pet-omad-l",
+        "pet-mad-xs",
+        "pet-mad-s",
+        "pet-omat-xs",
+        "pet-omat-s",
+        "pet-omat-m",
+        "pet-omat-l",
+        "pet-omat-xl",
+        "pet-oam-l",
+        "pet-oam-xl",
+        "pet-omad-xs",
+        "pet-omad-s",
+        "pet-omad-l",
         "pet-omatpes-l",
-        "pet-spice-s", "pet-spice-l",
+        "pet-spice-s",
+        "pet-spice-l",
     ]
 
 _UPET_MODELS: frozenset[str] = frozenset(_UPET_MODEL_LIST)
@@ -162,6 +179,31 @@ class CalculatorFactory:
             )
         return builder.build(*args, **kwargs)
 
+    @classmethod
+    def from_config(
+        cls, section: typing.Any, default_key: str = "goal_model"
+    ) -> ase.calculators.calculator.Calculator:
+        """Build from a config mapping such as a ``calculator:`` section.
+
+        The builder is named by ``key`` or ``type``.  ``method`` is *not*
+        an alias here: it is a real builder argument for ``tblite``
+        (GFN method) and ``cp2k`` (electronic-structure method).  Hydra's
+        ``_target_`` / ``_convert_`` / ``_recursive_`` / ``_partial_``
+        entries are ignored, so the group templates in
+        ``goal/configs/md/calculators/`` can be used unchanged.
+        """
+        from omegaconf import OmegaConf
+
+        if OmegaConf.is_config(section):
+            section = OmegaConf.to_container(section, resolve=True)
+        kwargs: dict[str, typing.Any] = {
+            str(k): v
+            for k, v in dict(section or {}).items()
+            if not (str(k).startswith("_") and str(k).endswith("_"))
+        }
+        key: str = str(kwargs.pop("key", None) or kwargs.pop("type", None) or default_key)
+        return cls.create(key, **kwargs)
+
 
 class CalculatorBuilder(abc.ABC):
     """Abstract base class for calculator builders."""
@@ -203,23 +245,39 @@ class GOALModelBuilder(CalculatorBuilder):
         checkpoint: str | Path,
         cutoff: float | None = None,
         device: str = "cpu",
-        dtype: torch.dtype = torch.float64,
+        dtype: torch.dtype | None = None,
         head: str | None = None,
+        select: str = "best",
+        use_ema: bool = True,
+        fragment_on_failure: str | None = "fallback",
+        neighbor_list_backend: str | None = None,
     ) -> ase.calculators.calculator.Calculator:
         """Load goal.ml trained model as ASE calculator.
 
         Parameters
         ----------
         checkpoint : str or Path
-            Path to Lightning checkpoint (.ckpt)
+            A ``.simurgh`` archive, a checkpoint directory, or a bare
+            ``.ckpt`` file.
         cutoff : float, optional
-            Cutoff in Ångströms (read from config if None)
+            Ignored: the cutoff always comes from the checkpoint's config,
+            because a model evaluated with a different neighbour list is
+            a different model.  Kept so older configs still load.
         device : str
             Torch device ("cpu" or "cuda")
-        dtype : torch.dtype
-            Precision (torch.float64 default)
+        dtype : torch.dtype, optional
+            Input precision.  ``None`` (default) matches the model.
         head : str, optional
             Multi-head identifier
+        select : str
+            Which weights to use from a checkpoint *directory*:
+            ``"best"``, ``"last"``, ``"epoch=N"`` or a ``.ckpt`` name.
+        use_ema : bool
+            Load the EMA weights when the checkpoint has them.
+        fragment_on_failure : str or None
+            See :class:`~goal.ml.utils.calculator.GOALCalculator`.
+        neighbor_list_backend : str, optional
+            See :class:`~goal.ml.utils.calculator.GOALCalculator`.
 
         Returns
         -------
@@ -228,12 +286,19 @@ class GOALModelBuilder(CalculatorBuilder):
         """
         from goal.ml.utils.calculator import GOALCalculator
 
+        if cutoff is not None:
+            log.info(
+                "goal_model: ignoring cutoff=%s; the checkpoint's own cutoff is used.", cutoff
+            )
         calc = GOALCalculator(
             checkpoint_path=checkpoint,
-            cutoff=cutoff,
             device=device,
             dtype=dtype,
             head=head,
+            checkpoint=select,
+            use_ema=use_ema,
+            fragment_on_failure=fragment_on_failure,
+            neighbor_list_backend=neighbor_list_backend,
         )
         return calc
 
@@ -272,7 +337,11 @@ class FlashMDBuilder(CalculatorBuilder):
             If FlashMD not installed
         """
         if not HAS_FLASHMD:
-            raise ImportError("FlashMD not installed. Install with: pip install flashmd")
+            if isinstance(_FLASHMD_IMPORT_ERROR, ImportError) or _FLASHMD_IMPORT_ERROR is None:
+                raise ImportError("FlashMD not installed. Install with: pip install flashmd")
+            raise ImportError(
+                f"FlashMD is installed but failed to import: {_FLASHMD_IMPORT_ERROR!r}"
+            ) from _FLASHMD_IMPORT_ERROR
 
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -395,7 +464,7 @@ class UPETBuilder(CalculatorBuilder):
         if not HAS_UPET:
             raise GOALCalculatorNotFound(
                 "UPET is not installed. Install with: pip install upet. "
-                "See docs/calculators/upet.md."
+                "See docs/md/calculators/upet.md."
             )
 
         # Validate the model identifier unless a checkpoint overrides it.
@@ -444,15 +513,23 @@ class UPETBuilder(CalculatorBuilder):
 
 @register_calculator("orca")
 class ORCABuilder(CalculatorBuilder):
-    """Create ORCA quantum chemistry calculator."""
+    """Create an ORCA quantum chemistry calculator.
+
+    Any ORCA method works through ``keywords`` (the ``!`` simple-input line):
+    DFT (``"wB97M-V def2-TZVPD RIJCOSX"``), wavefunction methods, and the
+    semi-empirical tight-binding methods built into ORCA (``"XTB2"`` for
+    GFN2-xTB, ``"XTB1"`` for GFN1-xTB).  ``EnGrad`` is added automatically when
+    missing, because MD and optimisation need forces.
+    """
 
     def build(
         self,
         orca_path: str,
-        keywords: str = "EnGrad wB97M-V def2-TZVPD RIJCOSX TightSCF DEFGRID3",
+        keywords: str = "wB97M-V def2-TZVPD RIJCOSX TightSCF DEFGRID3",
         charge: int = 0,
         multiplicity: int = 1,
         num_threads: int = 1,
+        blocks: str = "",
         directory: str = "orca_files",
     ) -> ase.calculators.calculator.Calculator:
         """Create ORCA calculator.
@@ -460,43 +537,50 @@ class ORCABuilder(CalculatorBuilder):
         Parameters
         ----------
         orca_path : str
-            Path to ORCA executable
+            Absolute path to the ``orca`` executable (ORCA needs the full path
+            for parallel runs, and a bare ``orca`` may resolve to an unrelated
+            program such as the GNOME screen reader).
         keywords : str
-            ORCA input keywords
+            ORCA simple-input keywords, without the leading ``!``.
+            ``"XTB2"`` runs GFN2-xTB.
         charge : int
-            Molecular charge
+            Total molecular charge.
         multiplicity : int
-            Spin multiplicity
+            Spin multiplicity (2S + 1).
         num_threads : int
-            Number of threads
+            Number of MPI processes (written as ``%pal nprocs … end``).
+        blocks : str
+            Extra ORCA ``%`` input blocks, e.g. ``"%scf MaxIter 500 end"``.
         directory : str
-            Output directory
+            Working directory for ORCA's input and output files.
 
         Returns
         -------
         ase.calculators.orca.ORCA
-            ORCA calculator
+            ORCA calculator.
 
         Raises
         ------
         ImportError
-            If ASE ORCA support not available
+            If ASE ORCA support is not available.
         """
         if not HAS_ORCA:
             raise ImportError("ORCA support not available. Check ASE installation.")
 
-        profile = OrcaProfile(command=orca_path)
-        calc = ORCA(
-            template=OrcaTemplate(
-                keywords=keywords,
-                charge=charge,
-                multiplicity=multiplicity,
-            ),
-            profile=profile,
-            num_threads=num_threads,
+        if "engrad" not in keywords.lower().split():
+            keywords = f"EnGrad {keywords}"
+        orcablocks = f"%pal nprocs {int(num_threads)} end"
+        if blocks:
+            orcablocks = f"{orcablocks}\n{blocks}"
+
+        return ORCA(
+            profile=OrcaProfile(command=orca_path),
             directory=directory,
+            charge=charge,
+            mult=multiplicity,
+            orcasimpleinput=keywords,
+            orcablocks=orcablocks,
         )
-        return calc
 
 
 #: Maps friendly functional names to the explicit libxc functional pairs that
@@ -706,7 +790,7 @@ class CP2KBuilder(CalculatorBuilder):
             raise GOALCalculatorNotFound(
                 "CP2K support is unavailable — ASE could not import "
                 "ase.calculators.cp2k.  Install a recent ASE (>= 3.23) and a "
-                "CP2K build (>= 2024.2 for set_pos_file).  See docs/calculators/cp2k.md."
+                "CP2K build (>= 2024.2 for set_pos_file).  See docs/md/calculators/cp2k.md."
             )
         if preset not in ("molecular", "bulk"):
             raise ValueError(f"CP2K preset must be 'molecular' or 'bulk', got {preset!r}.")
@@ -823,9 +907,7 @@ class CP2KBuilder(CalculatorBuilder):
         """Build the standalone dispersion calculator (currently ``d3bj``)."""
         key = dispersion.lower().replace("-", "").replace("_", "")
         if key not in ("d3bj", "d3"):
-            raise ValueError(
-                f"Unsupported dispersion {dispersion!r}; only 'd3bj' is implemented."
-            )
+            raise ValueError(f"Unsupported dispersion {dispersion!r}; only 'd3bj' is implemented.")
         try:
             from dftd3.ase import DFTD3
         except ImportError as exc:
@@ -951,27 +1033,22 @@ class CP2KBuilder(CalculatorBuilder):
         return str(symlink_path.absolute())
 
 
-@register_calculator("psi4")
-class PSI4Builder(CalculatorBuilder):
-    """Create PSI4 quantum chemistry calculator."""
+def _deep_merge(
+    base: typing.Mapping[str, typing.Any], override: typing.Mapping[str, typing.Any]
+) -> dict:
+    """Recursively merge ``override`` into a copy of ``base`` (override wins).
 
-    def build(self, **kwargs: typing.Any) -> ase.calculators.calculator.Calculator:
-        """Create PSI4 calculator.
-
-        Raises
-        ------
-        UnsupportedOperationError
-            PSI4 support not yet implemented.
-        """
-        raise UnsupportedOperationError("PSI4 support not yet implemented.")
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge ``override`` into a copy of ``base`` (override wins)."""
-    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
+    Accepts any mapping, including OmegaConf ``DictConfig`` objects that Hydra
+    passes when a config uses ``_convert_: none``; the result is plain dicts.
+    """
+    out = {
+        k: (_deep_merge(v, {}) if isinstance(v, typing.Mapping) else v) for k, v in base.items()
+    }
     for k, v in override.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
+        if isinstance(v, typing.Mapping) and isinstance(out.get(k), dict):
             out[k] = _deep_merge(out[k], v)
+        elif isinstance(v, typing.Mapping):
+            out[k] = _deep_merge(v, {})
         else:
             out[k] = v
     return out
@@ -990,7 +1067,12 @@ class EspressoBuilder(CalculatorBuilder):
 
     * ``"molecular"`` — adds ``system.assume_isolated = "mt"``
       (Martyna–Tuckerman), gamma-point only.
-    * ``"bulk"`` — defaults ``kpts`` to ``[2, 2, 2]`` if not given.
+    * ``"bulk"`` — defaults ``kpts`` to ``[2, 2, 2]`` if not given and
+      enables ``control.tstress`` (unless set explicitly).
+
+    Forces are always requested (``control.tprnfor = True``) so the
+    calculator works for MD and geometry optimisation.  ``pw.x`` is taken from
+    ``command``, then ``$ASE_ESPRESSO_COMMAND``, then ``PATH``.
     """
 
     def build(
@@ -1034,7 +1116,7 @@ class EspressoBuilder(CalculatorBuilder):
             raise GOALCalculatorNotFound(
                 "Quantum ESPRESSO support requires ASE >= 3.23 with "
                 "ase.calculators.espresso.EspressoProfile.  Upgrade ASE. "
-                "See docs/calculators/espresso.md."
+                "See docs/md/calculators/espresso.md."
             )
         if preset not in ("molecular", "bulk"):
             raise ValueError(f"Espresso preset must be 'molecular' or 'bulk', got {preset!r}.")
@@ -1044,7 +1126,7 @@ class EspressoBuilder(CalculatorBuilder):
                 "Quantum ESPRESSO requires a `pseudopotentials` mapping "
                 "{element: UPF_filename}; none were provided.  Point `pseudo_dir` "
                 "at your SSSP library and list a UPF file per element. "
-                "See docs/calculators/espresso.md."
+                "See docs/md/calculators/espresso.md."
             )
         if elements:
             missing = [el for el in elements if el not in pseudopotentials]
@@ -1053,16 +1135,21 @@ class EspressoBuilder(CalculatorBuilder):
                     "Quantum ESPRESSO is missing pseudopotentials for element(s): "
                     f"{', '.join(sorted(missing))}.  Provided: "
                     f"{sorted(pseudopotentials)}.  Add a UPF file for each. "
-                    "See docs/calculators/espresso.md."
+                    "See docs/md/calculators/espresso.md."
                 )
 
         if omp_threads is not None:
             os.environ["OMP_NUM_THREADS"] = str(int(omp_threads))
 
-        # Build launch command.
+        # Build launch command: explicit command > $ASE_ESPRESSO_COMMAND >
+        # pw.x found on PATH (the `-full` pixi environments ship QE's binaries).
         pw_command = command
         if pw_command is None and n_mpi is not None:
             pw_command = f"mpirun -n {int(n_mpi)} pw.x"
+        if pw_command is None:
+            pw_command = os.environ.get("ASE_ESPRESSO_COMMAND")
+        if pw_command is None and shutil.which("pw.x") is not None:
+            pw_command = "pw.x"
 
         resolved_pseudo_dir = pseudo_dir or os.environ.get("ESPRESSO_PSEUDO")
 
@@ -1082,7 +1169,9 @@ class EspressoBuilder(CalculatorBuilder):
         # Merge preset into input_data.
         merged_input: dict[str, typing.Any] = _deep_merge(
             {
-                "control": {"calculation": "scf", "verbosity": "low"},
+                # tprnfor: QE only prints forces when asked, and MD /
+                # optimisation need them.  tstress is enabled for "bulk" below.
+                "control": {"calculation": "scf", "verbosity": "low", "tprnfor": True},
                 "system": {"ecutwfc": 80, "ecutrho": 640},
                 "electrons": {"conv_thr": 1.0e-8},
             },
@@ -1091,8 +1180,10 @@ class EspressoBuilder(CalculatorBuilder):
         resolved_kpts = kpts
         if preset == "molecular":
             merged_input = _deep_merge(merged_input, {"system": {"assume_isolated": "mt"}})
-        elif preset == "bulk" and resolved_kpts is None:
-            resolved_kpts = [2, 2, 2]
+        elif preset == "bulk":
+            merged_input = _deep_merge({"control": {"tstress": True}}, merged_input)
+            if resolved_kpts is None:
+                resolved_kpts = [2, 2, 2]
 
         return Espresso(
             profile=profile,
@@ -1153,7 +1244,7 @@ class VaspBuilder(CalculatorBuilder):
             raise GOALCalculatorNotFound(
                 "VASP support is unavailable — ASE could not import "
                 "ase.calculators.vasp.Vasp.  VASP is commercial: install a "
-                "licensed build and a recent ASE.  See docs/calculators/vasp.md."
+                "licensed build and a recent ASE.  See docs/md/calculators/vasp.md."
             )
         if preset not in ("molecular", "bulk"):
             raise ValueError(f"VASP preset must be 'molecular' or 'bulk', got {preset!r}.")
@@ -1163,7 +1254,7 @@ class VaspBuilder(CalculatorBuilder):
             raise GOALCalculatorNotFound(
                 "VASP needs a POTCAR library: set `pp_path` or the $VASP_PP_PATH "
                 "environment variable to the directory containing potpaw_PBE/ etc. "
-                "See docs/calculators/vasp.md."
+                "See docs/md/calculators/vasp.md."
             )
         os.environ["VASP_PP_PATH"] = resolved_pp
 
@@ -1192,71 +1283,86 @@ class VaspBuilder(CalculatorBuilder):
 
 
 # ============================================================================
-# Semi-empirical
+# Semi-empirical tight binding
 # ============================================================================
 
 
-@register_calculator("xtb")
-class XTBBuilder(CalculatorBuilder):
-    """Create xTB semi-empirical calculator (GFN2-xTB by default)."""
+@register_calculator("tblite")
+class TBLiteBuilder(CalculatorBuilder):
+    """Create a tblite calculator: GFN1-xTB, GFN2-xTB or IPEA1-xTB.
+
+    tblite is the maintained library implementation of Grimme's extended
+    tight-binding methods.  It runs in-process (no file I/O) and returns
+    analytic forces, plus stress for periodic systems, so it is the cheap
+    physics-based option for exploratory MD, pre-equilibration and the slow
+    level of a cheap MTS run.  For DFT-quality forces use ``espresso``,
+    ``cp2k``, ``vasp`` or ``orca``.
+    """
 
     def build(
         self,
         method: str = "GFN2-xTB",
-        charge: int = 0,
-        uhf: int = 0,
+        charge: int | None = None,
+        multiplicity: int | None = None,
         accuracy: float = 1.0,
         electronic_temperature: float = 300.0,
         max_iterations: int = 250,
-        solvent: str | None = None,
+        solvation: tuple[str, ...] | list[str] | None = None,
+        verbosity: int = 0,
     ) -> ase.calculators.calculator.Calculator:
-        """Create xTB semi-empirical calculator.
+        """Create tblite calculator.
 
         Parameters
         ----------
         method : str
-            xTB method: ``"GFN1-xTB"`` or ``"GFN2-xTB"`` (default).
-        charge : int
-            Total molecular charge.
-        uhf : int
-            Number of unpaired electrons.
+            ``"GFN2-xTB"`` (default), ``"GFN1-xTB"`` or ``"IPEA1-xTB"``.
+        charge : int, optional
+            Total charge.  ``None`` takes it from the atoms' initial charges.
+        multiplicity : int, optional
+            Spin multiplicity (2S + 1).  ``None`` takes it from the atoms'
+            initial magnetic moments.
         accuracy : float
-            Numerical accuracy (1.0 = default).
+            Numerical accuracy (smaller is tighter; 1.0 is tblite's default).
         electronic_temperature : float
             Fermi smearing temperature in Kelvin.
         max_iterations : int
-            Maximum SCF iterations.
-        solvent : str, optional
-            Implicit solvent name (e.g. ``"water"``).
+            Maximum SCC iterations.
+        solvation : sequence of str, optional
+            Implicit solvation, e.g. ``("alpb", "water")`` or
+            ``("gbsa", "water")``; passed to tblite unchanged.
+        verbosity : int
+            tblite output level (0 = silent, which suits MD loops).
 
         Returns
         -------
-        xtb.ase.calculator.XTB
-            xTB calculator instance.
+        tblite.ase.TBLite
+            tblite calculator instance.
 
         Raises
         ------
         ImportError
-            If ``xtb-python`` is not installed.
+            If ``tblite`` is not installed.
         """
-        if not HAS_XTB:
+        if not HAS_TBLITE:
             raise ImportError(
-                "xtb-python not installed. Install with: pip install xtb-python "
-                "or: pip install 'goal[md]'"
+                "tblite not installed. Use a `-full` pixi environment "
+                "(e.g. `pixi install -e cuda-full`) or `pip install tblite`."
             )
 
-        kwargs: dict[str, typing.Any] = dict(
-            method=method,
-            charge=charge,
-            uhf=uhf,
-            accuracy=accuracy,
-            electronic_temperature=electronic_temperature,
-            max_iterations=max_iterations,
-        )
-        if solvent is not None:
-            kwargs["solvent"] = solvent
-
-        return XTB(**kwargs)
+        kwargs: dict[str, typing.Any] = {
+            "method": method,
+            "accuracy": accuracy,
+            "electronic_temperature": electronic_temperature,
+            "max_iterations": max_iterations,
+            "verbosity": verbosity,
+        }
+        if charge is not None:
+            kwargs["charge"] = charge
+        if multiplicity is not None:
+            kwargs["multiplicity"] = multiplicity
+        if solvation is not None:
+            kwargs["solvation"] = tuple(solvation)
+        return TBLite(**kwargs)
 
 
 # ============================================================================

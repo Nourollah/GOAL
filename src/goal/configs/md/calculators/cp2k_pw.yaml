@@ -1,0 +1,39 @@
+# CP2K PURE PLANE-WAVE calculator (SIRIUS backend) — PBE / GTH-PBE.
+#
+# Unlike the GPW `cp2k.yaml` (Gaussian orbitals + a plane-wave *density* grid),
+# this drives CP2K's SIRIUS backend: the Kohn–Sham WAVEFUNCTIONS are plane waves
+# — no Gaussian basis set at all — exactly like Quantum ESPRESSO / VASP.
+# Requires a SIRIUS-enabled CP2K build; the official `cp2k/cp2k` container is one
+# (drive it with the podman wrapper at $HOME/bin/cp2k_shell — see
+# docs/calculators/cp2k.md).
+_target_: goal.md.core.calculator_factory.CalculatorFactory.create
+_convert_: none
+key: cp2k
+
+method: sirius # pure plane-wave via SIRIUS  (vs "quickstep" = GPW)
+preset: molecular # molecule-in-a-box: Γ-point, no stress
+
+command:
+  null # null -> $ASE_CP2K_COMMAND, then "cp2k_shell.psmp".
+  # Point $ASE_CP2K_COMMAND at $HOME/bin/cp2k_shell, or
+  # put $HOME/bin on PATH.
+set_pos_file: true # positions via temp file (CP2K >= 2024.2)
+
+xc: PBE # auto-mapped to libxc XC_GGA_X_PBE + XC_GGA_C_PBE
+pseudo_potential: GTH-PBE # norm-conserving; resolved from GTH_POTENTIALS
+potential_file: GTH_POTENTIALS
+
+# Plane-wave cutoffs in bohr^-1 (|G|_max). If left null they derive from
+# cutoff_ry:  pw_cutoff = sqrt(cutoff_ry),  gk_cutoff = pw_cutoff / 2
+# (i.e. E_wfc = E_rho / 4).  pw=18 / gk=9 ≈ 324 Ry density / 81 Ry wavefunction,
+# well converged for H/C/O GTH-PBE.  Lower them (e.g. 16 / 8) to trade accuracy
+# for speed on long runs.
+cutoff_ry: 324.0
+pw_cutoff: 18.0
+gk_cutoff: 9.0
+
+kpts: [1, 1, 1] # Γ-point — correct for an isolated molecule in a box
+smearing_width: 0.001 # Hartree (tiny, for SCF robustness on a gapped system)
+num_dft_iter: 100 # max SIRIUS SCF iterations
+charge: 0
+uks: false # closed shell; true -> spin-polarised (NUM_MAG_DIMS 1)

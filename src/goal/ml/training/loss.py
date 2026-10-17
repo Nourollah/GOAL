@@ -197,6 +197,21 @@ class WeightedLoss(nn.Module):
         predictions: dict[str, torch.Tensor],
         targets: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Evaluate the wrapped loss and scale it by ``self.weight``.
+
+        Parameters
+        ----------
+        predictions : dict[str, Tensor]
+            Model output dict, passed unchanged to the inner loss.
+        targets : dict[str, Tensor]
+            Reference labels (typically the PyG batch), passed unchanged
+            to the inner loss.
+
+        Returns
+        -------
+        Tensor
+            Scalar ``weight * loss(predictions, targets)``.
+        """
         return self.weight * self.loss(predictions, targets)
 
     def __add__(self, other: WeightedLoss) -> CompositeLoss:
@@ -291,6 +306,30 @@ class EnergyLoss(nn.Module):
         pred: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Compute the loss on per-atom energies.
+
+        Both predicted and reference total energies are divided by
+        ``pred["num_atoms"]`` (eV → eV/atom) before comparison, so
+        structures of different size are on the same scale.  Without a
+        per-graph ``target.weight`` attribute the configured ``loss_fn``
+        is applied with its default (mean) reduction; with one, the
+        per-graph errors are averaged with those weights (divided by
+        ``weight.sum()``, MACE convention).
+
+        Parameters
+        ----------
+        pred : dict[str, Tensor]
+            Model outputs; reads ``'energy'`` ``(G,)`` and
+            ``'num_atoms'`` ``(G,)``.
+        target : dict[str, Tensor]
+            Reference labels; reads ``'energy'`` ``(G,)`` and, if
+            present, the ``weight`` attribute ``(G,)``.
+
+        Returns
+        -------
+        Tensor
+            Scalar loss.
+        """
         # ``num_atoms`` is a property of the input batch, so it is identical
         # in ``pred`` and ``target``.  The PyG ``Batch`` used as ``target``
         # doesn't carry it as an indexable key — only the head's output dict
@@ -416,6 +455,30 @@ class ForcesLoss(nn.Module):
         pred: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Compute the loss between predicted and reference forces.
+
+        With ``normalize_by_n_atoms=True`` and a ``target.batch``
+        attribute available, the element-wise loss is averaged over the
+        xyz components and atoms of each structure and then over
+        structures (weighted by ``target.weight`` when present), so each
+        structure contributes equally.  Otherwise the loss is a flat mean
+        over all ``N x 3`` components, per-atom weighted through
+        ``target.batch`` when ``target.weight`` is given.
+
+        Parameters
+        ----------
+        pred : dict[str, Tensor]
+            Model outputs; reads ``'forces'`` ``(N, 3)`` in eV/Å.
+        target : dict[str, Tensor]
+            Reference labels; reads ``'forces'`` ``(N, 3)`` and, if
+            present, the ``batch`` ``(N,)`` and ``weight`` ``(G,)``
+            attributes (an empty ``weight`` is treated as absent).
+
+        Returns
+        -------
+        Tensor
+            Scalar loss.
+        """
         p: torch.Tensor = pred["forces"]
         t: torch.Tensor = target["forces"]
         batch_index: torch.Tensor | None = getattr(target, "batch", None)
@@ -445,6 +508,24 @@ class StressLoss(nn.Module):
         pred: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Apply ``loss_fn`` to ``pred["stress"]`` and ``target["stress"]``.
+
+        No per-atom normalisation or sample weighting is applied; the
+        reduction is the default of the configured ``loss_fn`` (mean over
+        all ``(G, 3, 3)`` components for the built-ins).
+
+        Parameters
+        ----------
+        pred : dict[str, Tensor]
+            Model outputs; reads ``'stress'``.
+        target : dict[str, Tensor]
+            Reference labels; reads ``'stress'`` (same shape and units).
+
+        Returns
+        -------
+        Tensor
+            Scalar loss.
+        """
         return self.loss_fn(pred["stress"], target["stress"])
 
 
@@ -461,6 +542,24 @@ class DipoleLoss(nn.Module):
         pred: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Apply ``loss_fn`` to ``pred["dipole"]`` and ``target["dipole"]``.
+
+        No normalisation or sample weighting is applied; the reduction is
+        the default of the configured ``loss_fn`` (mean over all
+        ``(G, 3)`` components for the built-ins).
+
+        Parameters
+        ----------
+        pred : dict[str, Tensor]
+            Model outputs; reads ``'dipole'`` ``(G, 3)`` in e·Å.
+        target : dict[str, Tensor]
+            Reference labels; reads ``'dipole'`` ``(G, 3)``.
+
+        Returns
+        -------
+        Tensor
+            Scalar loss.
+        """
         return self.loss_fn(pred["dipole"], target["dipole"])
 
 
@@ -477,6 +576,25 @@ class ChargeLoss(nn.Module):
         pred: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Apply ``loss_fn`` to the predicted and reference total charge.
+
+        When ``target`` has no ``'total_charge'`` entry the reference
+        defaults to zeros, i.e. the loss becomes a charge-neutrality
+        penalty on the predicted per-graph charge sum.
+
+        Parameters
+        ----------
+        pred : dict[str, Tensor]
+            Model outputs; reads ``'total_charge'`` ``(G,)`` in e.
+        target : dict[str, Tensor]
+            Reference labels; reads ``'total_charge'`` ``(G,)`` if
+            present.
+
+        Returns
+        -------
+        Tensor
+            Scalar loss (default reduction of ``loss_fn``).
+        """
         target_charge: torch.Tensor = target.get(
             "total_charge",
             torch.zeros_like(pred["total_charge"]),
@@ -511,6 +629,23 @@ class GateRegLoss(nn.Module):
         pred: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Return ``sum(gate_values ** 2)`` over all gate scalars.
+
+        The sum is not normalised by the number of gates or graphs.
+
+        Parameters
+        ----------
+        pred : dict[str, Tensor]
+            Model outputs; reads ``'gate_values'`` (1-D) if present.
+        target : dict[str, Tensor]
+            Unused; accepted for interface compatibility.
+
+        Returns
+        -------
+        Tensor
+            Scalar penalty, or ``0.0`` on the device of the first
+            prediction when ``'gate_values'`` is missing or empty.
+        """
         gate_values: torch.Tensor | None = pred.get("gate_values", None)
         if gate_values is None or gate_values.numel() == 0:
             device: torch.device = next(iter(pred.values())).device
@@ -554,6 +689,25 @@ class ScalarPropertyLoss(nn.Module):
         pred: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """Apply ``loss_fn`` to the ``property_name`` entry of both dicts.
+
+        When ``per_atom`` is ``True`` both prediction and target are first
+        divided by ``pred["num_atoms"]``.  No sample weighting is applied;
+        the reduction is the default of the configured ``loss_fn``.
+
+        Parameters
+        ----------
+        pred : dict[str, Tensor]
+            Model outputs; reads ``property_name`` and, with
+            ``per_atom=True``, ``'num_atoms'`` ``(G,)``.
+        target : dict[str, Tensor]
+            Reference labels; reads ``property_name``.
+
+        Returns
+        -------
+        Tensor
+            Scalar loss.
+        """
         p: torch.Tensor = pred[self.property_name]
         t: torch.Tensor = target[self.property_name]
         if self.per_atom:

@@ -45,7 +45,7 @@ from goal.ml.registry import BACKBONE_REGISTRY
 from tests.ml.simurgh.conftest import _build_graph
 from tests.ml.simurgh.test_fragment_interaction import _methane_positions
 
-_CONFIGS_ML_DIR = Path(__file__).parents[3] / "configs" / "ml"
+_CONFIGS_ML_DIR = Path(__file__).parents[3] / "src" / "goal" / "configs" / "ml"
 _BASE_CONFIG = "simurgh_gmd26"
 
 # Configs that document the add-ons inline.  Both must keep the blocks in
@@ -247,9 +247,7 @@ class TestDocumentedBlocks:
 
     @pytest.mark.parametrize("config_file", LEGACY_CONFIG_FILES)
     @pytest.mark.parametrize("key", ADDON_KEYS)
-    def test_legacy_configs_offer_no_uncommentable_block(
-        self, config_file: str, key: str
-    ) -> None:
+    def test_legacy_configs_offer_no_uncommentable_block(self, config_file: str, key: str) -> None:
         """The ACE-first backbone rejects these keys, so its configs must not
         tempt anyone with a block to uncomment — only a pointer to ARACE."""
         assert _documented_block(config_file, key) is None, (
@@ -293,14 +291,10 @@ class TestAblationLadder:
     ) -> None:
         backbone = _backbone_from_cfg(_cfg_with_addons(sections))
 
-        assert backbone.fragment_interaction_enabled is (
-            "fragment_interaction" in sections
-        )
+        assert backbone.fragment_interaction_enabled is ("fragment_interaction" in sections)
         assert backbone.adaptive_gate_enabled is ("adaptive_gate" in sections)
         for rnd in backbone.rounds:
-            assert (rnd.fragment_interaction is not None) is (
-                "fragment_interaction" in sections
-            )
+            assert (rnd.fragment_interaction is not None) is ("fragment_interaction" in sections)
             assert (rnd.adaptive_gate is not None) is ("adaptive_gate" in sections)
 
     @pytest.mark.parametrize(("label", "sections"), LADDER)

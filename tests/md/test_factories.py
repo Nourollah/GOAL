@@ -90,8 +90,8 @@ class TestCalculatorFactory:
         assert "mace" in keys
         assert "orca" in keys
         assert "cp2k" in keys
-        assert "psi4" in keys
-        assert "xtb" in keys
+        assert "espresso" in keys
+        assert "tblite" in keys
         assert "nequip" in keys
 
     def test_unknown_key_raises(self) -> None:
@@ -128,17 +128,135 @@ class TestCalculatorFactory:
         except Exception as exc:
             pytest.fail(f"Unexpected exception: {exc}")
 
-    def test_xtb_requires_import(self) -> None:
-        """Test CalculatorFactory handles missing xtb gracefully."""
+
+class TestTBLiteBuilder:
+    """Tests for the tblite (GFN-xTB) builder."""
+
+    def test_gfn2_energy_and_forces(self) -> None:
+        """GFN2-xTB returns an energy and analytic forces that match finite differences."""
+        pytest.importorskip("tblite")
+        from ase.build import molecule
+
         from goal.md.core.calculator_factory import CalculatorFactory
 
-        try:
-            calc = CalculatorFactory.create("xtb")
-            from ase.calculators.calculator import Calculator
+        atoms = molecule("H2O")
+        atoms.calc = CalculatorFactory.create("tblite", method="GFN2-xTB")
+        energy = atoms.get_potential_energy()
+        forces = atoms.get_forces()
+        assert np.isfinite(energy)
+        assert forces.shape == (3, 3)
 
-            assert isinstance(calc, Calculator)
-        except ImportError:
-            pass  # expected when xtb-python not installed
+        # finite-difference check on one coordinate
+        h = 1e-4
+        displaced = atoms.copy()
+        displaced.calc = CalculatorFactory.create("tblite", method="GFN2-xTB")
+        displaced.positions[0, 2] += h
+        e_plus = displaced.get_potential_energy()
+        displaced.positions[0, 2] -= 2 * h
+        e_minus = displaced.get_potential_energy()
+        assert forces[0, 2] == pytest.approx(-(e_plus - e_minus) / (2 * h), abs=1e-3)
+
+    def test_hydra_config_instantiates(self) -> None:
+        """configs/md/calculators/tblite.yaml builds a working calculator."""
+        pytest.importorskip("tblite")
+        from hydra.utils import instantiate
+        from omegaconf import OmegaConf
+
+        cfg = OmegaConf.load(
+            Path(__file__).parents[2] / "src/goal/configs/md/calculators/tblite.yaml"
+        )
+        calc = instantiate(cfg)
+        assert "forces" in calc.implemented_properties
+
+
+class TestORCABuilder:
+    """Tests for the ORCA builder's generated input (no ORCA run)."""
+
+    def test_xtb2_input_requests_gradient(self, tmp_path: Path) -> None:
+        """ORCA's built-in GFN2-xTB gets EnGrad added and a %pal block."""
+        from ase.build import molecule
+
+        from goal.md.core.calculator_factory import CalculatorFactory
+
+        calc = CalculatorFactory.create(
+            "orca",
+            orca_path="/opt/orca/orca",
+            keywords="XTB2",
+            num_threads=4,
+            directory=str(tmp_path),
+        )
+        calc.template.write_input(
+            calc.profile, tmp_path, molecule("H2O"), calc.parameters, ["energy", "forces"]
+        )
+        text = (tmp_path / "orca.inp").read_text()
+
+        assert text.startswith("! EnGrad XTB2")
+        assert "%pal nprocs 4 end" in text
+        assert "*xyz 0 1" in text
+
+    def test_engrad_not_duplicated(self, tmp_path: Path) -> None:
+        """An explicit EnGrad keyword is kept once."""
+        from goal.md.core.calculator_factory import CalculatorFactory
+
+        calc = CalculatorFactory.create(
+            "orca",
+            orca_path="/opt/orca/orca",
+            keywords="EnGrad B3LYP def2-SVP",
+            directory=str(tmp_path),
+        )
+        assert calc.parameters["orcasimpleinput"].lower().split().count("engrad") == 1
+
+
+class TestEspressoBuilder:
+    """Tests for the Quantum ESPRESSO builder's input handling (no pw.x run)."""
+
+    _PSEUDOS = {"H": "H.UPF", "O": "O.UPF"}
+
+    def test_hydra_config_keeps_cutoffs_with_molecular_preset(self, tmp_path: Path) -> None:
+        """DictConfig input_data from Hydra must merge with the preset, not be replaced by it."""
+        from hydra.utils import instantiate
+        from omegaconf import OmegaConf
+
+        cfg = OmegaConf.load(
+            Path(__file__).parents[2] / "src/goal/configs/md/calculators/espresso.yaml"
+        )
+        cfg.command = "pw.x"
+        cfg.pseudo_dir = str(tmp_path)
+        cfg.pseudopotentials = self._PSEUDOS
+        cfg.directory = str(tmp_path / "run")
+        calc = instantiate(cfg)
+
+        system = calc.parameters["input_data"]["system"]
+        assert system["ecutwfc"] == 80
+        assert system["ecutrho"] == 640
+        assert system["assume_isolated"] == "mt"
+        assert calc.parameters["input_data"]["control"]["tprnfor"] is True
+
+    def test_bulk_preset_requests_stress_and_kpts(self, tmp_path: Path) -> None:
+        """The bulk preset enables tstress and default k-points unless overridden."""
+        from goal.md.core.calculator_factory import CalculatorFactory
+
+        calc = CalculatorFactory.create(
+            "espresso",
+            command="pw.x",
+            pseudo_dir=str(tmp_path),
+            pseudopotentials=self._PSEUDOS,
+            preset="bulk",
+            directory=str(tmp_path / "run"),
+        )
+        assert calc.parameters["input_data"]["control"]["tstress"] is True
+        assert tuple(calc.parameters["kpts"]) == (2, 2, 2)
+
+        calc = CalculatorFactory.create(
+            "espresso",
+            command="pw.x",
+            pseudo_dir=str(tmp_path),
+            pseudopotentials=self._PSEUDOS,
+            preset="bulk",
+            input_data={"control": {"tstress": False}},
+            directory=str(tmp_path / "run2"),
+        )
+        assert calc.parameters["input_data"]["control"]["tstress"] is False
 
 
 # ---------------------------------------------------------------------------

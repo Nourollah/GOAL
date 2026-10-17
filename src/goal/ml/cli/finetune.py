@@ -1,13 +1,22 @@
 """Hydra-based fine-tuning entry point.
 
-Fine-tunes a pre-trained foundation model (via adapter) on a
-downstream dataset. Supports three loading modes:
+Fine-tunes a pre-trained model on a downstream dataset.  The default
+config, ``finetune/simurgh_lora``, adapts a trained SIMURGH checkpoint with
+LoRA::
+
+    goal-finetune model.backbone.checkpoint_path=logs/<task>/runs/<run>/checkpoints \
+        data.train_dir=data/dicarboxylic/train
+
+Any config whose backbone is an adapter works too.  The backbone is built in
+one of three modes:
 
 1. **Pre-trained hub model**: ``backbone.pretrained=true backbone.variant=large``
 2. **Local fine-tuned checkpoint**: ``backbone.local_checkpoint=/path/to/model.pt``
-3. **Fresh backbone**: default — builds from config params
+3. **Fresh backbone**: default — builds from config params (this is how
+   ``simurgh_lora`` loads its checkpoint)
 
-Optionally freezes the backbone for linear probing.
+Monolithic backbones (``head: null``) are supported.  Optionally freezes
+the backbone for linear probing (``training.freeze_backbone``).
 """
 
 from __future__ import annotations
@@ -22,81 +31,20 @@ from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
-from goal.ml.cli import CONFIGS_DIR
+from goal.ml.cli import CONFIGS_ML_DIR
+from goal.ml.cli.builders import (
+    build_head,
+    build_loss,
+    instantiate_callbacks,
+    instantiate_loggers,
+)
 from goal.ml.data.datamodule import GOALDataModule
-from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
+from goal.ml.registry import BACKBONE_REGISTRY
 from goal.ml.training.callbacks.checkpoint import GOALCheckpoint
 from goal.ml.training.callbacks.logging import RichLoggingCallback
-from goal.ml.training.loss import CompositeLoss, WeightedLoss
+from goal.ml.training.loss import CompositeLoss
 from goal.ml.training.module import GOALModule
 from goal.ml.training.strategies.factory import build_strategy
-
-
-def _instantiate_callbacks(cfg: DictConfig | None) -> list[Callback]:
-    """Instantiate Lightning callbacks from Hydra config."""
-    if not cfg:
-        return []
-    callbacks: list[Callback] = []
-    for _, cb_conf in cfg.items():
-        if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
-            callbacks.append(hydra.utils.instantiate(cb_conf))
-    return callbacks
-
-
-def _instantiate_loggers(cfg: DictConfig | None) -> list[Logger]:
-    """Instantiate Lightning loggers from Hydra config."""
-    if not cfg:
-        return []
-    loggers: list[Logger] = []
-    for _, lg_conf in cfg.items():
-        if isinstance(lg_conf, DictConfig) and "_target_" in lg_conf:
-            loggers.append(hydra.utils.instantiate(lg_conf))
-    return loggers
-
-
-def _build_loss(cfg: DictConfig) -> CompositeLoss:
-    """Construct the composite loss from config.
-
-    Each loss entry may specify ``fn`` as either:
-
-    - A **string** (default ``"mse"``) — single loss function.
-    - A **list** of ``{name, weight}`` dicts — multiple loss functions
-      for the same property, each logged and weighted independently.
-    """
-    losses: list[WeightedLoss] = []
-    for loss_cfg in cfg.training.losses:
-        loss_cls: typing.Any = LOSS_REGISTRY.get(loss_cfg.name)
-        fn_spec: typing.Any = loss_cfg.get("fn", "mse")
-
-        if isinstance(fn_spec, str):
-            losses.append(
-                WeightedLoss(
-                    loss_cls(loss_fn=fn_spec),
-                    weight=loss_cfg.weight,
-                    label=loss_cfg.name,
-                )
-            )
-        else:
-            for sub in fn_spec:
-                sub_name: str = sub["name"] if isinstance(sub, dict) else sub.name
-                sub_weight: float = float(sub["weight"] if isinstance(sub, dict) else sub.weight)
-                fn_label: str = sub_name.rsplit(".", 1)[-1]
-                losses.append(
-                    WeightedLoss(
-                        loss_cls(loss_fn=sub_name),
-                        weight=sub_weight,
-                        label=f"{loss_cfg.name}_{fn_label}",
-                        group=loss_cfg.name,
-                    )
-                )
-    return CompositeLoss(losses)
-
-
-def _build_head(cfg: DictConfig) -> typing.Any:
-    """Build the task head from config."""
-    head_cls: typing.Any = HEAD_REGISTRY.get(cfg.model.head.name)
-    head_kwargs: dict[str, typing.Any] = {k: v for k, v in cfg.model.head.items() if k != "name"}
-    return head_cls(**head_kwargs)
 
 
 def _build_backbone(backbone_cfg: DictConfig) -> typing.Any:
@@ -126,7 +74,7 @@ def _build_backbone(backbone_cfg: DictConfig) -> typing.Any:
     return adapter_cls(**backbone_kwargs)
 
 
-@hydra.main(version_base=None, config_path=CONFIGS_DIR, config_name="train")
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="finetune/simurgh_lora")
 def finetune(cfg: DictConfig) -> None:
     """GOAL fine-tuning entry point.
 
@@ -145,8 +93,8 @@ def finetune(cfg: DictConfig) -> None:
         for param in backbone.parameters():
             param.requires_grad = False
 
-    head: typing.Any = _build_head(cfg)
-    loss: CompositeLoss = _build_loss(cfg)
+    head: typing.Any = build_head(cfg, backbone)  # None for monolithic backbones
+    loss: CompositeLoss = build_loss(cfg)
 
     module: GOALModule = GOALModule(
         backbone=backbone,
@@ -176,8 +124,8 @@ def finetune(cfg: DictConfig) -> None:
     ]
 
     # Instantiate callbacks and loggers from Hydra config (if present)
-    hydra_callbacks: list[Callback] = _instantiate_callbacks(cfg.get("callbacks"))
-    loggers: list[Logger] = _instantiate_loggers(cfg.get("logger"))
+    hydra_callbacks: list[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+    loggers: list[Logger] = instantiate_loggers(cfg.get("logger"))
     all_callbacks: list[Callback] = callbacks + (hydra_callbacks or [])
 
     # Strategy: if cfg.strategy exists, use the strategy factory;

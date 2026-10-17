@@ -9,13 +9,21 @@ import torch
 from ase import Atoms, units
 from ase.md.langevin import Langevin
 
+# Any failure, not just ImportError: an installed-but-broken flashmd stack
+# must not take ``import goal.md`` down with it.  (Seen with torch 2.14 /
+# Python 3.14: once torch_geometric is imported, metatensor-operations'
+# TorchScript compilation raises RuntimeError — so importing goal.ml before
+# goal.md broke the whole MD module.)
 try:
     from flashmd import get_pretrained
     from flashmd.ase.langevin import Langevin as FlashMDLangevin
 
     HAS_FLASHMD = True
-except ImportError:
+except Exception as _exc:  # noqa: BLE001
     HAS_FLASHMD = False
+    _FLASHMD_IMPORT_ERROR: Exception | None = _exc
+else:
+    _FLASHMD_IMPORT_ERROR = None
 
 
 class DynamicsFactory:
@@ -27,9 +35,9 @@ class DynamicsFactory:
     --------
     >>> dyn = DynamicsFactory.create(
     ...     "langevin_ase",
-    ...     molecule=atoms,
+    ...     atoms=atoms,
     ...     temperature_K=300.0,
-    ...     timestep=1.0
+    ...     timestep_fs=0.5,
     ... )
     """
 
@@ -107,26 +115,38 @@ class LangevinASEBuilder(DynamicsBuilder):
     def build(
         self,
         atoms: Atoms,
-        timestep: float = 1.0 * units.fs,
+        timestep: float | None = None,
         temperature_K: float = 300.0,
-        friction: float = 0.5,
+        friction: float | None = None,
         fixcm: bool = True,
+        timestep_fs: float | None = None,
+        friction_per_fs: float | None = None,
         **kwargs: typing.Any,
     ) -> Langevin:
         """Create ASE Langevin dynamics.
+
+        Time-like arguments come in two spellings.  The ``_fs`` ones are in
+        femtoseconds and are what configs should use; the bare ones are
+        passed to ASE untouched, i.e. in **ASE units** (1 ASE time unit ≈
+        10.18 fs), exactly like ``ase.md.langevin.Langevin`` itself.
 
         Parameters
         ----------
         atoms : ase.Atoms
             System to simulate
-        timestep : float
-            Timestep in fs (default: 1.0)
+        timestep : float, optional
+            Timestep in ASE units, e.g. ``0.5 * ase.units.fs``.
         temperature_K : float
             Temperature in Kelvin (default: 300)
-        friction : float
-            Friction coefficient (default: 0.5)
+        friction : float, optional
+            Friction in inverse ASE time units, e.g. ``0.01 / ase.units.fs``.
         fixcm : bool
             Fix center of mass (default: True)
+        timestep_fs : float, optional
+            Timestep in fs.  Default when neither timestep is given: 1.0 fs.
+        friction_per_fs : float, optional
+            Friction in 1/fs.  When neither friction is given the historic
+            default of 0.5 ASE units (≈ 0.049 fs⁻¹) is used.
         **kwargs
             Additional arguments for Langevin
 
@@ -135,6 +155,15 @@ class LangevinASEBuilder(DynamicsBuilder):
         ase.md.langevin.Langevin
             Dynamics integrator
         """
+        if timestep is not None and timestep_fs is not None:
+            raise ValueError("Pass either 'timestep' (ASE units) or 'timestep_fs', not both.")
+        if friction is not None and friction_per_fs is not None:
+            raise ValueError("Pass either 'friction' (ASE units) or 'friction_per_fs', not both.")
+        if timestep is None:
+            timestep = (1.0 if timestep_fs is None else float(timestep_fs)) * units.fs
+        if friction is None:
+            friction = 0.5 if friction_per_fs is None else float(friction_per_fs) / units.fs
+
         dyn = Langevin(
             atoms,
             timestep=timestep,
@@ -190,7 +219,11 @@ class LangevinFlashMDBuilder(DynamicsBuilder):
             If FlashMD not installed
         """
         if not HAS_FLASHMD:
-            raise ImportError("FlashMD not installed. Install with: pip install flashmd")
+            if isinstance(_FLASHMD_IMPORT_ERROR, ImportError) or _FLASHMD_IMPORT_ERROR is None:
+                raise ImportError("FlashMD not installed. Install with: pip install flashmd")
+            raise ImportError(
+                f"FlashMD is installed but failed to import: {_FLASHMD_IMPORT_ERROR!r}"
+            ) from _FLASHMD_IMPORT_ERROR
 
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"

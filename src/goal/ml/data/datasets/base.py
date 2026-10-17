@@ -76,9 +76,7 @@ class BaseAtomicDataset(Dataset, ABC):
 
         # A bare string in YAML means one pattern, not a list of characters.
         self.fragment_smarts: list[str] | None = as_pattern_list(fragment_smarts) or None
-        self.fragment_keep_groups: list[str] | None = (
-            as_pattern_list(fragment_keep_groups) or None
-        )
+        self.fragment_keep_groups: list[str] | None = as_pattern_list(fragment_keep_groups) or None
         if self.compute_fragment_index:
             # Fail on a bad scheme or a typo'd SMARTS here, at setup, rather
             # than thousands of frames into the first epoch.
@@ -110,22 +108,15 @@ class BaseAtomicDataset(Dataset, ABC):
         """
         if not self.compute_fragment_index:
             return graph
-        if graph.get("fragment_index", None) is not None:
-            return graph
 
-        from goal.ml.data.fragments import compute_fragment_index
+        from goal.ml.data.fragments import attach_fragment_index
 
-        cell: torch.Tensor | None = graph.get("cell", None)
-        graph.fragment_index = compute_fragment_index(
-            positions=graph.pos,
-            atomic_numbers=graph.z,
+        return attach_fragment_index(
+            graph,
             covalent_cutoff=self.fragment_covalent_cutoff,
-            cell=cell,
-            pbc=graph.get("pbc", None),
             scheme=self.fragment_scheme,
             charge=self.fragment_charge,
             on_failure=self.fragment_on_failure,
             smarts=self.fragment_smarts,
             keep_groups=self.fragment_keep_groups,
         )
-        return graph

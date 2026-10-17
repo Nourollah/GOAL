@@ -8,9 +8,6 @@ dependency-free pieces — currently the shared exception types.
 
 from __future__ import annotations
 
-from goal.md.calculators.base import (
-    GOALCalculatorNotFound,
-    UnsupportedOperationError,
-)
+from goal.md.calculators.base import GOALCalculatorNotFound, UnsupportedOperationError
 
 __all__ = ["GOALCalculatorNotFound", "UnsupportedOperationError"]

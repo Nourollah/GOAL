@@ -164,7 +164,10 @@ def test_6_num_workers_2_works():
 
 @requires_traj
 def test_7_e0_extraction(dataset):
-    from goal.ml.data.statistics import compute_atomic_references, compute_unique_elements
+    from goal.ml.data.statistics import (
+        compute_atomic_references,
+        compute_unique_elements,
+    )
 
     elements = compute_unique_elements(dataset)
     refs = compute_atomic_references(dataset)

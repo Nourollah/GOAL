@@ -34,6 +34,14 @@ class FoundationE0Callback(Callback):
         self._done: bool = False
 
     def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        """Re-estimate the backbone's atomic energies from the training set, once.
+
+        Calls ``backbone.reestimate_atomic_energies(trainer.datamodule.data_train)``
+        when ``pl_module.backbone`` exists and sets ``reestimate_e0s = True``.
+        Logs a warning and skips if that method is missing or no training
+        dataset is available.  After a successful re-estimation later calls
+        do nothing.
+        """
         if self._done:
             return
         backbone = getattr(pl_module, "backbone", None)

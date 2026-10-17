@@ -1,0 +1,41 @@
+# @package _global_
+# Online learning composed from the group templates: ORCA reference +
+# GOAL model learner.  Same run as online_learner.yaml, assembled from
+#   md/molecules/ethanol, md/mts/base_calculators/orca_reference,
+#   md/mts/ml_models/learner
+# to show how the reusable pieces plug together.
+#
+# Usage:
+#   goal-simulate-mts --config-name md/mts/simulations/orca_ml_learner \
+#       ml_calculator.checkpoint=path/to/model.simurgh \
+#       base_calculator.orca_path=/opt/orca/orca
+defaults:
+  - /md/molecules@molecule: ethanol
+  - /md/mts/base_calculators@base_calculator: orca_reference
+  - /md/mts/ml_models@ml_calculator: learner
+  - _self_
+
+learner:
+  eval_interval: 100
+  data_buffer_size: 5000
+  fine_tuning:
+    learning_rate: 1.0e-4
+    epochs_per_update: 3
+    batch_size: 8
+    min_buffer_size: 20
+  policy:
+    type: threshold
+    force_rmse: 0.01 # eV/Å
+    energy_mae: 0.001 # eV/atom
+    min_steps: 500
+
+mts:
+  timestep_fs: 0.5
+  mts_ratio: 1
+  total_steps: 5000
+  temperature_K: 300.0
+  friction: 0.01
+  log_interval: 50
+  trajectory_file: trajectory.traj
+  log_file: md.log
+  output_dir: outputs/md/orca_ml_learner

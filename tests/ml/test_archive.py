@@ -98,7 +98,12 @@ def _build_module(cfg: DictConfig):
     """Construct a GOALModule exactly as the calculator rebuild would."""
     from goal.ml.nn.heads.dual_forces import DualForcesHead
     from goal.ml.nn.models.simurgh.backbone import SimurghBackbone
-    from goal.ml.training.loss import CompositeLoss, EnergyLoss, ForcesLoss, WeightedLoss
+    from goal.ml.training.loss import (
+        CompositeLoss,
+        EnergyLoss,
+        ForcesLoss,
+        WeightedLoss,
+    )
     from goal.ml.training.module import GOALModule
 
     torch.manual_seed(0)
@@ -110,9 +115,7 @@ def _build_module(cfg: DictConfig):
         atomic_energies={"mode": "learned"},
         compute_pairwise_forces=True,
     ).to(torch.float64)
-    head = DualForcesHead(irreps_in="8x0e+8x1o", hidden_dim=16, mode="pairwise").to(
-        torch.float64
-    )
+    head = DualForcesHead(irreps_in="8x0e+8x1o", hidden_dim=16, mode="pairwise").to(torch.float64)
     loss = CompositeLoss(
         [
             WeightedLoss(EnergyLoss(loss_fn="mse"), weight=1.0, label="energy"),
@@ -156,7 +159,7 @@ def _make_trainer(module, cfg: DictConfig, metrics: dict[str, float], epoch: int
 def _make_manager(dirpath: Path, **overrides) -> GOALCheckpointManager:
     kwargs = {
         "dirpath": str(dirpath),
-        "top_k": {"enabled": True, "k": 2, "metric": "val/forces_mae", "mode": "min"},
+        "top_k": {"enabled": True, "k": 2, "metric": "val_forces/forces_mae", "mode": "min"},
         "interval": {"enabled": True, "every_n_epochs": 2, "keep_last_n": 2},
         "last": {"enabled": True, "filename": "last.ckpt"},
         "save_archive": False,
@@ -191,7 +194,7 @@ def trained_dir(tmp_path_factory) -> Path:
         loss.backward()
         optimizer.step()
 
-    trainer = _make_trainer(module, cfg, {"val/forces_mae": 0.5}, epoch=0)
+    trainer = _make_trainer(module, cfg, {"val_forces/forces_mae": 0.5}, epoch=0)
     manager.on_validation_epoch_end(trainer, module)
     return dirpath
 
@@ -261,9 +264,7 @@ class TestFreezeAtTrainingStart:
 
 
 class TestCodeChangeResilience:
-    def test_loads_from_frozen_source_after_live_code_destroyed(
-        self, trained_dir: Path
-    ) -> None:
+    def test_loads_from_frozen_source_after_live_code_destroyed(self, trained_dir: Path) -> None:
         from goal.ml.utils.calculator import GOALCalculator
 
         calc_before = GOALCalculator(checkpoint_path=str(trained_dir), checkpoint="best")
@@ -406,7 +407,7 @@ class TestSidecars:
 
         values = [0.5, 0.4, 0.3]
         for epoch, value in enumerate(values):
-            trainer = _make_trainer(module, cfg, {"val/forces_mae": value}, epoch=epoch)
+            trainer = _make_trainer(module, cfg, {"val_forces/forces_mae": value}, epoch=epoch)
             manager.on_validation_epoch_end(trainer, module)
 
         ckpts = sorted(tmp_path.glob("*.ckpt"))
@@ -416,7 +417,7 @@ class TestSidecars:
             assert sidecar_path.is_file(), f"Missing sidecar for {ckpt.name}"
             sidecar = json.loads(sidecar_path.read_text())
             assert sidecar["pool"] in ("top_k", "interval", "last")
-            assert sidecar["metrics"]["val/forces_mae"] == values[sidecar["epoch"]]
+            assert sidecar["metrics"]["val_forces/forces_mae"] == values[sidecar["epoch"]]
             assert sidecar["config_path"] == "config.yaml"
             assert sidecar["frozen_source_path"] == f"{FROZEN_SOURCE_DIRNAME}/"
             assert sidecar["metadata_path"] == "metadata.json"
@@ -431,7 +432,7 @@ class TestSidecars:
         module = _build_module(cfg)
         manager = _make_manager(
             tmp_path,
-            top_k={"enabled": True, "k": 1, "metric": "val/forces_mae", "mode": "min"},
+            top_k={"enabled": True, "k": 1, "metric": "val_forces/forces_mae", "mode": "min"},
             interval={"enabled": False},
             last={"enabled": False},
         )
@@ -440,7 +441,7 @@ class TestSidecars:
         manager.on_train_start(trainer, module)
 
         for epoch, value in enumerate([0.5, 0.1]):  # 0.1 evicts the 0.5 ckpt
-            trainer = _make_trainer(module, cfg, {"val/forces_mae": value}, epoch=epoch)
+            trainer = _make_trainer(module, cfg, {"val_forces/forces_mae": value}, epoch=epoch)
             manager.on_validation_epoch_end(trainer, module)
 
         remaining = {p.name for p in tmp_path.glob("best_*")}

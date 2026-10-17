@@ -214,6 +214,11 @@ class AraceRound(nn.Module):
         avg_num_neighbors: float | None = None,
         fragment_interaction_config: dict[str, typing.Any] | None = None,
         adaptive_gate_config: dict[str, typing.Any] | None = None,
+        pair_counts: typing.Mapping[tuple[int, int], int] | None = None,
+        rare_pair_enabled: bool = False,
+        min_pair_frequency: float = 0.01,
+        rare_pair_embed_dim: int = 16,
+        rare_artisan: typing.Any = None,
     ) -> None:
         super().__init__()
         self.artisan_layer: ArtisanLayer = ArtisanLayer(
@@ -222,6 +227,11 @@ class AraceRound(nn.Module):
             cutoff=cutoff,
             artisan_kwargs=artisan_kwargs,
             artisans=artisans,
+            pair_counts=pair_counts,
+            rare_pair_enabled=rare_pair_enabled,
+            min_pair_frequency=min_pair_frequency,
+            rare_pair_embed_dim=rare_pair_embed_dim,
+            rare_artisan=rare_artisan,
         )
         self.ace_block: AceBlock = AceBlock(
             irreps_node=irreps_node,
@@ -290,9 +300,7 @@ class AraceRound(nn.Module):
             when the gate is disabled) and the round's auxiliary loss
             (0-d, exactly zero unless the gate is enabled and training).
         """
-        h_pair, e_atom = self.artisan_layer(
-            h, atomic_numbers, edge_index, edge_sh, edge_lengths
-        )
+        h_pair, e_atom = self.artisan_layer(h, atomic_numbers, edge_index, edge_sh, edge_lengths)
         # ----- ACE branch (unchanged) -----
         h_local: torch.Tensor = self.ace_block(h, h_pair, edge_index)
 

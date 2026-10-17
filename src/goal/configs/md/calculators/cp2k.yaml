@@ -1,0 +1,26 @@
+# CP2K quantum-chemistry calculator (cp2k_shell subprocess mode)
+# Requires: CP2K >= 2024.2 (for set_pos_file) and ASE >= 3.23.
+#
+# The `command` must point at a cp2k_shell binary (e.g. cp2k_shell.psmp for
+# an MPI+OpenMP build). set_pos_file=true sends positions via a temp file
+# instead of stdin — the fix for stalls when streaming large structures to
+# MPI builds.
+_target_: goal.md.core.calculator_factory.CalculatorFactory.create
+_convert_: none
+key: cp2k
+
+command: null # null -> $ASE_CP2K_COMMAND, then "cp2k_shell.psmp"
+preset: molecular # "molecular" (MT poisson, no stress) or "bulk"
+set_pos_file: true # send positions via temp file (CP2K >= 2024.2)
+n_mpi: null # MPI ranks; null = no mpirun prefix
+omp_threads: null # OMP_NUM_THREADS per rank
+
+cutoff_ry: 400.0 # plane-wave cutoff in Rydberg (converted to eV for ASE)
+xc: PBE
+basis_set: DZVP-MOLOPT-SR-GTH
+pseudo_potential: GTH-PBE
+basis_set_file: BASIS_MOLOPT
+potential_file: GTH_POTENTIALS
+charge: 0
+uks: false
+max_scf: 50

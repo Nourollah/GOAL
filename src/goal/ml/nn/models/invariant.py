@@ -20,6 +20,7 @@ from torch_geometric.utils import scatter
 
 from goal.ml.data.graph import AtomicGraph, NodeFeatures
 from goal.ml.nn.blocks.embedding import AtomicNumberEmbedding
+from goal.ml.nn.models.simurgh.geometry import differentiable_edges
 from goal.ml.nn.primitives.radial import BesselBasis, RadialMLP
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 
@@ -56,6 +57,28 @@ class ContinuousFilterConv(nn.Module):
         edge_index: torch.Tensor,
         edge_lengths: torch.Tensor,
     ) -> torch.Tensor:
+        """Apply one residual continuous-filter convolution.
+
+        Edge lengths are expanded in a Bessel basis and mapped by
+        ``filter_net`` to per-edge filters; each message is the
+        neighbour feature ``h[col]`` multiplied element-wise by its
+        filter, summed onto the ``row`` (receiving) atom, passed through
+        ``node_mlp`` and added back to the input features.
+
+        Parameters
+        ----------
+        node_feats : Tensor
+            ``(N, hidden_dim)`` invariant node features.
+        edge_index : Tensor
+            ``(2, E)`` ``[row, col]`` edge indices.
+        edge_lengths : Tensor
+            ``(E,)`` interatomic distances in Å.
+
+        Returns
+        -------
+        Tensor
+            ``(N, hidden_dim)`` updated node features.
+        """
         row: torch.Tensor
         col: torch.Tensor
         row, col = edge_index  # (E,), (E,)
@@ -145,6 +168,36 @@ class InvariantGNN(nn.Module):
         return Irreps(f"{self._hidden_dim}x0e")
 
     def forward(self, graph: AtomicGraph) -> NodeFeatures:
+        """Compute invariant per-atom features for an atomic graph.
+
+        When grad mode is enabled and ``graph.pos`` does not yet require
+        gradients, the positions are replaced in place on ``graph`` by a
+        detached leaf with ``requires_grad=True`` so downstream heads can
+        take ``-dE/dpos``.  Edge lengths are recomputed from these
+        positions (including periodic shifts) via ``differentiable_edges``.
+
+        Parameters
+        ----------
+        graph : AtomicGraph
+            Input graph; reads ``pos`` ``(N, 3)`` in Å, ``z`` ``(N,)``,
+            ``edge_index`` ``(2, E)`` and, if present, ``unit_shifts`` /
+            ``cell`` / ``batch``.
+
+        Returns
+        -------
+        NodeFeatures
+            ``node_feats`` ``(N, hidden_channels)`` with irreps
+            ``"{hidden_channels}x0e"``; ``node_energies`` and
+            ``node_forces`` are left ``None``.
+        """
+        # Distances are re-derived from positions so forces (-dE/dpos) are
+        # non-zero — see ``HyperSpecModel.forward``.
+        positions: torch.Tensor = typing.cast(torch.Tensor, graph.pos)
+        if torch.is_grad_enabled() and not positions.requires_grad:
+            positions = positions.detach().requires_grad_(True)
+            graph.pos = positions
+        _, edge_lengths = differentiable_edges(graph, positions)
+
         h: torch.Tensor = self.embedding(graph.z)  # (N, embedding_dim)
         h = self.input_proj(h)  # (N, hidden_channels)
 
@@ -152,7 +205,7 @@ class InvariantGNN(nn.Module):
             h = interaction(  # (N, hidden_channels)
                 node_feats=h,
                 edge_index=graph.edge_index,  # (2, E)
-                edge_lengths=graph.edge_weight,  # (E,)
+                edge_lengths=edge_lengths,  # (E,)
             )
 
         return NodeFeatures(
