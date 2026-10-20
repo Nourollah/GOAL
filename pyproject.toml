@@ -227,6 +227,10 @@ platforms = ["linux-64-cuda", "linux-aarch64-cuda"]
 
 [tool.pixi.feature.cuda.dependencies]
 pytorch-gpu = ">=2.10"
+# cuda.h for Triton: on first use Triton compiles a small driver helper with
+# the system gcc (cached in ~/.triton/cache afterwards).  Without this header
+# a fresh machine fails with "fatal error: cuda.h: No such file or directory".
+cuda-cudart-dev = "*"
 
 [tool.pixi.feature.cuda.pypi-dependencies]
 # GPU-accelerated neighbour lists (NVIDIA only)
