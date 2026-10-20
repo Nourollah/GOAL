@@ -187,13 +187,29 @@ def build_fragment_geometry(
     n_fragments: int = int(fragment_index.max().item()) + 1 if fragment_index.numel() else 0
 
     if max_fragments is not None and n_fragments > int(max_fragments):
+        # The limit applies to the whole batch: candidate pairs are
+        # enumerated densely over every fragment in it.  Report how that
+        # total splits over structures, so a large batch of ordinary
+        # structures is distinguishable from one over-fragmented structure.
+        breakdown: str = ""
+        if batch is not None and fragment_index.numel():
+            frag_graph = torch.zeros(n_fragments, dtype=torch.long, device=device)
+            frag_graph[fragment_index] = batch.to(device=device, dtype=torch.long)
+            per_structure = torch.bincount(frag_graph)
+            breakdown = (
+                f" ({int(per_structure.numel())} structures in the batch, "
+                f"{int(per_structure.max().item())} fragments in the largest)"
+            )
         raise ValueError(
-            f"Fragment interaction: {n_fragments} fragments exceeds "
-            f"max_fragments={int(max_fragments)}.  Pair enumeration is O(K²), "
-            f"so a structure decomposed into many tiny fragments (e.g. a gas "
-            f"of single atoms) gets expensive.  Raise max_fragments, lower "
-            f"data.fragment_covalent_cutoff so fewer fragments are found, or "
-            f"reduce the pair cutoff."
+            f"Fragment interaction: {n_fragments} fragments in this batch{breakdown} "
+            f"exceeds max_fragments={int(max_fragments)}.  The limit counts the whole "
+            f"batch, because fragment pairs are enumerated over all of its fragments "
+            f"(O(K²) memory).  If every structure has a sensible number of fragments, "
+            f"raise max_fragments (vnode_max_fragments for NF_SIMURGH) to at least "
+            f"batch_size × the largest per-structure count, or lower data.batch_size.  "
+            f"If one structure has very many, the fragment scheme is splitting it too "
+            f"finely (check data.fragment_scheme / fragment_smarts / "
+            f"fragment_covalent_cutoff)."
         )
 
     # ----- Centroids (differentiable w.r.t. positions) -----
