@@ -26,15 +26,15 @@
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "nf_simurgh_gmd26_typecond"
-  description: "EXPERIMENT 1 — NF_SIMURGH + vnode_type_conditioned, vs nf_simurgh_gmd26 baseline"
+  name: "nf_simurgh_gmd26_combination"
+  description: "GMD-26 Fragment Combination — NF_SIMURGH. Train C2–C9 diamines and C2–C9 dicarboxylic acids, OOD C2–C9 amino acids: one terminus from each training family. Model is NF_SIMURGH with vnode_type_conditioned; identical across all five GMD tasks so only the chemistry varies."
   tags:
     [
       "simurgh",
       "nf_simurgh",
       "arace",
       "gmd",
-      "fragment_duplication",
+      "fragment_combination",
       "experimental",
       "ablation",
       "type_conditioned",
@@ -44,12 +44,12 @@ seed: 42
 
 # task_name: used by Hydra to namespace the output directory.
 # Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
-task_name: "nf_simurgh_gmd26_typecond"
+task_name: "nf_simurgh_gmd26_combination"
 
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
 # Example: "fragment_duplication" → 2026-06-02_18-30_trajectory_simurgh_fragment_duplication
-run_name_suffix: "_typecond" # prepend "_"; set to "" for no suffix
+run_name_suffix: "_combination" # prepend "_"; set to "" for no suffix
 
 # run_name: leaf of the log directory AND the W&B run name — always in sync.
 # Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
@@ -121,10 +121,10 @@ data:
   dataset_type: trajectory
 
   # Mode 4 — directory-based per-split (GMD directory layout)
-  train_dir: ${paths.data_dir}/GMD/FragmentDuplication/Training
-  val_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestID
-  test_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestOOD
-  root: ${paths.data_dir}/GMD/FragmentDuplication # for logging
+  train_dir: ${paths.data_dir}/GMD/FragmentCombination/Training
+  val_dir: ${paths.data_dir}/GMD/FragmentCombination/TestID
+  test_dir: ${paths.data_dir}/GMD/FragmentCombination/TestOOD
+  root: ${paths.data_dir}/GMD/FragmentCombination # for logging
 
   # ── MONITOR THE OOD SET DURING TRAINING ──────────────────────────
   # true → the test split above also runs through the validation loop
@@ -204,7 +204,7 @@ data:
   #   custom           cut exactly the bonds named in fragment_smarts
   #
   # `connected` IS THE WRONG CHOICE HERE. GMD structures are single
-  # covalently connected acids despite the "FragmentDuplication" subset
+  # covalently connected molecules despite the "FragmentCombination"
   # name, so `connected` returns K=1 for every structure: one virtual
   # node, no pairs, and an interaction term that is exactly zero on
   # every batch. The model would run, train, and report numbers, and the
@@ -217,14 +217,15 @@ data:
   # NF_SIMURGH is built for — with vnode_cutoff (15 Å) far above the atom
   # cutoff (8 Å), the two ends of a long chain couple in a single step.
   #
-  # Measured on this dataset with exactly these two patterns:
-  #   butanoic acid (C4, 14 atoms)  → K= 4  sizes [4,3,3,4]
-  #   decanoic acid (C10, 32 atoms) → K=10  sizes [4,3,3,3,3,3,3,3,3,4]
-  #                                       = [COOH] + 8x[CH2] + [CH3]
-  # For decanoic acid 4 of the 45 unordered centroid pairs sit beyond the
-  # 8 Å atom cutoff (max separation 9.8 Å) — precisely the pairs
-  # atom-level message passing cannot see, and the reason vnode_cutoff is
-  # set well above data.cutoff below.
+  # Measured on this dataset with exactly these three patterns:
+  #   oxalic acid  (O4C2H2,   8 atoms) → K= 2  [COOH] + [COOH]
+  #   nonanediamine (N2C9H22, 33 atoms) → K= 9  2x[CH2NH2] + 7x[CH2]
+  #   glycine      (NC2O2H5, 10 atoms, OOD) → K= 2  [CH2NH2] + [COOH]
+  #   9-aminononanoic acid (NC9O2H19, 31 atoms, OOD) → K= 9
+  # For the C9 molecules 1–2 of the 36 unordered centroid pairs sit beyond
+  # the 8 Å atom cutoff (max separation 8.1–8.6 Å) — the pairs atom-level
+  # message passing cannot see, and the reason vnode_cutoff is set well
+  # above data.cutoff below.
   #
   # Full scheme comparison table with measured fragment counts lives in
   # src/goal/configs/ml/simurgh_gmd26.yaml.
@@ -245,13 +246,43 @@ data:
   fragment_keep_groups: null # e.g. ["C(=O)O"] — atoms that stay together
 
   # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`.
-  # Name the bonds BETWEEN the groups you want, not the groups:
-  #   [CX4]-[CX4]   sp3 C to sp3 C → each chain carbon keeps only its own
-  #                 hydrogens: CH2 inside the chain, CH3 at the end
+  #   [CX4]-[CX4]   sp3 C to sp3 C → chain carbons, CH2
   #   [CX4]-[CX3]   sp3 C to the sp2 carboxyl carbon → detaches COOH
-  # Nothing cuts inside COOH, so its C, both O and the acid H stay one
-  # fragment.
-  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]"]
+  #   [CX3]-[CX3]   sp2 to sp2 — REQUIRED HERE, and the reason this task
+  #                 cannot reuse the FragmentDuplication patterns: oxalic
+  #                 acid (O4C2H2) is HOOC–COOH, its two carboxyl carbons
+  #                 bonded directly. With only the first two patterns that
+  #                 molecule is not cut at all — K=1, one virtual node,
+  #                 zero interaction energy, and no warning. Measured: K
+  #                 goes 1→2 for oxalic acid when this pattern is added.
+  #
+  # The C–N bond is deliberately NOT cut. The nitrogen stays on its
+  # carbon, so the amine terminus is one CH2NH2 group, mirroring the one
+  # COOH group at the acid terminus — one virtual node per functional
+  # terminus on both training families and on the test set.
+  #
+  # FRAGMENTS vs VOCAB — the terms used throughout this study:
+  #   fragments   the virtual nodes one molecule is cut into (K)
+  #   vocab       the distinct fragment TYPES among them; a type is the
+  #               fragment's composition (a CH2 is a CH2 wherever it sits)
+  #   vocab pair  two vocab entries joined by a cut bond, i.e. an edge
+  #               type of the fragment graph
+  # e.g. decanoic acid = 10 fragments, vocab 3 (CHO2 + 8xCH2 + CH3).
+  # Measured over every training and OOD frame:
+  #                    fragments/mol  vocab               new vocab  new pairs
+  #   train diamines        2–9       {CH4N, CH2}
+  #   train diacids         2–9       {CHO2, CH2}
+  #   OOD   amino acids     2–9       {CH4N, CH2, CHO2}      none      CH4N–CHO2
+  # The OOD vocab is exactly the union of the two training families: the
+  # amine terminus comes from one, the acid terminus from the other.
+  # The one new pair comes from GLYCINE ALONE (NCC(=O)O, the C2 member),
+  # where the two termini are bonded directly; every longer amino acid has
+  # a CH2 between them and is a pure recombination. Training does contain
+  # the homo-pairs CH4N–CH4N (ethylenediamine) and CHO2–CHO2 (oxalic
+  # acid), just not the hetero one — so glycine is where this task's
+  # difficulty should concentrate, and a per-molecule breakdown should
+  # show it.
+  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]", "[CX3]-[CX3]"]
 
 # ─────────────────────────────────────────────────────
 # MODEL
@@ -315,8 +346,12 @@ model:
     # GETTING THIS WRONG IS SILENT: an edge whose element pair has no
     # artisan is zero-masked, so it contributes exactly zero energy and
     # nothing warns. Set it to the elements actually present.
-    # GMD FragmentDuplication is O2CnH2n → H, C, O only.
-    elements: [1, 6, 8]
+    # GMD FragmentCombination has NITROGEN: the training set is α,ω-diamines
+    # (H2N–(CH2)n–NH2) alongside α,ω-dicarboxylic acids, and the OOD set is
+    # ω-amino acids. Leaving N out would silently zero-mask every N-bearing
+    # edge — the amine chemistry would contribute exactly zero energy and
+    # nothing would warn.
+    elements: [1, 6, 7, 8]
 
     # ── Atomic-energy baseline ──────────────────────────────────────
     #   "learned"  — nn.Parameter, zero-init, jointly optimised.
@@ -503,7 +538,9 @@ model:
       # Safety cap on K. Pair enumeration is O(K²), so a structure
       # decomposed into many tiny fragments (a gas of single atoms) gets
       # expensive. Raise it, or coarsen fragment_scheme, if you hit it.
-      vnode_max_fragments: 512
+      # Counts every fragment in a batch (incl. the OOD set monitored during training):
+      # GMD-26 splits reach 48 x 30 = 1440 (FCE TestOOD), so 512 is too low.
+      vnode_max_fragments: 2048
 
       # NOTE: there is no `init_zero` key. Zero-init of the correction
       # readout is a design invariant — it is what makes a fresh
@@ -1050,7 +1087,7 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags: ["simurgh", "nf_simurgh", "gmd", "experimental", "ablation"]
+    tags: ["simurgh", "nf_simurgh", "gmd", "fragment_combination"]
 
   # TensorBoard:
   # tensorboard:

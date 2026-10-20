@@ -501,7 +501,9 @@ model:
       # Safety cap on K. Pair enumeration is O(K²), so a structure
       # decomposed into many tiny fragments (a gas of single atoms) gets
       # expensive. Raise it, or coarsen fragment_scheme, if you hit it.
-      vnode_max_fragments: 512
+      # Counts every fragment in a batch (incl. the OOD set monitored during training):
+      # GMD-26 splits reach 48 x 30 = 1440 (FCE TestOOD), so 512 is too low.
+      vnode_max_fragments: 2048
 
       # NOTE: there is no `init_zero` key. Zero-init of the correction
       # readout is a design invariant — it is what makes a fresh

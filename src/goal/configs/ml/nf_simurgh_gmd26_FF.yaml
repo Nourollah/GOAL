@@ -26,8 +26,8 @@
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "nf_simurgh_gmd26_typecond"
-  description: "EXPERIMENT 1 — NF_SIMURGH + vnode_type_conditioned, vs nf_simurgh_gmd26 baseline"
+  name: "nf_simurgh_gmd26_fusion"
+  description: "GMD-26 Fragment Fusion — NF_SIMURGH. Train alcohols, diols, aldehydes, ketones and polycarbonyls; OOD C4–C10 carboxylic acids: carbonyl and hydroxyl fuse into one group. Model is NF_SIMURGH with vnode_type_conditioned; identical across all five GMD tasks so only the chemistry varies."
   tags:
     [
       "simurgh",
@@ -49,7 +49,7 @@ task_name: "nf_simurgh_gmd26_fusion"
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
 # Example: "fragment_duplication" → 2026-06-02_18-30_trajectory_simurgh_fragment_duplication
-run_name_suffix: "_typecond" # prepend "_"; set to "" for no suffix
+run_name_suffix: "_fusion" # prepend "_"; set to "" for no suffix
 
 # run_name: leaf of the log directory AND the W&B run name — always in sync.
 # Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
@@ -204,7 +204,7 @@ data:
   #   custom           cut exactly the bonds named in fragment_smarts
   #
   # `connected` IS THE WRONG CHOICE HERE. GMD structures are single
-  # covalently connected acids despite the "FragmentFusion" subset
+  # covalently connected molecules despite the "FragmentFusion"
   # name, so `connected` returns K=1 for every structure: one virtual
   # node, no pairs, and an interaction term that is exactly zero on
   # every batch. The model would run, train, and report numbers, and the
@@ -217,12 +217,13 @@ data:
   # NF_SIMURGH is built for — with vnode_cutoff (15 Å) far above the atom
   # cutoff (8 Å), the two ends of a long chain couple in a single step.
   #
-  # Measured on this dataset with exactly these two patterns:
-  #   butanoic acid (C4, 14 atoms)  → K= 4  sizes [4,3,3,4]
-  #   decanoic acid (C10, 32 atoms) → K=10  sizes [4,3,3,3,3,3,3,3,3,4]
-  #                                       = [COOH] + 8x[CH2] + [CH3]
-  # For decanoic acid 4 of the 45 unordered centroid pairs sit beyond the
-  # 8 Å atom cutoff (max separation 9.8 Å) — precisely the pairs
+  # Measured on this dataset with exactly these five patterns:
+  #   butanal   (OC4H8,   13 atoms) → K= 4  [CHO] + 2x[CH2] + [CH3]
+  #   undecanediol (OC11OH24, 37 atoms) → K=13  2x[OH] + 11x[CH2]
+  #   butanoic acid (O2C4H8, 14 atoms, OOD) → K= 5  [OH] + [CO] + 2x[CH2] + [CH3]
+  #   decanoic acid (O2C10H20, 32 atoms, OOD) → K=11
+  # For decanoic acid 9 of the 55 unordered centroid pairs sit beyond the
+  # 8 Å atom cutoff (max separation 11.8 Å) — precisely the pairs
   # atom-level message passing cannot see, and the reason vnode_cutoff is
   # set well above data.cutoff below.
   #
@@ -245,13 +246,53 @@ data:
   fragment_keep_groups: null # e.g. ["C(=O)O"] — atoms that stay together
 
   # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`.
-  # Name the bonds BETWEEN the groups you want, not the groups:
-  #   [CX4]-[CX4]   sp3 C to sp3 C → each chain carbon keeps only its own
-  #                 hydrogens: CH2 inside the chain, CH3 at the end
-  #   [CX4]-[CX3]   sp3 C to the sp2 carboxyl carbon → detaches COOH
-  # Nothing cuts inside COOH, so its C, both O and the acid H stay one
-  # fragment.
-  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]"]
+  #   [CX4]-[CX4]    sp3 C to sp3 C → chain carbons, CH2 / CH3
+  #   [CX4]-[CX3]    sp3 C to a carbonyl or carboxyl carbon
+  #   [CX3]-[CX3]    sp2 to sp2 — REQUIRED: the training set contains
+  #                  1,2-dicarbonyls (e.g. O=CCC(=O)CCC(=O)C(=O)CC=O)
+  #                  whose two carbonyl carbons are bonded directly
+  #   [CX4]-[OX2H1]  sp3 C to a hydroxyl O → OH becomes its own group
+  #   [CX3]-[OX2H1]  sp2 C to a hydroxyl O → splits COOH into its
+  #                  carbonyl and its hydroxyl
+  #
+  # THE LAST TWO ARE WHY THIS TASK DIFFERS FROM FragmentDuplication, and
+  # they are the whole point of the task:
+  #
+  #   training  alcohols / diols  →  HO        ketones  →  CO
+  #   OOD       carboxylic acid   →  CO + HO
+  #
+  # i.e. the acid is literally the FUSION of a ketone-like carbonyl and an
+  # alcohol-like hydroxyl — exactly what the task is named after.
+  #
+  # FRAGMENTS vs VOCAB — the terms used throughout this study:
+  #   fragments   the virtual nodes one molecule is cut into (K)
+  #   vocab       the distinct fragment TYPES among them; a type is the
+  #               fragment's composition (a CH2 is a CH2 wherever it sits)
+  #   vocab pair  two vocab entries joined by a cut bond, i.e. an edge
+  #               type of the fragment graph
+  # e.g. decanoic acid = 10 fragments, vocab 3 (CHO2 + 8xCH2 + CH3).
+  # Measured over every training and OOD frame:
+  #                  fragments/mol  vocab                        new vocab  new pairs
+  #   train               4–14      {CH3, CH2, CH, CHO, CO, HO}
+  #   OOD   acids         5–11      {CH3, CH2, CO, HO}             none       CO–HO
+  # No new vocab: the acid's carbonyl is the ketones' CO, its hydroxyl is
+  # the alcohols' HO. What IS new is the bond joining them — the CO–HO
+  # pair, which no training molecule contains. That pair is the fusion
+  # itself, so the task's entire novelty sits in ONE edge type of the
+  # fragment graph, between two vocab entries the model already knows.
+  # Keep COOH intact instead (the FragmentDuplication rule) and the OOD
+  # set introduces new vocab, CHO2: the novelty moves from an edge to a
+  # node, and the test becomes an extrapolation to an unseen fragment.
+  # Both were measured; this set is the one that matches the task's
+  # semantics.
+  fragment_smarts:
+    [
+      "[CX4]-[CX4]",
+      "[CX4]-[CX3]",
+      "[CX3]-[CX3]",
+      "[CX4]-[OX2H1]",
+      "[CX3]-[OX2H1]",
+    ]
 
 # ─────────────────────────────────────────────────────
 # MODEL
@@ -315,7 +356,8 @@ model:
     # GETTING THIS WRONG IS SILENT: an edge whose element pair has no
     # artisan is zero-masked, so it contributes exactly zero energy and
     # nothing warns. Set it to the elements actually present.
-    # GMD FragmentFusion is O2CnH2n → H, C, O only.
+    # GMD FragmentFusion is alcohols / diols / aldehydes / ketones /
+    # polycarbonyls in training and carboxylic acids at test → H, C, O only.
     elements: [1, 6, 8]
 
     # ── Atomic-energy baseline ──────────────────────────────────────
@@ -503,7 +545,9 @@ model:
       # Safety cap on K. Pair enumeration is O(K²), so a structure
       # decomposed into many tiny fragments (a gas of single atoms) gets
       # expensive. Raise it, or coarsen fragment_scheme, if you hit it.
-      vnode_max_fragments: 512
+      # Counts every fragment in a batch (incl. the OOD set monitored during training):
+      # GMD-26 splits reach 48 x 30 = 1440 (FCE TestOOD), so 512 is too low.
+      vnode_max_fragments: 2048
 
       # NOTE: there is no `init_zero` key. Zero-init of the correction
       # readout is a design invariant — it is what makes a fresh
@@ -1050,7 +1094,7 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags: ["simurgh", "nf_simurgh", "gmd", "experimental", "ablation"]
+    tags: ["simurgh", "nf_simurgh", "gmd", "fragment_fusion"]
 
   # TensorBoard:
   # tensorboard:
