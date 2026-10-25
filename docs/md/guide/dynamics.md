@@ -21,8 +21,9 @@ calc = CalculatorFactory.create("goal_model", checkpoint="path/to/best.simurgh",
 
 sim = Simulation(
     atoms, calc,
-    steps=20_000, temperature_K=300.0, timestep_fs=0.5, friction=0.01,
-    log_interval=20, trajectory_file="md.traj", log_file="md.log",
+    dynamics_key='langevin_ase', steps=20_000, temperature_K=300.0,
+    timestep_fs=0.5, friction=0.01, log_interval=20,
+    trajectory_file="md.traj", log_file="md.log",
     output_dir="outputs/md/ethanol_300K",
 )
 result = sim.run()
@@ -34,10 +35,10 @@ result = sim.run()
 | --- | --- | --- |
 | `atoms` | — | The system. `atoms.calc` is set to `calculator`. |
 | `calculator` | — | Any ASE calculator. |
+| `dynamics_key` | `None` | The integrator used for simulations (either `"langevin_ase"` or `"langevin_flashmd"`). It will be set to `"langevin_ase"` if no value is porvided. |
+| `dynamics_cfg` | `dict()` | The configuration parameters placeholder. |
 | `steps` | `1000` | Number of integration steps per `run()` call. |
 | `temperature_K` | `300.0` | Thermostat target and initial-velocity temperature (K). |
-| `timestep_fs` | `1.0` | Time step in **femtoseconds** (converted with `ase.units.fs`). |
-| `friction` | `0.5` | Langevin friction in **1/fs** (converted as `friction / units.fs`). |
 | `chunk_size` | `100` | Steps per inner `dynamics.run()` call (progress-bar granularity, velocity restarts). |
 | `restart_thermostat` | `False` | Re-draw Maxwell–Boltzmann velocities after every chunk (see [run loop](#the-run-loop-run_dynamics)). |
 | `log_interval` | `10` | Interval, in steps, for trajectory frames, log lines and energy samples. |
@@ -46,6 +47,15 @@ result = sim.run()
 | `output_dir` | `"outputs/md"` | Created if needed. Relative to the current working directory. |
 | `show_progress` | `True` | Rich progress bar (needs `rich`, a core dependency). |
 | `initialise_velocities` | `True` | Draw Maxwell–Boltzmann velocities at `temperature_K` before the first step. |
+| `timestep` | `None` | Time step in **ASE units** (converted with `ase.units.fs`). * It must not be used along with **timestep_fs**. |
+| `timestep_fs` | `1.0` | Time step in **femtoseconds** - for `"langevin_ase"` integrator. * It must not be used along with **timestep**. |
+| `fixcm` | `None` | Fix Centre of Mass - for `"langevin_ase"` integrator. |
+| `friction` | `None` | Langevin friction in **ASE units** (converted as `friction / units.fs`) - for `"langevin_ase"` integrator. * It must not be used along with **friction_per_fs**. |
+| `friction_per_fs` | `None` | Langevin friction in **1/fs** - for `"langevin_ase"` integrator. * It must not be used along with **friction**. |
+| `time_constant` | `None` | Thermostat time constant in fs - for `"langevin_flashmd"` integrator. |
+| `model_name` | `None` | FlashMD model name - for `"langevin_flashmd"` integrator. |
+| `device` | `None` | Torch device ("cuda" or "cpu") - for `"langevin_flashmd"` integrator. |
+| `**kwargs` | --- | Additional arguments for building the dynamics integrator. |
 
 `SimulationConfig` is a dataclass with the same fields (minus `atoms`/`calculator`). It documents the schema and supplies the key set that `from_config` accepts.
 
@@ -63,7 +73,7 @@ sim.run()      # 20 000 more, same trajectory file
 ```
 
 > [!IMPORTANT]
-> `Simulation` **always** integrates with ASE's Langevin thermostat. It does not use `DynamicsFactory`, and a `dynamics:` section in a config is ignored. For FlashMD, NVE, Nosé–Hoover, Bussi or NPT, use the [lower-level path](#building-your-own-loop).
+> `Simulation` uses the `dynamics` section in a config and `DynamicsFactory` to integrate with ASE's or FlashMD's Langevin thermostat. For NVE, Nosé–Hoover, Bussi or NPT, use the [lower-level path](#building-your-own-loop).
 
 ### `RunResult`
 
@@ -88,16 +98,20 @@ calculator:            # builder from `key` (or `type`; default goal_model)
   key: goal_model
   checkpoint: path/to/best.simurgh
   device: cuda
+dynamics:              # builder from `key` (or `method`; default langevin_ase)
+  key: langevin_ase
+  timestep_fs: 1.0
+  temperature_K: 300.0
+  friction_per_fs: 0.05
+  fixcm: true
 # any SimulationConfig field at the top level:
 steps: 20000
-timestep_fs: 0.5
-friction: 0.01
 trajectory_file: md.traj
 log_file: md.log
 output_dir: outputs/md/ethanol
 ```
 
-Top-level keys that are not `SimulationConfig` fields (such as `dynamics`) are silently ignored; `num_steps` is accepted as an alias of `steps`. Hydra's `_target_`/`_convert_` keys inside `molecule:`/`calculator:` are dropped, so group templates can be composed in. The [Configuration reference](../reference/configuration.md#writing-a-simulation-config-that-works) shows a template and how the bundled `langevin_with_model.yaml` is built.
+Top-level keys that are not `SimulationConfig` fields are silently ignored; `num_steps` is accepted as an alias of `steps`. Hydra's `_target_`/`_convert_` keys inside `molecule:`/`calculator:`/`dynamics:` are dropped, so group templates can be composed in. The [Configuration reference](../reference/configuration.md#writing-a-simulation-config-that-works) shows a template and how the bundled `langevin_with_model.yaml` is built.
 
 ## DynamicsFactory
 
@@ -319,7 +333,8 @@ NPT needs a calculator that returns stress. Check the calculator page for the ba
 
 | File | Purpose |
 | --- | --- |
-| [`src/goal/configs/md/dynamics/langevin.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/dynamics/langevin.yaml) | `langevin_ase` template (`timestep_fs: 1.0`, `temperature_K: 300`, `friction_per_fs: 0.05`, `fixcm: true`). Instantiate with `atoms=`. Not read by `Simulation`. |
-| [`src/goal/configs/md/simulations/langevin_with_model.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/simulations/langevin_with_model.yaml) | Default config of `goal-simulate`. Currently does not match the schema `Simulation.from_config` reads; see [Configuration](../reference/configuration.md#writing-a-simulation-config-that-works). |
+| [`src/goal/configs/md/dynamics/langevin_ase.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/dynamics/langevin_ase.yaml) | `langevin_ase` template (`timestep_fs: 1.0`, `temperature_K: 300`, `friction_per_fs: 0.05`, `fixcm: true`). Instantiate with `atoms=`. |
+| [`src/goal/configs/md/dynamics/langevin_flashmd.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/dynamics/langevin_flashmd.yaml) | `langevin_flashmd` template (`timestep: 16`, `temperature_K: 300`, `time_constant: 100.0`, `model_name: pet-omatpes-v2`, `device: null`). Instantiate with `atoms=`. |
+| [`src/goal/configs/md/simulations/langevin_with_model.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/simulations/langevin_with_model.yaml) | Default config of `goal-simulate`. |
 
 For the multiple-time-step integrator (RESPA), see [MTS overview](../mts/overview.md) and [RESPA integrator](../mts/respa.md).

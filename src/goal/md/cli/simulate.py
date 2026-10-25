@@ -52,6 +52,7 @@ def simulate(cfg: DictConfig) -> None:
     log.info("Starting MD simulation")
     log.info("Molecule config: %s", dict(cfg.get("molecule", {})))
     log.info("Calculator config: %s", dict(cfg.get("calculator", {})))
+    log.info("Dynamics config: %s", dict(cfg.get("dynamics", {})))
 
     result = simulate_from_config(cfg)
 

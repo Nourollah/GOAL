@@ -121,7 +121,7 @@ run_dynamics(dyn, steps=2_000)
 ```
 
 > [!NOTE]
-> `Simulation` always builds an ASE Langevin integrator and does not consult `DynamicsFactory`. Custom dynamics keys are therefore used through the [lower-level loop](dynamics.md#building-your-own-loop), not through `Simulation` or `goal-simulate`.
+> `Simulation` builds an ASE or FlashMD Langevin integrator via `DynamicsFactory`. Other custom dynamics keys are therefore used through the [lower-level loop](dynamics.md#building-your-own-loop).
 
 ## Custom molecule builders
 

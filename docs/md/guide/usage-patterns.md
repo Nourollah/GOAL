@@ -26,7 +26,7 @@ calc = CalculatorFactory.create("tblite", method="GFN2-xTB", charge=0)    # GFN2
 
 sim = Simulation(
     atoms, calc,
-    steps=10_000, temperature_K=300.0, timestep_fs=0.5, friction=0.01,
+    dynamics_key='langevin_ase', steps=10_000, temperature_K=300.0, timestep_fs=0.5, friction=0.01,
     log_interval=20, trajectory_file="acetone.traj", log_file="acetone.log",
     output_dir="outputs/md/acetone_gfn2",
 )
@@ -41,7 +41,7 @@ plt.show()
 
 ### With an explicit integrator
 
-`Simulation` always uses ASE Langevin. When you want a different ensemble, or the FlashMD integrator, build the dynamics yourself and reuse GOAL's observers and progress loop:
+`Simulation` uses ASE or FlashMD Langevin. When you want a different ensemble build the dynamics yourself and reuse GOAL's observers and progress loop:
 
 ```python
 from ase import units
@@ -87,7 +87,7 @@ print("max |F| =", abs(atoms.get_forces()).max(), "eV/Å")
 
 # Relax, then run MD from the relaxed structure
 BFGS(atoms, logfile=None).run(fmax=0.05)
-Simulation(atoms, atoms.calc, steps=20_000, timestep_fs=0.5, friction=0.01,
+Simulation(atoms, atoms.calc, dynamics_key='langevin_ase', steps=20_000, timestep_fs=0.5, friction=0.01,
            trajectory_file="md.traj", log_file="md.log",
            output_dir="outputs/md/ethanol_goal").run()
 ```
@@ -96,11 +96,11 @@ The same calculator can be obtained with `goal.md.adapters.load_goal_calculator(
 
 ## Pattern 3: config-first
 
-In the config-first pattern, one YAML file fully describes a run: the molecule, the calculator, and every `SimulationConfig` field. You run it from Python or from the CLI and override values on the command line. The file is your record of what was run.
+In the config-first pattern, one YAML file fully describes a run: the molecule, the calculator, the dynamics, and every `SimulationConfig` field. You run it from Python or from the CLI and override values on the command line. The file is your record of what was run.
 
 ### Write the config
 
-`Simulation.from_config` reads a **flat** schema: a `molecule:` mapping, a `calculator:` mapping, and the `SimulationConfig` fields at the top level. Put the file in your own config directory, for example `configs/md_runs/ethanol_goal.yaml`:
+`Simulation.from_config` reads a **flat** schema: a `molecule:` mapping, a `calculator:` mapping, a `dynamics:` mapping, and the `SimulationConfig` fields at the top level. Put the file in your own config directory, for example `configs/md_runs/ethanol_goal.yaml`:
 
 ```yaml
 # @package _global_
@@ -115,10 +115,13 @@ calculator:
   checkpoint: ???              # mandatory, given on the command line
   device: cuda
 
+dynamics:
+  key: langevin_ase            # popped (`method` also accepted)
+  temperature_K: 300.0         # popped (used by `observer` as well); the rest goes to the builder
+  timestep_fs: 0.5
+  friction: 0.01               # 1/fs
+
 steps: 20000
-temperature_K: 300.0
-timestep_fs: 0.5
-friction: 0.01                 # 1/fs
 log_interval: 20
 trajectory_file: md.traj
 log_file: md.log
@@ -160,8 +163,8 @@ for T in (250, 300, 350, 400):
     cfg = OmegaConf.create({
         "molecule": {"method": "from_smiles", "smiles": "CCO"},
         "calculator": {"type": "goal_model", "checkpoint": "path/to/best.simurgh", "device": "cuda"},
-        "steps": 20_000, "temperature_K": T, "timestep_fs": 0.5, "friction": 0.01,
-        "trajectory_file": "md.traj", "log_file": "md.log",
+        "dynamics": {"key": "langevin_flashmd", "timestep": 32, "temperature_K": T, "time_constant": 100.0}
+        "steps": 20_000, "trajectory_file": "md.traj", "log_file": "md.log",
         "output_dir": f"outputs/md/ethanol_T{T}",
     })
     simulate_from_config(cfg)
@@ -247,7 +250,7 @@ for name, spec in candidates.items():
 
     # 2) stability: short NVT run at an elevated temperature
     atoms = ref_frames[0].copy()
-    res = Simulation(atoms, calc, steps=4_000, temperature_K=500, timestep_fs=0.5,
+    res = Simulation(atoms, calc, dynamics_key='langevin_ase', steps=4_000, temperature_K=500, timestep_fs=0.5,
                      friction=0.01, show_progress=False,
                      trajectory_file=f"{name}.traj", output_dir="outputs/md/compare").run()
     traj = read(f"outputs/md/compare/{name}.traj", index=":")
