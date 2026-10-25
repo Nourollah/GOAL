@@ -203,7 +203,8 @@ src/goal/configs/
 ├── md/                                   # goal.md configs (goal-simulate's config tree)
 │   ├── README.md
 │   ├── calculators/                      #   cp2k, cp2k_pw, espresso, vasp, mace, flashmd, upet, tblite, goal_model
-│   ├── dynamics/langevin.yaml
+│   ├── dynamics/langevin_ase.yaml
+│   ├── dynamics/langevin_flashmd.yaml
 │   ├── molecules/                        #   ethanol, from_file
 │   ├── simulations/langevin_with_model.yaml   # goal-simulate default
 │   ├── simulations/batch.yaml          # goal-simulate-batch --config example

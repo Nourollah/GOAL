@@ -7,7 +7,7 @@ This page lists the known limitations of `goal.md` and the errors you are most l
 | Limitation | Workaround |
 | --- | --- |
 | A config in your own directory is not found with a relative `--config-path` | Pass an absolute `--config-path` (`"$PWD/..."`), or use `--config-dir` |
-| `Simulation` always uses ASE Langevin; the `dynamics:` config section and `DynamicsFactory` are not used by it | Build the integrator yourself and use `setup_observers` + `run_dynamics` ([Dynamics](../guide/dynamics.md#building-your-own-loop)) |
+| `Simulation` uses ASE or FlashMD Langevin | Build the integrator yourself and use `setup_observers` + `run_dynamics` ([Dynamics](../guide/dynamics.md#building-your-own-loop)) |
 | `from_db` molecule builder is a placeholder | Use `ase.db` directly |
 | SMILES embedding is not seeded, so each call gives a different conformer | Generate once, save, and use `from_file` |
 | `box_molecule(**kwargs)` forwards kwargs to both `set_cell` and `center` | Do not pass kwargs; adjust with ASE afterwards |
@@ -60,7 +60,7 @@ pixi run -e cuda-full goal-simulate --config-path "$PWD/configs/md_runs" --confi
 
 ### `got an unexpected keyword argument ...`
 
-`Simulation.from_config` / `MTSSimulation.from_config` drop Hydra's `_target_` / `_convert_` keys and take the builder name from `key` or `type` (molecules also accept `method`), so the group templates can be placed under `calculator:` / `molecule:` unchanged. An unexpected keyword argument is therefore an argument the builder does not take, usually a misspelling. Check the [calculator page](../calculators/overview.md) for the backend. `method` is a real argument for `tblite` and `cp2k`, never a calculator's builder name.
+`Simulation.from_config` / `MTSSimulation.from_config` drop Hydra's `_target_` / `_convert_` keys and take the builder name from `key` or `type` (molecules also accept `method`), so the group templates can be placed under `calculator:` / `molecule:` / `dynamics:` unchanged. An unexpected keyword argument is therefore an argument the builder does not take, usually a misspelling. Check the [calculator page](../calculators/overview.md) for the backend. `method` is a real argument for `tblite` and `cp2k`, never a calculator's builder name.
 
 ### `MoleculeFactory.create() missing 1 required positional argument: 'key'`
 
@@ -153,7 +153,7 @@ Defaults differ between backends. `goal_model` defaults to `cpu`; `flashmd`, `ma
 
 Work through these causes in order:
 
-1. **Time-step units.** `DynamicsFactory.create("langevin_ase", ..., timestep=1.0)` passes `timestep` to ASE raw, which is ≈ 10 fs. Use `timestep_fs=0.5` (or `timestep=0.5 * units.fs`). `Simulation`, `goal-simulate`, `goal-simulate-batch` and the shipped `dynamics/langevin.yaml` template all work in femtoseconds.
+1. **Time-step units.** `DynamicsFactory.create("langevin_ase", ..., timestep=1.0)` passes `timestep` to ASE raw, which is ≈ 10 fs. Use `timestep_fs=0.5` (or `timestep=0.5 * units.fs`). `Simulation`, `goal-simulate`, `goal-simulate-batch` and the shipped `dynamics/langevin_ase.yaml` template all work in femtoseconds.
 2. **Time step too large for the chemistry.** Use 0.5 fs for molecules with hydrogens, less at high temperature ([Dynamics](../guide/dynamics.md#choosing-a-time-step)).
 3. **Unrelaxed start.** The MMFF94 geometry from `from_smiles` is not a minimum of your potential. Relax with the production calculator first.
 4. **Model extrapolation.** The potential is being evaluated outside its training distribution. Check the minimum interatomic distance along the trajectory, compare forces on a few frames with a reference method, and add training data from those regions (see the [train → simulate → analyse loop](../guide/ml-bridge.md#the-train-simulate-analyse-loop)).

@@ -133,6 +133,7 @@ calc = CalculatorFactory.create("tblite", method="GFN2-xTB")
 sim = Simulation(
     atoms,
     calc,
+    dynamics_key='langevin_ase'
     steps=4000,
     temperature_K=300.0,
     timestep_fs=0.5,
