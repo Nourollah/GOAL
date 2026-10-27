@@ -35,7 +35,7 @@ result = sim.run()
 | --- | --- | --- |
 | `atoms` | — | The system. `atoms.calc` is set to `calculator`. |
 | `calculator` | — | Any ASE calculator. |
-| `dynamics_key` | `None` | The integrator used for simulations (either `"langevin_ase"` or `"langevin_flashmd"`). It will be set to `"langevin_ase"` if no value is porvided. |
+| `dynamics_key` | `None` | The integrator used for simulations (either `"langevin_ase"` or `"langevin_flashmd"`). It will be set to `"langevin_ase"` if no value is provided. |
 | `dynamics_cfg` | `dict()` | The configuration parameters placeholder. |
 | `steps` | `1000` | Number of integration steps per `run()` call. |
 | `temperature_K` | `300.0` | Thermostat target and initial-velocity temperature (K). |
