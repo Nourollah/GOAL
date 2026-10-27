@@ -31,10 +31,10 @@ Usage patterns
 """
 
 from __future__ import annotations
-import warnings
 
 import dataclasses
 import typing
+import warnings
 from pathlib import Path
 
 from ase import Atoms, units
@@ -42,15 +42,15 @@ from ase.calculators.calculator import Calculator
 from ase.md.langevin import Langevin
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
+from goal.md.core import ASE_DYNAMICS_PARAMS, FLASHMD_DYNAMICS_PARAMS
 from goal.md.core.observers import setup_observers
 from goal.md.core.runner import RunResult, run_dynamics
 
-from goal.md.core import ASE_DYNAMICS_PARAMS, FLASHMD_DYNAMICS_PARAMS
-
 SUPPORTED_DYNAMICS_PARAMS = {
     "langevin_ase": ASE_DYNAMICS_PARAMS,
-    "langevin_flashmd": FLASHMD_DYNAMICS_PARAMS
+    "langevin_flashmd": FLASHMD_DYNAMICS_PARAMS,
 }
+
 
 @dataclasses.dataclass
 class SimulationConfig:
@@ -151,14 +151,17 @@ class Simulation:
         time_constant: float | None = None,
         model_name: str | None = None,
         device: str | None = None,
-        **kwargs: typing.Any
-
+        **kwargs: typing.Any,
     ) -> None:
         self.atoms = atoms
         self.atoms.calc = calculator
         self.calculator = calculator
-        self.dynamics_key = dynamics_key or "langevin_ase" # Set 'langevin_ase' if no value is provided.
-        self.dynamics_cfg = dict(dynamics_cfg) # Create another dictionary instance to keep the original configurations intact.
+        self.dynamics_key = (
+            dynamics_key or "langevin_ase"
+        )  # Set 'langevin_ase' if no value is provided.
+        self.dynamics_cfg = dict(
+            dynamics_cfg
+        )  # Create another dictionary instance to keep the original configurations intact.
         self.steps = steps
         self.temperature_K = temperature_K
         self.chunk_size = chunk_size
@@ -172,27 +175,29 @@ class Simulation:
         self._traj_file = self._resolve_path(trajectory_file)
         self._log_file = self._resolve_path(log_file)
 
-        self._dynamics: Object | None = None
+        self._dynamics: object | None = None
         self._observers: dict[str, typing.Any] = {}
 
-        assert self.dynamics_key in SUPPORTED_DYNAMICS_PARAMS.keys(), f"`dynamics_key` must be either 'langevin_ase' or 'langevin_flashmd'. Got '{self.dynamics_method}'"
+        assert (
+            self.dynamics_key in SUPPORTED_DYNAMICS_PARAMS.keys()
+        ), f"`dynamics_key` must be either 'langevin_ase' or 'langevin_flashmd'. Got '{self.dynamics_method}'"
 
         self.dynamics_cfg |= self.dyn_kwargs
 
         # Override the dynamics configuration values when they are provided by a library call.
         overrides = {
-        # Values common for both 'langevin_ase' and 'langevin_flashmd':
-                "timestep": timestep,
-                "fixcm": fixcm,
-                # Values for 'langevin_ase' dynamics method:
-                "timestep_fs": timestep_fs,
-                "friction": friction,
-                "friction_fs": friction_fs,
-                # Values for 'langevin_flashmd' dynamics method:
-                "time_constant": time_constant,
-                "model_name": model_name,
-                "device": device
-                }
+            # Values common for both 'langevin_ase' and 'langevin_flashmd':
+            "timestep": timestep,
+            "fixcm": fixcm,
+            # Values for 'langevin_ase' dynamics method:
+            "timestep_fs": timestep_fs,
+            "friction": friction,
+            "friction_per_fs": friction_per_fs,
+            # Values for 'langevin_flashmd' dynamics method:
+            "time_constant": time_constant,
+            "model_name": model_name,
+            "device": device,
+        }
 
         for key, value in overrides.items():
             if value is not None:
@@ -205,6 +210,7 @@ class Simulation:
     # ------------------------------------------------------------------
 
     def _resolve_path(self, path: str | None) -> str | None:
+        """Resolving relative paths under `output_dir`."""
         if path is None:
             return None
         p = Path(path)
@@ -212,14 +218,12 @@ class Simulation:
             return str(self.output_dir / p)
         return str(p)
 
-    def _build_dynamics(self) -> Object:
+    def _build_dynamics(self) -> object:
+        """Creates an integrator with the provided keys via `DynamicsFactory` to be used for simulations."""
         from goal.md.core.md_factory import DynamicsFactory
 
         dyn = DynamicsFactory.create(
-            self.dynamics_key,
-            self.atoms,
-            temperature_K=self.temperature_K,
-            **self.dynamics_cfg
+            self.dynamics_key, self.atoms, temperature_K=self.temperature_K, **self.dynamics_cfg
         )
         return dyn
 
@@ -247,17 +251,17 @@ class Simulation:
         """Checks if the input dynamics parameters are supported by the relevant method. Otherwise, raises ValueError"""
 
         # Change 'model', used by `flashmd.ase.langevin.Langevin`, to 'model_name' as it is handled by `goal.md.core.md_factory.DynamicsFactory`.
-        if self.dynamics_key == 'langevin_flashmd' and 'model' in self.dynamics_cfg.keys():
-            self.dynamics_cfg['model_name'] = self.dynamics_cfg.pop('model')
+        if self.dynamics_key == "langevin_flashmd" and "model" in self.dynamics_cfg.keys():
+            self.dynamics_cfg["model_name"] = self.dynamics_cfg.pop("model")
 
-            warning_msg = f"Use 'model_name' instead of 'model' as `goal.md.core.md_factory.DynamicsFactory` internally handles it. Refer to FlashMD part of `goal.md.core.md_factory.DynamicsFactory` for more information."
+            warning_msg = "Use 'model_name' instead of 'model' as `goal.md.core.md_factory.DynamicsFactory` internally handles it. Refer to FlashMD part of `goal.md.core.md_factory.DynamicsFactory` for more information."
             warnings.warn(warning_msg)
 
         supported = SUPPORTED_DYNAMICS_PARAMS[self.dynamics_key]
         unsupported = set(self.dynamics_cfg.keys()) - supported
 
         if unsupported:
-            names = ', '.join(sorted(unsupported))
+            names = ", ".join(sorted(unsupported))
             raise ValueError(
                 f"Unsupported parameter{'' if len(unsupported) == 1 else 's'} for {self.dynamics_key!r}: {names}"
             )
@@ -310,7 +314,7 @@ class Simulation:
         - ``dynamics`` - passed to :meth:`DynamicsFactory.create`
           (builder named by ``key`` or ``method``)
         - All optional fields of :class:`SimulationConfig` (``steps``,
-          ``chunk_size``, ``restart_thermostat``, ``log_interval`` …).  
+          ``chunk_size``, ``restart_thermostat``, ``log_interval`` …).
           The older spelling ``num_steps`` is accepted for ``steps``.
 
         Parameters
@@ -325,9 +329,13 @@ class Simulation:
         from goal.md.core.calculator_factory import CalculatorFactory
         from goal.md.core.molecule_factory import MoleculeFactory
 
-        if cfg.get("molecule") is None or cfg.get("calculator") is None or cfg.get("dynamics") is None:
+        if (
+            cfg.get("molecule") is None
+            or cfg.get("calculator") is None
+            or cfg.get("dynamics") is None
+        ):
             raise ValueError(
-                    "A simulation config needs top-level 'molecule:', 'calculator:', and the optional 'dynamics:' "
+                "A simulation config needs top-level 'molecule:', 'calculator:', and the optional 'dynamics:' "
                 f"sections; got top-level keys {sorted(cfg.keys())}.  A config "
                 "stored in a sub-directory must start with '# @package _global_', "
                 "otherwise Hydra nests it (e.g. under 'md.simulations')."
@@ -335,19 +343,21 @@ class Simulation:
 
         atoms: Atoms = MoleculeFactory.from_config(cfg.molecule, default_key="from_smiles")
         calculator = CalculatorFactory.from_config(cfg.calculator, default_key="goal_model")
-        
+
         # Dynamics Parameters
         dyn_cfg = dict(cfg.get("dynamics", {}))
 
         # Make a copy of the dynamics config to avoid changes to the original config and remove keys Hydra reserves for ``instantiate``.
         dynamics_cfg: dict[str, typing.Any] = {
-                str(k): v
-                for k, v in dyn_cfg.items()
-                if not (str(k).startswith('_') and str(k).startswith('_'))
-                }
+            str(k): v
+            for k, v in dyn_cfg.items()
+            if not (str(k).startswith("_") and str(k).startswith("_"))
+        }
 
-        temperature_K: float = dynamics_cfg.pop('temperature_K', 300.0)
-        dynamics_key: str = dynamics_cfg.pop('key', None) or dynamics_cfg.pop('method', 'langevin_ase')
+        temperature_K: float = dynamics_cfg.pop("temperature_K", 300.0)
+        dynamics_key: str = dynamics_cfg.pop("key", None) or dynamics_cfg.pop(
+            "method", "langevin_ase"
+        )
 
         # Simulation parameters
         sim_keys = {f.name for f in dataclasses.fields(SimulationConfig)}
@@ -356,13 +366,13 @@ class Simulation:
             sim_params["steps"] = int(cfg.num_steps)
 
         return cls(
-                atoms=atoms,
-                calculator=calculator,
-                dynamics_key=dynamics_key,
-                dynamics_cfg=dynamics_cfg,
-                temperature_K=temperature_K,
-                **sim_params
-                )
+            atoms=atoms,
+            calculator=calculator,
+            dynamics_key=dynamics_key,
+            dynamics_cfg=dynamics_cfg,
+            temperature_K=temperature_K,
+            **sim_params,
+        )
 
 
 def simulate_from_config(cfg: typing.Any) -> RunResult:

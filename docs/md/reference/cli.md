@@ -54,7 +54,7 @@ dynamics:
   timestep_fs: 0.5
   friction: 0.01
   temperature_K: 300.0
-  
+
 steps: 20000
 log_interval: 20
 trajectory_file: md.traj
