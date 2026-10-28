@@ -1,0 +1,12 @@
+# FlashMD Langevin NVT thermostat (DynamicsFactory template)
+#
+# You can instantiate it yourself: hydra.utils.instantiate(cfg, atoms=atoms).
+_target_: goal.md.core.md_factory.DynamicsFactory.create
+_convert_: none
+
+key: langevin_flashmd
+timestep: 16 # fs
+temperature_K: 300.0
+time_constant: 100.0
+model_name: pet-omatpes-v2
+device: null

@@ -1,0 +1,11 @@
+# ASE Langevin NVT thermostat (DynamicsFactory template)
+#
+# You can instantiate it yourself: hydra.utils.instantiate(cfg, atoms=atoms).
+_target_: goal.md.core.md_factory.DynamicsFactory.create
+_convert_: none
+
+key: langevin_ase
+timestep_fs: 1.0 # fs
+temperature_K: 300.0
+friction_per_fs: 0.05 # 1/fs (≈ the 0.5 ASE units this template used to pass raw)
+fixcm: true

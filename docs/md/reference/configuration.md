@@ -15,7 +15,7 @@ src/goal/configs/md/
 │   ├── goal_model.yaml     ├── mace.yaml     ├── flashmd.yaml   ├── upet.yaml   ├── tblite.yaml
 │   ├── cp2k.yaml           ├── cp2k_pw.yaml  ├── espresso.yaml  └── vasp.yaml
 ├── dynamics/
-│   └── langevin.yaml
+│   └── langevin_ase.yaml   └── langevin_flashmd.yaml
 ├── molecules/
 │   ├── ethanol.yaml
 │   └── from_file.yaml
@@ -40,11 +40,13 @@ calculator:                # mapping; builder from `key` (or `type`; default: go
   key: goal_model
   checkpoint: path/to/best.simurgh
 
+dynamics:                  # mapping; builder from `key` (or `method`; default: langevin_ase)
+  temperature_K: 300.0
+  timestep_fs: 1.0           # fs
+  friction: 0.5              # 1/fs
+
 # SimulationConfig fields, all optional, at the TOP level
 steps: 1000
-temperature_K: 300.0
-timestep_fs: 1.0           # fs
-friction: 0.5              # 1/fs
 chunk_size: 100
 restart_thermostat: false
 log_interval: 10
@@ -57,9 +59,9 @@ initialise_velocities: true
 
 Rules worth knowing:
 
-- Any other top-level key is **silently ignored**, including `output_file` and `dynamics`; `num_steps` is accepted as an alias of `steps`. The integrator is always ASE Langevin (see [Dynamics](../guide/dynamics.md#simulation)).
+- Any other top-level key is **silently ignored**, including `output_file`; `num_steps` is accepted as an alias of `steps`.
 - `molecule:` / `calculator:` missing at the top level is an error that names the keys it did find (usually a missing `# @package _global_`).
-- Hydra's `_target_` / `_convert_` / `_recursive_` / `_partial_` keys are dropped, so the group templates can be placed under `molecule:` / `calculator:` unchanged (that is how the default config composes them).
+- Hydra's `_target_` / `_convert_` / `_recursive_` / `_partial_` keys are dropped, so the group templates can be placed under `molecule:` / `calculator:` / `dynamics:` unchanged (that is how the default config composes them).
 - After the builder name is taken from `calculator`, every remaining key must be a keyword argument of the builder's `build` method. `method` is never the builder name for calculators: it is a real argument of `tblite` and `cp2k`. A misspelt key fails loudly with `TypeError: ...build() got an unexpected keyword argument`. Each backend's arguments are listed on its [calculator page](../calculators/overview.md).
 
 ### Writing a simulation config that works
@@ -79,10 +81,13 @@ calculator:
   checkpoint: ???              # required on the command line
   device: cuda
 
+dynamics:
+  key: langevin_ase
+  temperature_K: 300.0
+  timestep_fs: 0.5
+  friction: 0.01
+
 steps: 20000
-temperature_K: 300.0
-timestep_fs: 0.5
-friction: 0.01
 log_interval: 20
 trajectory_file: md.traj
 log_file: md.log
@@ -100,7 +105,7 @@ You can check what Hydra composed without running anything:
 pixi run -e cuda-full goal-simulate --config-path "$PWD/configs" --config-name md_runs/ethanol_goal_nvt --cfg job
 ```
 
-The keys you expect (`molecule`, `calculator`, `steps`, …) must appear at the top level of the printout.
+The keys you expect (`molecule`, `calculator`, `dynamics`, …) must appear at the top level of the printout.
 
 ### How the bundled `langevin_with_model.yaml` is built
 
@@ -111,16 +116,16 @@ The keys you expect (`molecule`, `calculator`, `steps`, …) must appear at the 
 defaults:
   - /md/molecules@molecule: ethanol
   - /md/calculators@calculator: goal_model
+  - /md/dynamics@dynamics: langevin_ase
   - _self_
 
 steps: 1000
-timestep_fs: 0.5
-temperature_K: 300.0
-friction: 0.01
+chunk_size: 100
+log_interval: 10
 ...
 ```
 
-`/md/molecules@molecule: ethanol` places `molecules/ethanol.yaml` under `molecule:` (and `goal_model.yaml` under `calculator:`); their `_target_` keys are ignored by `Simulation.from_config`. Use the same pattern to reuse templates in your own configs. Before October 2026 this file lacked the header and the package overrides, so `goal-simulate` with its default config failed.
+`/md/molecules@molecule: ethanol` places `molecules/ethanol.yaml` under `molecule:` (`goal_model.yaml` under `calculator:` and `langevin_ase.yaml` under `dynamics:`); their `_target_` keys are ignored by `Simulation.from_config`. Use the same pattern to reuse templates in your own configs. Before October 2026 this file lacked the header and the package overrides, so `goal-simulate` with its default config failed.
 
 ## Calculator templates
 
@@ -171,7 +176,8 @@ Both work with `instantiate` and can be placed under `molecule:` unchanged (the 
 
 | File | Contents | Notes |
 | --- | --- | --- |
-| `dynamics/langevin.yaml` | `key: langevin_ase`, `timestep_fs: 1.0`, `temperature_K: 300.0`, `friction_per_fs: 0.05`, `fixcm: true` | Not read by `Simulation`; instantiate it with `atoms=`. Femtoseconds throughout (before October 2026 it passed `timestep: 1.0` raw, ≈ 10.18 fs). See [Dynamics](../guide/dynamics.md#langevin_ase). |
+| `dynamics/langevin_ase.yaml` | `key: langevin_ase`, `timestep_fs: 1.0`, `temperature_K: 300.0`, `friction_per_fs: 0.05`, `fixcm: true` | Instantiate it with `atoms=`. Femtoseconds throughout (before October 2026 it passed `timestep: 1.0` raw, ≈ 10.18 fs). See [Dynamics](../guide/dynamics.md#langevin_ase). |
+| `dynamics/langevin_flashmd.yaml` | `key: langevin_flashmd`, `timestep: 16`, `temperature_K: 300.0`, `time_constant: 100.0`, `model_name: pet-omatpes-v2`, `device: null` | Instantiate it with `atoms=`. See [Dynamics](../guide/dynamics.md#langevin_ase). |
 
 ### Loading any group template from Python
 
@@ -186,7 +192,7 @@ def template(path):
 
 atoms = instantiate(template("molecules/ethanol.yaml"))
 atoms.calc = instantiate(template("calculators/goal_model.yaml"), checkpoint="path/to/best.simurgh")
-dyn = instantiate(template("dynamics/langevin.yaml"), atoms=atoms, timestep_fs=0.5)
+dyn = instantiate(template("dynamics/langevin_ase.yaml"), atoms=atoms, timestep_fs=0.5)
 dyn.run(1000)
 ```
 
