@@ -26,7 +26,7 @@ The command composes a config, builds the molecule and calculator, runs Langevin
 
 ### Minimal invocation
 
-The default config runs Langevin NVT of ethanol for 1000 steps at 0.5 fs with a trained GOAL model. The checkpoint is the only required value:
+The default config runs Langevin NVT of ethanol for 1000 steps at 1.0 fs with a trained GOAL model. The checkpoint is the only required value:
 
 ```bash
 pixi run -e cuda-full goal-simulate calculator.checkpoint=logs/my_exp/runs/<run>/checkpoints
@@ -49,10 +49,13 @@ calculator:
   key: goal_model
   checkpoint: ???
   device: cuda
+dynamics:
+  key: langevin_ase
+  timestep_fs: 0.5
+  friction: 0.01
+  temperature_K: 300.0
+
 steps: 20000
-timestep_fs: 0.5
-friction: 0.01
-temperature_K: 300.0
 log_interval: 20
 trajectory_file: md.traj
 log_file: md.log
@@ -81,8 +84,8 @@ pixi run -e cuda-full goal-simulate "${CFG[@]}" $CKPT molecule.key=from_file '~m
 # Different backend: delete the calculator mapping, then add a new one
 pixi run -e cuda-full goal-simulate "${CFG[@]}" '~calculator' '+calculator={key: tblite, method: GFN2-xTB}'
 
-# Longer, hotter, GPU 1, log and frame every 100 steps
-pixi run -e cuda-full goal-simulate "${CFG[@]}" $CKPT steps=200000 temperature_K=500 calculator.device=cuda:1 log_interval=100
+# Longer, integrate with 'langevin_flashmd', hotter, GPU 1, log and frame every 100 steps
+pixi run -e cuda-full goal-simulate "${CFG[@]}" $CKPT steps=200000 dynamics_key=langevin_flashmd temperature_K=500 calculator.device=cuda:1 log_interval=100
 
 # Temperature sweep (Hydra multirun, one job per value)
 pixi run -e cuda-full goal-simulate "${CFG[@]}" $CKPT -m temperature_K=250,300,350 'output_dir=outputs/md/ethanol_${temperature_K}K'

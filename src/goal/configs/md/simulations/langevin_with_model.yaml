@@ -12,13 +12,11 @@
 defaults:
   - /md/molecules@molecule: ethanol
   - /md/calculators@calculator: goal_model
+  - /md/dynamics@dynamics: langevin_ase
   - _self_
 
 # MD parameters (read by goal.md.core.simulation.Simulation)
 steps: 1000
-timestep_fs: 0.5 # molecules with hydrogens: 0.5 fs
-temperature_K: 300.0
-friction: 0.01 # Langevin friction, 1/fs
 chunk_size: 100
 log_interval: 10
 
