@@ -31,3 +31,10 @@ data:
       "[CX4]-[OX2H1]",
       "[CX3]-[OX2H1]",
     ]
+
+# Multi-scale fragment consistency: on in the GMD configs (half-space
+# windows, two levels, b = r_c); its removal is an ablation arm.
+model:
+  backbone:
+    mfc:
+      enabled: true

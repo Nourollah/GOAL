@@ -482,7 +482,7 @@ class GOALModule(L.LightningModule):
                 {f"{self._section(prefix, section)}{k}": v for k, v in values.items()},
                 batch_size=batch.num_graphs,
                 sync_dist=True,
-                prog_bar=prog_bar and section != "gate",
+                prog_bar=prog_bar and section not in ("gate", "mfc"),
                 on_step=on_step,
                 on_epoch=True,
                 add_dataloader_idx=False,
@@ -608,7 +608,10 @@ class GOALModule(L.LightningModule):
         aux: torch.Tensor | None = predictions.get("aux_loss", None)
         if aux is None or "aux_loss" in losses:
             return losses
-        return {**losses, "aux_loss": aux, "total": losses["total"] + aux}
+        # Parts of aux_loss the model reports separately: logged, not re-added.
+        terms: dict[str, torch.Tensor] = predictions.get("aux_terms", None) or {}
+        parts = {k: v.detach() for k, v in terms.items() if k not in losses}
+        return {**losses, **parts, "aux_loss": aux, "total": losses["total"] + aux}
 
     def training_step(self, batch: AtomicGraph, batch_idx: int) -> torch.Tensor:
         """Single training step -- forward, loss, logging."""

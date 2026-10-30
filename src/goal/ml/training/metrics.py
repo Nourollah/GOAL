@@ -107,6 +107,7 @@ _SECTION_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("newton_violation", "forces"),
     ("gate", "gate"),
     ("artisan", "gate"),
+    ("mfc", "mfc"),
 )
 
 

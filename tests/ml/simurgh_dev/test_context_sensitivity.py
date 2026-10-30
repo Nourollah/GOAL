@@ -36,3 +36,13 @@ def test_binned_jacobian_matches_analytic() -> None:
     expected, _ = np.histogram(d, bins=edges, weights=np.exp(-d))
     assert counts.sum() == len(atoms) * (len(atoms) - 1)
     np.testing.assert_allclose(sums, expected, rtol=1e-12)
+
+
+def test_simurgh_atomic_energies_can_be_differentiated_after_forward() -> None:
+    """The model keeps its graph when the caller's positions require grad."""
+    from tests.ml.simurgh_dev.test_monolithic import awake, build
+
+    model = awake(build()).eval()
+    graph = AtomicGraph.from_ase(molecule("CH3CH2OH"), cutoff=5.0, dtype=torch.float64)
+    sums, counts = ctx.context_sensitivity(model, graph, np.linspace(0.0, 5.0, 11))
+    assert counts.sum() == 72 and sums[counts > 0].min() > 0

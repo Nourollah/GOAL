@@ -24,6 +24,7 @@ per work package; it becomes a modular GOAL model only at release.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import itertools
 import math
 import typing
@@ -898,6 +899,328 @@ class _D3Term(nn.Module):
 
 
 # =============================================================================
+# WP6: multi-scale fragment consistency (MFC)
+# =============================================================================
+#
+# One engine for training and diagnosis.  A *window* W is a subset of a
+# structure's atoms; its *core* is the atoms of W at least ``buffer`` from
+# every atom of the parent that W removed.  The same network evaluated on
+# W must reproduce, on the core atoms, the atom-line energies (and the
+# forces those energies generate) it predicts inside the parent: the full
+# structure, or the next larger window.  With ``buffer >= r_c`` the
+# objectives vanish exactly for a strictly local (one-layer) model, so
+# they penalise only dependence carried by message passing.
+
+
+@dataclasses.dataclass
+class Window:
+    """One window of one structure: local atom indices of ``W`` and its core.
+
+    ``parent`` is the index (in the same list) of the enclosing window, or
+    -1 for the full structure.
+    """
+
+    nodes: np.ndarray
+    core: np.ndarray
+    parent: int
+
+
+def core_mask(
+    positions: np.ndarray, inside: np.ndarray, parent: np.ndarray, buffer: float
+) -> np.ndarray:
+    """Atoms of ``inside`` at least ``buffer`` from every atom of ``parent & ~inside``."""
+    removed = parent & ~inside
+    if not removed.any():
+        return np.zeros_like(inside)
+    d = np.linalg.norm(positions[:, None] - positions[None, removed], axis=-1).min(axis=1)
+    return inside & (d >= buffer)
+
+
+def principal_axis(positions: np.ndarray) -> np.ndarray:
+    """Largest-variance direction, signed so the projections have positive skew."""
+    x = positions - positions.mean(axis=0)
+    axis = np.linalg.eigh(x.T @ x)[1][:, -1]
+    skew = float(((x @ axis) ** 3).sum())
+    return axis if skew >= 0 else -axis
+
+
+def halfspace_windows(
+    positions: np.ndarray,
+    heavy: np.ndarray,
+    buffer: float,
+    levels: int,
+    rng: np.random.Generator,
+    principal_prob: float = 0.5,
+    tries: int = 8,
+) -> list[Window]:
+    """Nested half-space cuts ``{(r - r̄)·u <= t_1 < ... }`` along one direction.
+
+    ``u`` is the principal axis with probability ``principal_prob``, else
+    uniform on the sphere; thresholds are uniform over the projected range.
+    A level is valid when it removes at least one heavy atom and its core
+    holds one.  Returns ``[]`` after ``tries`` failures.
+    """
+    full = np.ones(len(positions), dtype=bool)
+    for _ in range(tries):
+        if rng.random() < principal_prob:
+            u = principal_axis(positions)
+        else:
+            u = rng.normal(size=3)
+            u /= np.linalg.norm(u)
+        s = (positions - positions.mean(axis=0)) @ u
+        cuts = np.sort(rng.uniform(s.min(), s.max(), size=levels - 1))
+        windows: list[Window] = []
+        parent, parent_index = full, -1
+        for t in cuts[::-1]:  # largest window first
+            inside = s <= t
+            core = core_mask(positions, inside, parent, buffer)
+            if not (heavy & parent & ~inside).any() or not (heavy & core).any():
+                break
+            windows.append(Window(np.flatnonzero(inside), np.flatnonzero(core), parent_index))
+            parent, parent_index = inside, len(windows) - 1
+        if len(windows) == levels - 1:
+            return windows
+    return []
+
+
+def sphere_windows(
+    positions: np.ndarray,
+    heavy: np.ndarray,
+    buffer: float,
+    radii: typing.Sequence[float],
+    rng: np.random.Generator,
+    tries: int = 8,
+) -> list[Window]:
+    """Nested spheres of ``radii`` around a random heavy seed atom."""
+    full = np.ones(len(positions), dtype=bool)
+    seeds = np.flatnonzero(heavy) if heavy.any() else np.arange(len(positions))
+    for _ in range(tries):
+        d = np.linalg.norm(positions - positions[rng.choice(seeds)], axis=1)
+        windows: list[Window] = []
+        parent, parent_index = full, -1
+        for radius in sorted(radii, reverse=True):
+            inside = d <= radius
+            core = core_mask(positions, inside, parent, buffer)
+            if inside.all() or not (parent & ~inside).any() or not (heavy & core).any():
+                break
+            windows.append(Window(np.flatnonzero(inside), np.flatnonzero(core), parent_index))
+            parent, parent_index = inside, len(windows) - 1
+        if len(windows) == len(radii):
+            return windows
+    return []
+
+
+class _MFC(nn.Module):
+    """Training objective of multi-scale fragment consistency.
+
+    Builds windows per structure, evaluates the atom line on copies of the
+    window atoms (batched), and returns the weighted consistency loss and
+    its parts.  Parent (teacher) values are detached with
+    ``stop_grad: parent``; the window values with ``child``; neither with
+    ``none``.  Running scales normalise the energy and force terms.
+    """
+
+    def __init__(self, cfg: dict, cutoff: float) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.window_type = _choice(cfg, "window_type", ("halfspace", "sphere", "chemical"), "mfc.")
+        self.stop_grad = _choice(cfg, "stop_grad", ("parent", "none", "child"), "mfc.")
+        self.objectives = set(cfg["objective"])
+        if not self.objectives or self.objectives - {"energy", "core_force", "force"}:
+            raise ValueError(
+                f"mfc.objective must be a subset of energy, core_force, force: {cfg['objective']}"
+            )
+        if cfg["levels"] not in (2, 3):
+            raise ValueError("mfc.levels must be 2 or 3")
+        if self.window_type == "sphere" and len(cfg["radii"]) != cfg["levels"] - 1:
+            raise ValueError("mfc.radii needs levels - 1 radii")
+        for flag, on in (
+            ("mfc.window_type: chemical", self.window_type == "chemical"),
+            ("mfc.parameters: separate", cfg["parameters"] != "shared"),
+            ("mfc.window_weighting: violation", cfg["window_weighting"] != "uniform"),
+            ("mfc.tolerance: calibrated", cfg["tolerance"] != "none"),
+        ):
+            if on:
+                _not_yet(flag)
+        self.register_buffer("sigma2", torch.zeros(2))  # running scales: energy, force
+        self.register_buffer("step", torch.zeros((), dtype=torch.long))
+        self.rng = np.random.default_rng(0)
+        self.principal_prob = 0.5  # half-space direction: principal axis vs uniform
+
+    def weight(self, epoch: int) -> float:
+        """λ_MFC: 0 before ``start_epoch``, then a linear ramp over ``warmup_epochs``."""
+        start, ramp = self.cfg["start_epoch"], max(int(self.cfg["warmup_epochs"]), 1)
+        if epoch < start:
+            return 0.0
+        return float(self.cfg["weight"]) * min(1.0, (epoch - start + 1) / ramp)
+
+    def windows(
+        self, pos: np.ndarray, numbers: np.ndarray, batch: np.ndarray
+    ) -> list[tuple[int, Window, int]]:
+        """``(structure, window, slot)`` for every window of the batch."""
+        out = []
+        for g in np.unique(batch):
+            idx = np.flatnonzero(batch == g)
+            heavy = numbers[idx] > 1
+            for k in range(int(self.cfg["windows_per_structure"])):
+                if self.window_type == "halfspace":
+                    ws = halfspace_windows(
+                        pos[idx],
+                        heavy,
+                        self.cfg["buffer"],
+                        self.cfg["levels"],
+                        self.rng,
+                        self.principal_prob,
+                    )
+                else:
+                    ws = sphere_windows(
+                        pos[idx], heavy, self.cfg["buffer"], self.cfg["radii"], self.rng
+                    )
+                base = len(out)
+                for level, w in enumerate(ws):
+                    parent = -1 if w.parent < 0 else base + w.parent
+                    out.append((g, Window(idx[w.nodes], idx[w.core], parent), k * 3 + level))
+        return out
+
+    def _scale(self, i: int, value: torch.Tensor) -> torch.Tensor:
+        """Running mean of ``value`` (squared targets), initialised on first use."""
+        with torch.no_grad():
+            v = value.detach().to(self.sigma2.dtype)
+            if self.sigma2[i] == 0:
+                self.sigma2[i] = v
+            else:
+                self.sigma2[i] = 0.99 * self.sigma2[i] + 0.01 * v
+        return self.sigma2[i].clamp_min(1e-12)
+
+    def forward(
+        self,
+        model: SimurghDev,
+        graph: AtomicGraph,
+        pos: torch.Tensor,
+        pos_d: torch.Tensor,
+        elem: torch.Tensor,
+        batch: torch.Tensor,
+        e_full: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """MFC loss (``mfc``) and logged parts for one training batch."""
+        zero = e_full.new_zeros(())
+        lam = self.weight(model.epoch)
+        self.step += 1
+        if lam == 0.0 or int(self.step) % int(self.cfg["every_n_steps"]):
+            return {"mfc": zero}
+        shifts = graph.get("unit_shifts", None)
+        if shifts is not None and bool(shifts.abs().sum() > 0):
+            raise ValueError("MFC windows are defined for molecules (non-periodic graphs)")
+        windows = self.windows(
+            pos_d.detach().cpu().numpy(), graph.atomic_numbers.cpu().numpy(), batch.cpu().numpy()
+        )
+        num_graphs = int(batch.max()) + 1
+        valid = len({g for g, _, _ in windows}) / num_graphs
+        if not windows:
+            return {"mfc": zero, "mfc_valid_fraction": zero + valid}
+
+        # copies of the window atoms, one block per window
+        device = pos.device
+        copies = [torch.as_tensor(w.nodes, device=device) for _, w, _ in windows]
+        offsets = np.cumsum([0] + [len(c) for c in copies])
+        src = torch.cat(copies)
+        lookup = torch.full((pos.shape[0],), -1, dtype=torch.long, device=device)
+        row, col = graph.edge_index
+        edges = []
+        for k, c in enumerate(copies):
+            lookup.fill_(-1)
+            lookup[c] = torch.arange(len(c), device=device) + int(offsets[k])
+            keep = (lookup[row] >= 0) & (lookup[col] >= 0)
+            edges.append(torch.stack([lookup[row[keep]], lookup[col[keep]]]))
+        edge_index = torch.cat(edges, dim=1)
+        child_grad = self.stop_grad != "child"
+        parent_grad = self.stop_grad != "parent"
+        pos_w = pos_d[src] if child_grad else pos_d[src].detach().requires_grad_(True)
+        vec = pos_w[edge_index[1]] - pos_w[edge_index[0]]
+        e_w, _ = model.atom_line(
+            elem[src], edge_index, vec, vec.norm(dim=-1), model.avg_num_neighbors
+        )
+        s = model.scale
+
+        def block(k: int) -> slice:
+            return slice(int(offsets[k]), int(offsets[k + 1]))
+
+        def rows(k: int, atoms: np.ndarray) -> torch.Tensor:
+            """Rows of window ``k``'s copy holding the given (global) atoms."""
+            return torch.as_tensor(
+                int(offsets[k]) + np.searchsorted(windows[k][1].nodes, atoms), device=device
+            )
+
+        def parent_rows(k: int, atoms: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
+            """``(energies, rows)`` of the given atoms inside window ``k``'s parent."""
+            p = windows[k][1].parent
+            if p < 0:
+                return e_full, torch.as_tensor(atoms, device=device)
+            return e_w, rows(p, atoms)
+
+        def maybe_detach(x: torch.Tensor, keep: bool) -> torch.Tensor:
+            return x if keep else x.detach()
+
+        n_windows = len(windows)
+        out: dict[str, torch.Tensor] = {"mfc_valid_fraction": zero + valid}
+        loss = zero
+        if "energy" in self.objectives:
+            child, parent = [], []
+            for k, (_, w, _) in enumerate(windows):
+                child.append(s * e_w[rows(k, w.core)])
+                e_p, r_p = parent_rows(k, w.core)
+                parent.append(s * e_p[r_p])
+            child_t = maybe_detach(torch.cat(child), child_grad)
+            parent_t = maybe_detach(torch.cat(parent), parent_grad)
+            sigma = self._scale(0, parent_t.detach().square().mean())
+            term = (child_t - parent_t).square().sum() / sigma / n_windows
+            out["mfc_energy"] = term.detach()
+            loss = loss + self.cfg["weight_energy"] * term
+        for name in sorted(self.objectives & {"core_force", "force"}):
+            term = zero
+            for slot in sorted({sl for _, _, sl in windows}):
+                ks = [k for k, (_, _, sl) in enumerate(windows) if sl == slot]
+                full_parent = windows[ks[0]][1].parent < 0  # one level per slot
+                q_child, q_parent = zero, zero
+                for k in ks:
+                    g, w, _ = windows[k]
+                    if name == "core_force":
+                        q_child = q_child + (s * e_w[rows(k, w.core)]).sum()
+                        e_p, r_p = parent_rows(k, w.core)
+                        q_parent = q_parent + (s * e_p[r_p]).sum()
+                    else:  # full atom-line forces: every atom's energy counts
+                        q_child = q_child + (s * e_w[block(k)]).sum()
+                        if full_parent:
+                            q_parent = q_parent + (s * e_full[batch == g]).sum()
+                        else:
+                            q_parent = q_parent + (s * e_w[block(w.parent)]).sum()
+                f_child = -torch.autograd.grad(
+                    q_child, pos_w, create_graph=child_grad, retain_graph=True
+                )[0]
+                leaf = pos if full_parent else pos_w
+                f_parent = -torch.autograd.grad(
+                    q_parent, leaf, create_graph=parent_grad, retain_graph=True
+                )[0]
+                f_child = maybe_detach(f_child, child_grad)
+                f_parent = maybe_detach(f_parent, parent_grad).to(f_child.dtype)
+                for k in ks:
+                    w = windows[k][1]
+                    atoms = w.core if name == "force" else w.nodes  # core_force: every atom of W
+                    if full_parent:
+                        ref = f_parent[torch.as_tensor(atoms, device=device)]
+                    else:
+                        ref = f_parent[rows(w.parent, atoms)]
+                    sigma = self._scale(1, ref.detach().square().sum(-1).mean())
+                    term = (
+                        term + (f_child[rows(k, atoms)] - ref).square().sum() / sigma / n_windows
+                    )
+            out[f"mfc_{name}"] = term.detach()
+            loss = loss + self.cfg["weight_force"] * term
+        out["mfc"] = lam * loss
+        return out
+
+
+# =============================================================================
 # WP4: optimiser (built by the model; GOALModule calls ``build_optimizer``)
 # =============================================================================
 
@@ -1108,7 +1431,6 @@ class SimurghDev(nn.Module):
             ("pair_line.bond_order", cfg["pair_line"]["bond_order"]),
             ("electrostatics", cfg["electrostatics"]["enabled"]),
             ("diagnostics.calm", cfg["diagnostics"]["calm"]),
-            ("mfc", cfg["mfc"]["enabled"]),
         ):
             if on:
                 _not_yet(flag)
@@ -1152,6 +1474,7 @@ class SimurghDev(nn.Module):
         self.dispersion = _D3Term(cfg["dispersion"]) if cfg["dispersion"]["enabled"] else None
         if pl["pair_first_epochs"] and not pl["enabled"]:
             raise ValueError("pair_line.pair_first_epochs needs pair_line.enabled")
+        self.mfc = _MFC(cfg["mfc"], cfg["cutoff"]) if cfg["mfc"]["enabled"] else None
         self.epoch = 0
         self.to(getattr(torch, cfg["dtype"]))
 
@@ -1186,7 +1509,8 @@ class SimurghDev(nn.Module):
         """Energy, forces and the decomposition outputs of ``graph``."""
         dtype = self.scale.dtype
         pos = graph.pos
-        if not pos.requires_grad:
+        caller_grad = pos.requires_grad  # the caller will differentiate the outputs further
+        if not caller_grad:
             pos = pos.detach().requires_grad_(True)
         pos_d = pos.to(dtype)
         vectors, lengths = differentiable_edges(graph, pos_d)
@@ -1227,7 +1551,10 @@ class SimurghDev(nn.Module):
         if e_d3 is not None:
             energy = energy + e_d3
         forces = -torch.autograd.grad(
-            energy.sum(), pos, create_graph=self.training, allow_unused=False
+            energy.sum(),
+            pos,
+            create_graph=self.training,
+            retain_graph=self.training or caller_grad,
         )[0]
         zeros = energy.new_zeros(num_graphs)
         forces = forces.to(dtype)
@@ -1247,7 +1574,12 @@ class SimurghDev(nn.Module):
                 self._fragment_decomposition(fragments, atomic, edge_index, lengths, elem, emb)
             )
         if self.training:
-            out["aux_loss"] = self._regularisers(elem, edge_index, e_atom, emb)
+            aux = self._regularisers(elem, edge_index, e_atom, emb)
+            if self.mfc is not None:
+                terms = self.mfc(self, graph, pos, pos_d, elem, batch, e_atom)
+                aux = aux + terms.pop("mfc")
+                out["aux_terms"] = terms
+            out["aux_loss"] = aux
         return out
 
     def _fragment_decomposition(self, fragments, atomic, edge_index, lengths, elem, emb):

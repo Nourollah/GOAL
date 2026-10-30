@@ -24,3 +24,10 @@ data:
   test_dir: ${paths.data_dir}/GMD/FragmentChainExtension/TestOOD
   root: ${paths.data_dir}/GMD/FragmentChainExtension
   fragment_smarts: ["[CX4]-[CX4]"]
+
+# Multi-scale fragment consistency: on in the GMD configs (half-space
+# windows, two levels, b = r_c); its removal is an ablation arm.
+model:
+  backbone:
+    mfc:
+      enabled: true
