@@ -1,0 +1,326 @@
+# @package _global_
+# ^ REQUIRED: this file lives in the `simurgh_dev` config group; without the
+#   _global_ package its contents would merge under a `simurgh_dev:` key and
+#   every task config would compose to an empty experiment.
+########################################################
+# SIMURGH (simurgh_dev) — SHARED BASE CONFIGURATION
+#
+# THIS FILE IS NOT A RUN.  Every src/goal/configs/ml/simurgh_dev_<task>.yaml
+# composes it and sets only its task data (and, for the standard
+# benchmarks, MFC off).  Ablations in src/goal/configs/ml/ablations/simurgh_dev/
+# compose a task config and change one key.
+#
+# Defaults are the proposed model B0: ACE core (nu = 3, L = 2 messages,
+# lmax_sh 3, 2 layers, 5 Å, 128 channels, 8 Bessel functions), phi_ab pair
+# line with a ZBL wall, pair-conditioned radial weights, attention gate,
+# PGS readout; Huber loss after a 5-epoch energy-only warm-up, AMSGrad,
+# EMA, float32.  Every optional capability defaults to off.
+#
+# goal-train derives `elements`, `avg_num_neighbors` (when null) and
+# `scale: force_rms` (RMS of the training force components) from the
+# training set, and records them in `dataset_stats` for resumes.
+########################################################
+
+experiment:
+  name: "simurgh_dev"
+  description: "SIMURGH (development form)"
+  tags: ["simurgh", "simurgh_dev"]
+
+seed: 42
+task_name: "simurgh_dev"
+run_name_suffix: ""
+run_name: ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}${run_name_suffix}
+
+hydra:
+  run:
+    dir: ${paths.log_dir}/${task_name}/runs/${run_name}
+  sweep:
+    dir: ${paths.log_dir}/${task_name}/multiruns/${run_name}
+    subdir: ${hydra.job.num}
+  job_logging:
+    handlers:
+      file:
+        filename: ${hydra.runtime.output_dir}/${task_name}.log
+
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT,${oc.env:PWD}}
+  data_dir: ${paths.root_dir}/data
+  log_dir: ${paths.root_dir}/logs
+  output_dir: ${hydra:runtime.output_dir}
+
+# ─────────────────────────────────────────────────────
+# DATA (task configs replace the paths and fragment settings)
+# Validation is the in-distribution set only; the OOD set is logged as
+# test_* every epoch but never selected on.
+# ─────────────────────────────────────────────────────
+data:
+  dataset_type: trajectory
+  train_dir: ${paths.data_dir}/GMD/FragmentDuplication/Training
+  val_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestID
+  test_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestOOD
+  root: ${paths.data_dir}/GMD/FragmentDuplication
+  monitor_test_during_training: true
+  cutoff: 5.0 # neighbour list; must equal model.backbone.cutoff
+  batch_size: 48
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: null
+  energy_key: energy
+  forces_key: forces
+  merge_strategy: sequential
+  split_ratio: [0.8, 0.1, 0.1]
+  split_seed: 97
+  # Fragment labels: the model returns exact fragment / inter-fragment
+  # energies whenever fragment_index is present (output only).
+  compute_fragment_index: true
+  fragment_covalent_cutoff: 1.8
+  fragment_scheme: custom
+  fragment_charge: 0
+  fragment_on_failure: raise
+  fragment_keep_groups: null
+  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]"]
+
+# ─────────────────────────────────────────────────────
+# MODEL (every key; unknown keys raise ValueError)
+# ─────────────────────────────────────────────────────
+model:
+  backbone:
+    name: simurgh_dev
+    core: ace # ace | ece
+    cutoff: ${data.cutoff}
+    elements: null # derived from the training set by goal-train
+    embedding_dim: 32
+    num_channels: 128
+    message_irreps: "128x0e + 128x1o + 128x2e"
+    lmax_sh: 3
+    num_interactions: 2
+    correlation: 3
+    product_basis: symmetric # symmetric | ladder | ladder_reduced
+    num_rbf: 8 # stage 5 sweeps 8 | 16 | 32
+    envelope_p: 5
+    radial_mlp: [64, 64, 64]
+    pair_conditioned_radial: true
+    element_weights: index # index | embedding
+    avg_num_neighbors: null # derived from the training set by goal-train
+    node_norm: none # none | rms (Muon arm only)
+    kernels: auto # auto | cuequivariance | e3nn
+    dtype: float32 # float64 only in stage 11, on A100/H100/H200
+    radial:
+      low_rank: null # null | 1-4
+      per_layer: null # null | [mlp, linear]
+      env_conditioned: false
+    a_basis:
+      regularity_prior_sigma: null # null | 0.25 | 0.5 (Å)
+      prior_weight_decay: null # required when the prior is on
+    attention:
+      mode: gate # gate | softmax_null | none
+      pan_gate: false
+    readout:
+      pgs: true
+      pgs_edge: false
+      pgs_beta: 4.0
+      pgs_directions: 16
+    pair_line:
+      enabled: true
+      mode: phi # phi | ece | phi+ece
+      coefficients: table # table | lowrank
+      basis: bessel # bessel | bspline
+      num_basis: 8
+      pair_cutoff: null # null = atom cutoff
+      r_min: 0.6 # the wall acts only below this distance (Å)
+      repulsive_wall: zbl # zbl | exp | none
+      curvature_penalty: 1.0e-4
+      many_body_penalty: 0.0
+      pair_first_epochs: 0
+      bond_order: false
+    ece: # used when core: ece, or pair_line.mode contains ece
+      lmax: 2
+      mmax: 2
+      channels: 32
+      bottleneck: 128
+      activation: fourier # fourier | o2_product
+      grid_points: 16
+      num_mp_layers: 2
+      message_width: 64
+      heads: 8
+      energy_mlp: [256, 256]
+      film: { element_dim: 4, mlp: [64, 128] }
+    electrostatics:
+      enabled: false
+      dipoles: false
+      sigma: learned # learned | 1.0
+    dispersion:
+      enabled: false # fixed analytic D3(BJ) term; no DFT; decided in stage 0
+      backend: torch # torch (tad-dftd3) | precomputed (dftd3-python)
+      functional: pbe
+      damping: bj
+      atm: false # GMD labels: ORCA D3BJ without ABC
+    diagnostics:
+      calm: false
+    # Isolated-atom energies (eV) of the GMD labels (PBE D3BJ def2-TZVP).
+    # Only `provided` is accepted; keep in sync with the data.
+    atomic_energies:
+      mode: provided
+      values:
+        1: -13.595298 # H
+        6: -1028.481145 # C
+        7: -1483.895483 # N
+        8: -2041.117735 # O
+    scale: force_rms # set to the training force RMS by goal-train
+    mfc:
+      enabled: false
+      objective: [energy, core_force] # energy | core_force | force
+      window_type: halfspace # halfspace (GMD) | sphere (long molecules) | chemical
+      levels: 2
+      radii: [8.0] # sphere only; L - 1 radii; [8.0, 14.0] for levels: 3
+      buffer: 5.0 # = atom-line cutoff r_c; values below r_c are ablation only
+      windows_per_structure: 1
+      every_n_steps: 1
+      weight: 1.0 # lambda_MFC; stage 0 sweeps 0.1 | 1 | 10
+      weight_energy: 1.0
+      weight_force: 1.0
+      start_epoch: 20
+      warmup_epochs: 10
+      stop_grad: parent # parent | none | child
+      parameters: shared # shared | separate
+      window_weighting: uniform # uniform | violation
+      tolerance: none # none | calibrated
+      include_charges: true
+      diagnostic: true
+  head: null
+
+# ─────────────────────────────────────────────────────
+# TRAINER
+# ─────────────────────────────────────────────────────
+trainer:
+  _target_: lightning.pytorch.trainer.Trainer
+  default_root_dir: ${paths.output_dir}
+  min_epochs: 10
+  max_epochs: 400 # GMD screening budget (Section 6 protocol)
+  accelerator: gpu
+  devices: 1
+  num_nodes: 1
+  precision: "32" # "64-true" together with model.backbone.dtype: float64 (stage 11)
+  strategy: auto
+  check_val_every_n_epoch: 1
+  val_check_interval: null
+  log_every_n_steps: 10
+  gradient_clip_val: null
+  gradient_clip_algorithm: "norm"
+  accumulate_grad_batches: 1
+  num_sanity_val_steps: 2
+  inference_mode: false # forces are autograd derivatives
+  deterministic: false
+  detect_anomaly: false
+  enable_model_summary: true
+  enable_progress_bar: true
+  sync_batchnorm: false
+
+# ─────────────────────────────────────────────────────
+# TRAINING RECIPE (WP4)
+# ─────────────────────────────────────────────────────
+training:
+  gradient_clip: 10.0
+  checkpoint_dir: ${paths.output_dir}/checkpoints
+  compile_model: false
+  compile:
+    mode: "default"
+    fullgraph: false
+    dynamic: null
+  slurm_mode: false
+  performance:
+    float32_matmul_precision: highest
+    cudnn_benchmark: false
+    cudnn_deterministic: false
+  optimizer:
+    name: amsgrad # amsgrad | muon | block_rms_adam (stage 1 decides)
+    lr: 0.01
+    weight_decay: 5.0e-7 # decoupled; not on embeddings or pair-line coefficients
+    muon_lr: 0.02 # muon only
+    min_lr: 1.0e-6
+    scheduler_type: reduce_on_plateau
+    scheduler:
+      patience: 50
+      factor: 0.8
+  ema:
+    enabled: true
+    decay: 0.99
+  position_noise_std: 0.0
+  # warmup_huber: 5 energy-only epochs, then E:F = 1:100.  The separate arm
+  # warmup_huber_switch adds a last stage (final 20% of epochs) with the
+  # energy weight raised 400x and lr 2.5e-4, e.g.
+  #   - {name: switch, epochs: null, lr: 2.5e-4, loss_weights: {energy: 400.0, forces: 100.0}}
+  # after a finite "main" stage.
+  stages:
+    - name: "energy_only"
+      epochs: 5
+      loss_weights:
+        energy: 1.0
+        forces: 0.0
+    - name: "main"
+      epochs: null
+      loss_weights:
+        energy: 1.0
+        forces: 100.0
+  # Huber on per-atom energy (delta 1 meV/atom) and on the per-atom
+  # force-error norm (delta 10 meV/Å); arms: fn mse | l1.
+  losses:
+    - name: energy
+      fn: huber
+      delta: 0.001
+      weight: 1.0
+    - name: forces
+      fn: huber
+      delta: 0.010
+      error: norm
+      normalize_by_n_atoms: false # mean over atoms; true = per structure first
+      weight: 100.0
+  strict_stage_labels: true
+
+dataset_stats:
+  reuse: true
+  recompute: []
+
+checkpoint_manager:
+  _target_: goal.ml.training.callbacks.checkpoint_manager.GOALCheckpointManager
+  dirpath: ${paths.output_dir}/checkpoints
+  top_k:
+    enabled: true
+    k: 5
+    metric: "val_forces/forces_mae" # validation = TestID only
+    mode: "min"
+  interval:
+    enabled: true
+    every_n_epochs: 10
+    keep_last_n: 3
+  last:
+    enabled: true
+    filename: "last.ckpt"
+  save_archive: true
+  archive_interval: false
+
+callbacks:
+  rich_progress_bar:
+    _target_: goal.ml.training.callbacks.progress.GOALRichProgressBar
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: 1
+
+logger:
+  csv:
+    _target_: lightning.pytorch.loggers.csv_logs.CSVLogger
+    save_dir: "${paths.output_dir}"
+    name: "csv_logs"
+    prefix: ""
+  wandb:
+    _target_: lightning.pytorch.loggers.wandb.WandbLogger
+    name: ${run_name}
+    project: "goal"
+    entity: null
+    save_dir: "${paths.output_dir}"
+    offline: false
+    id: null
+    log_model: false
+    group: ""
+    tags: ${experiment.tags}

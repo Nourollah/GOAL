@@ -1,0 +1,18 @@
+########################################################
+# SIMURGH (simurgh_dev) on rMD17 naphthalene (950 train / 50 validation).
+#   goal-train --config-name simurgh_dev_rmd17_naphthalene
+########################################################
+
+defaults:
+  - simurgh_dev/_rmd17
+  - _self_
+
+experiment:
+  name: "simurgh_dev_rmd17_naphthalene"
+  description: "SIMURGH on rMD17 naphthalene"
+  tags: ["simurgh", "simurgh_dev", "rmd17", "naphthalene"]
+
+task_name: "simurgh_dev_rmd17_naphthalene"
+
+data:
+  molecule: naphthalene

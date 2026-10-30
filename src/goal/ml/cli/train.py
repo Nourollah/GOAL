@@ -54,6 +54,19 @@ from goal.ml.training.resume import (
 from goal.ml.training.strategies.factory import build_strategy
 
 
+def _force_rms(dataset: typing.Iterable[typing.Any]) -> float:
+    """RMS of every force component in ``dataset`` (eV/Å)."""
+    total, count = 0.0, 0
+    for graph in dataset:
+        forces: typing.Any = getattr(graph, "forces", None)
+        if forces is not None:
+            total += float(forces.double().square().sum())
+            count += forces.numel()
+    if count == 0:
+        raise ValueError("scale: force_rms needs force labels in the training set")
+    return (total / count) ** 0.5
+
+
 def _gpu_supports_tf32() -> bool:
     """Check whether the current CUDA device supports TF32 (Ampere+, sm_80+)."""
     if not torch.cuda.is_available():
@@ -289,6 +302,7 @@ def _run_training(cfg: DictConfig) -> None:
             "simurgh_legacy_arace",
             "simurgh_legacy_monolithic",
             "simurgh_legacy_monolithic_arace",
+            "simurgh_dev",
         )
         and "elements" not in reused
     ):
@@ -350,6 +364,16 @@ def _run_training(cfg: DictConfig) -> None:
         avg_nn_arace: float = compute_avg_num_neighbors(datamodule.data_train)
         backbone_kwargs["avg_num_neighbors"] = avg_nn_arace
         print(f"[stats] avg_num_neighbors={avg_nn_arace:.4f}")
+
+    # SIMURGH: avg_num_neighbors when null, and scale = RMS of the training
+    # force components when the config asks for it (``scale: force_rms``).
+    if backbone_name == "simurgh_dev":
+        if backbone_kwargs.get("avg_num_neighbors") is None:
+            backbone_kwargs["avg_num_neighbors"] = compute_avg_num_neighbors(datamodule.data_train)
+            print(f"[stats] avg_num_neighbors={backbone_kwargs['avg_num_neighbors']:.4f}")
+        if backbone_kwargs.get("scale") == "force_rms":
+            backbone_kwargs["scale"] = _force_rms(datamodule.data_train)
+            print(f"[stats] scale (training force RMS)={backbone_kwargs['scale']:.6f}")
 
     # pair_counts — for data-driven expert routing.
     # Injected when a backbone declares rare_artisan.enabled=true.  The

@@ -1,0 +1,26 @@
+########################################################
+# SIMURGH (simurgh_dev) on GMD-26 FragmentDuplication
+# Training: C4-C10 monoacids; OOD: the matching diacids.
+# Validation = TestID (checkpoint selection); TestOOD is logged as test_*
+# every epoch and never selected on.
+#
+#   goal-train --config-name simurgh_dev_gmd26_FD
+########################################################
+
+defaults:
+  - simurgh_dev/_base
+  - _self_
+
+experiment:
+  name: "simurgh_dev_gmd26_FD"
+  description: "SIMURGH on GMD-26 FragmentDuplication"
+  tags: ["simurgh", "simurgh_dev", "gmd", "FragmentDuplication"]
+
+task_name: "simurgh_dev_gmd26_FD"
+
+data:
+  train_dir: ${paths.data_dir}/GMD/FragmentDuplication/Training
+  val_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestID
+  test_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestOOD
+  root: ${paths.data_dir}/GMD/FragmentDuplication
+  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]"]

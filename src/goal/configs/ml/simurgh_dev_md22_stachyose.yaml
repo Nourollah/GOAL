@@ -1,0 +1,19 @@
+########################################################
+# SIMURGH (simurgh_dev) on MD22 stachyose (8000 training frames).
+#   goal-train --config-name simurgh_dev_md22_stachyose
+########################################################
+
+defaults:
+  - simurgh_dev/_md22
+  - _self_
+
+experiment:
+  name: "simurgh_dev_md22_stachyose"
+  description: "SIMURGH on MD22 stachyose"
+  tags: ["simurgh", "simurgh_dev", "md22", "stachyose"]
+
+task_name: "simurgh_dev_md22_stachyose"
+
+data:
+  molecule: stachyose
+  train_size: 8000

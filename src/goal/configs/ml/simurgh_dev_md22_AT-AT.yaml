@@ -1,0 +1,19 @@
+########################################################
+# SIMURGH (simurgh_dev) on MD22 AT-AT (3000 training frames).
+#   goal-train --config-name simurgh_dev_md22_AT-AT
+########################################################
+
+defaults:
+  - simurgh_dev/_md22
+  - _self_
+
+experiment:
+  name: "simurgh_dev_md22_AT-AT"
+  description: "SIMURGH on MD22 AT-AT"
+  tags: ["simurgh", "simurgh_dev", "md22", "AT-AT"]
+
+task_name: "simurgh_dev_md22_AT-AT"
+
+data:
+  molecule: AT-AT
+  train_size: 3000

@@ -1,0 +1,33 @@
+########################################################
+# SIMURGH (simurgh_dev) on GMD-26 FragmentFusion
+# Training: fusion of fragments; OOD: fused molecules.
+# Validation = TestID (checkpoint selection); TestOOD is logged as test_*
+# every epoch and never selected on.
+#
+#   goal-train --config-name simurgh_dev_gmd26_FF
+########################################################
+
+defaults:
+  - simurgh_dev/_base
+  - _self_
+
+experiment:
+  name: "simurgh_dev_gmd26_FF"
+  description: "SIMURGH on GMD-26 FragmentFusion"
+  tags: ["simurgh", "simurgh_dev", "gmd", "FragmentFusion"]
+
+task_name: "simurgh_dev_gmd26_FF"
+
+data:
+  train_dir: ${paths.data_dir}/GMD/FragmentFusion/Training
+  val_dir: ${paths.data_dir}/GMD/FragmentFusion/TestID
+  test_dir: ${paths.data_dir}/GMD/FragmentFusion/TestOOD
+  root: ${paths.data_dir}/GMD/FragmentFusion
+  fragment_smarts:
+    [
+      "[CX4]-[CX4]",
+      "[CX4]-[CX3]",
+      "[CX3]-[CX3]",
+      "[CX4]-[OX2H1]",
+      "[CX3]-[OX2H1]",
+    ]

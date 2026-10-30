@@ -1,0 +1,19 @@
+########################################################
+# SIMURGH (simurgh_dev) on MD22 double-walled_nanotube (800 training frames).
+#   goal-train --config-name simurgh_dev_md22_double-walled_nanotube
+########################################################
+
+defaults:
+  - simurgh_dev/_md22
+  - _self_
+
+experiment:
+  name: "simurgh_dev_md22_double-walled_nanotube"
+  description: "SIMURGH on MD22 double-walled_nanotube"
+  tags: ["simurgh", "simurgh_dev", "md22", "double-walled_nanotube"]
+
+task_name: "simurgh_dev_md22_double-walled_nanotube"
+
+data:
+  molecule: double-walled_nanotube
+  train_size: 800

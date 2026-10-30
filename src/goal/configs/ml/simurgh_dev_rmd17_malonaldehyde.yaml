@@ -1,0 +1,18 @@
+########################################################
+# SIMURGH (simurgh_dev) on rMD17 malonaldehyde (950 train / 50 validation).
+#   goal-train --config-name simurgh_dev_rmd17_malonaldehyde
+########################################################
+
+defaults:
+  - simurgh_dev/_rmd17
+  - _self_
+
+experiment:
+  name: "simurgh_dev_rmd17_malonaldehyde"
+  description: "SIMURGH on rMD17 malonaldehyde"
+  tags: ["simurgh", "simurgh_dev", "rmd17", "malonaldehyde"]
+
+task_name: "simurgh_dev_rmd17_malonaldehyde"
+
+data:
+  molecule: malonaldehyde

@@ -1,0 +1,26 @@
+########################################################
+# SIMURGH (simurgh_dev) on GMD-26 FragmentCombination
+# Training: fragment combinations; OOD: new combinations.
+# Validation = TestID (checkpoint selection); TestOOD is logged as test_*
+# every epoch and never selected on.
+#
+#   goal-train --config-name simurgh_dev_gmd26_FCB
+########################################################
+
+defaults:
+  - simurgh_dev/_base
+  - _self_
+
+experiment:
+  name: "simurgh_dev_gmd26_FCB"
+  description: "SIMURGH on GMD-26 FragmentCombination"
+  tags: ["simurgh", "simurgh_dev", "gmd", "FragmentCombination"]
+
+task_name: "simurgh_dev_gmd26_FCB"
+
+data:
+  train_dir: ${paths.data_dir}/GMD/FragmentCombination/Training
+  val_dir: ${paths.data_dir}/GMD/FragmentCombination/TestID
+  test_dir: ${paths.data_dir}/GMD/FragmentCombination/TestOOD
+  root: ${paths.data_dir}/GMD/FragmentCombination
+  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]", "[CX3]-[CX3]"]

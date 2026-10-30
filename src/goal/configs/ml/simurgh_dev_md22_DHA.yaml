@@ -1,0 +1,19 @@
+########################################################
+# SIMURGH (simurgh_dev) on MD22 DHA (8000 training frames).
+#   goal-train --config-name simurgh_dev_md22_DHA
+########################################################
+
+defaults:
+  - simurgh_dev/_md22
+  - _self_
+
+experiment:
+  name: "simurgh_dev_md22_DHA"
+  description: "SIMURGH on MD22 DHA"
+  tags: ["simurgh", "simurgh_dev", "md22", "DHA"]
+
+task_name: "simurgh_dev_md22_DHA"
+
+data:
+  molecule: DHA
+  train_size: 8000

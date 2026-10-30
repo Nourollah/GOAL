@@ -1,0 +1,26 @@
+########################################################
+# SIMURGH (simurgh_dev) on GMD-26 FragmentChainExtension
+# Training: C2-C6 alkanes; OOD: longer alkanes.
+# Validation = TestID (checkpoint selection); TestOOD is logged as test_*
+# every epoch and never selected on.
+#
+#   goal-train --config-name simurgh_dev_gmd26_FCE
+########################################################
+
+defaults:
+  - simurgh_dev/_base
+  - _self_
+
+experiment:
+  name: "simurgh_dev_gmd26_FCE"
+  description: "SIMURGH on GMD-26 FragmentChainExtension"
+  tags: ["simurgh", "simurgh_dev", "gmd", "FragmentChainExtension"]
+
+task_name: "simurgh_dev_gmd26_FCE"
+
+data:
+  train_dir: ${paths.data_dir}/GMD/FragmentChainExtension/Training
+  val_dir: ${paths.data_dir}/GMD/FragmentChainExtension/TestID
+  test_dir: ${paths.data_dir}/GMD/FragmentChainExtension/TestOOD
+  root: ${paths.data_dir}/GMD/FragmentChainExtension
+  fragment_smarts: ["[CX4]-[CX4]"]

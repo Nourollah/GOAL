@@ -1,0 +1,37 @@
+# @package _global_
+# ^ REQUIRED (config group simurgh_dev): see _base.yaml.
+########################################################
+# SIMURGH — shared MD22 settings.  Not a run; compose it from
+# simurgh_dev_md22_<system>.yaml, which sets the system and its standard
+# training size.  The test set is every frame not used for training or
+# validation (cap it with data.test_size, e.g. 200 frames as in the best
+# published MD22 numbers).  MFC is off.
+# E0: the base carries the GMD isolated-atom energies (PBE D3BJ def2-TZVP).
+# MD22 (PBE+MBD) labels use other DFT settings: replace atomic_energies.values with
+# matching isolated-atom energies, otherwise the network has to learn the
+# constant offset.
+# Dispersion: MD22 labels contain MBD, not D3; keep dispersion off.
+########################################################
+
+defaults:
+  - _base
+  - _self_
+
+data:
+  dataset_type: md22
+  train_dir: null
+  val_dir: null
+  test_dir: null
+  root: ${paths.data_dir}/md22
+  molecule: Ac-Ala3-NHMe
+  train_size: 6000
+  val_size: 500
+  test_size: null
+  seed: 42
+  monitor_test_during_training: false
+  batch_size: 4
+  compute_fragment_index: false
+  fragment_smarts: null
+
+trainer:
+  max_epochs: 1000

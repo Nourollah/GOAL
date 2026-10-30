@@ -1,0 +1,18 @@
+########################################################
+# SIMURGH (simurgh_dev) on rMD17 azobenzene (950 train / 50 validation).
+#   goal-train --config-name simurgh_dev_rmd17_azobenzene
+########################################################
+
+defaults:
+  - simurgh_dev/_rmd17
+  - _self_
+
+experiment:
+  name: "simurgh_dev_rmd17_azobenzene"
+  description: "SIMURGH on rMD17 azobenzene"
+  tags: ["simurgh", "simurgh_dev", "rmd17", "azobenzene"]
+
+task_name: "simurgh_dev_rmd17_azobenzene"
+
+data:
+  molecule: azobenzene

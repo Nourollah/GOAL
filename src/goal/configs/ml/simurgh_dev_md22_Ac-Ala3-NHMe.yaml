@@ -1,0 +1,19 @@
+########################################################
+# SIMURGH (simurgh_dev) on MD22 Ac-Ala3-NHMe (6000 training frames).
+#   goal-train --config-name simurgh_dev_md22_Ac-Ala3-NHMe
+########################################################
+
+defaults:
+  - simurgh_dev/_md22
+  - _self_
+
+experiment:
+  name: "simurgh_dev_md22_Ac-Ala3-NHMe"
+  description: "SIMURGH on MD22 Ac-Ala3-NHMe"
+  tags: ["simurgh", "simurgh_dev", "md22", "Ac-Ala3-NHMe"]
+
+task_name: "simurgh_dev_md22_Ac-Ala3-NHMe"
+
+data:
+  molecule: Ac-Ala3-NHMe
+  train_size: 6000

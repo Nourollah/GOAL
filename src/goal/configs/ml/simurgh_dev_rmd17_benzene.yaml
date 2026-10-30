@@ -1,0 +1,18 @@
+########################################################
+# SIMURGH (simurgh_dev) on rMD17 benzene (950 train / 50 validation).
+#   goal-train --config-name simurgh_dev_rmd17_benzene
+########################################################
+
+defaults:
+  - simurgh_dev/_rmd17
+  - _self_
+
+experiment:
+  name: "simurgh_dev_rmd17_benzene"
+  description: "SIMURGH on rMD17 benzene"
+  tags: ["simurgh", "simurgh_dev", "rmd17", "benzene"]
+
+task_name: "simurgh_dev_rmd17_benzene"
+
+data:
+  molecule: benzene

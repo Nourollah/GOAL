@@ -363,13 +363,15 @@ def test_zbl_wall_acts_only_below_r_min() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fragment_energies_sum_to_the_local_energy() -> None:
-    model = awake(build())
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_fragment_energies_sum_to_the_local_energy(dtype: str) -> None:
+    model = awake(build(dtype=dtype))
     atoms = molecule("CH3CH2OH")
     graph = AtomicGraph.from_ase(atoms, cutoff=CUTOFF, dtype=torch.float64)
     graph.fragment_index = torch.tensor([0, 0, 1, 1, 0, 0, 0, 0, 0])
     out = model(Batch.from_data_list([graph]))
     k = out["fragment_energies"]
+    assert k.dtype == torch.float64
     assert k.shape == (2,)
     torch.testing.assert_close(k.sum(), out["atomic_energies"].sum())
     pair = out["fragment_pair_energies"]

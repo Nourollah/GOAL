@@ -1262,7 +1262,9 @@ class SimurghDev(nn.Module):
             ) + self.pair_line.wall_energy(lengths, a, b)
             fi, fj = fragments[edge_index[0]], fragments[edge_index[1]]
             cross = fi != fj
-            pair = pair.index_put((fi[cross], fj[cross]), phi[cross], accumulate=True)
+            pair = pair.index_put(
+                (fi[cross], fj[cross]), phi[cross].to(pair.dtype), accumulate=True
+            )
         out["fragment_pair_energies"] = pair
         return out
 

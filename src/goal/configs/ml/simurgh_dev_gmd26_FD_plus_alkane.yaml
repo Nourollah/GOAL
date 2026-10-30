@@ -1,0 +1,24 @@
+########################################################
+# SIMURGH (simurgh_dev) on the GMD-26 split gmd26_FD_plus_alkane
+# FragmentDuplication training set plus one alkane (C8H18) from the Chain
+# Extension OOD split; validation and OOD are Duplication's.  Compare with
+# simurgh_dev_gmd26_FD to separate missing information from genuine
+# compositional failure.  Never evaluate this model on Chain Extension.
+#
+#   goal-train --config-name simurgh_dev_gmd26_FD_plus_alkane
+########################################################
+
+defaults:
+  - simurgh_dev/_base
+  - /splits@data: gmd26_FD_plus_alkane
+  - _self_
+
+experiment:
+  name: "simurgh_dev_gmd26_FD_plus_alkane"
+  description: "SIMURGH on GMD-26 Duplication plus one alkane"
+  tags: ["simurgh", "simurgh_dev", "gmd", "FragmentDuplication", "plus_alkane"]
+
+task_name: "simurgh_dev_gmd26_FD_plus_alkane"
+
+data:
+  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]"]

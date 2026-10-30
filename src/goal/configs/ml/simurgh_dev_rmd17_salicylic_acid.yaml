@@ -1,0 +1,18 @@
+########################################################
+# SIMURGH (simurgh_dev) on rMD17 salicylic_acid (950 train / 50 validation).
+#   goal-train --config-name simurgh_dev_rmd17_salicylic_acid
+########################################################
+
+defaults:
+  - simurgh_dev/_rmd17
+  - _self_
+
+experiment:
+  name: "simurgh_dev_rmd17_salicylic_acid"
+  description: "SIMURGH on rMD17 salicylic_acid"
+  tags: ["simurgh", "simurgh_dev", "rmd17", "salicylic_acid"]
+
+task_name: "simurgh_dev_rmd17_salicylic_acid"
+
+data:
+  molecule: salicylic_acid

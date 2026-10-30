@@ -1,0 +1,19 @@
+########################################################
+# SIMURGH (simurgh_dev) on MD22 buckyball-catcher (600 training frames).
+#   goal-train --config-name simurgh_dev_md22_buckyball-catcher
+########################################################
+
+defaults:
+  - simurgh_dev/_md22
+  - _self_
+
+experiment:
+  name: "simurgh_dev_md22_buckyball-catcher"
+  description: "SIMURGH on MD22 buckyball-catcher"
+  tags: ["simurgh", "simurgh_dev", "md22", "buckyball-catcher"]
+
+task_name: "simurgh_dev_md22_buckyball-catcher"
+
+data:
+  molecule: buckyball-catcher
+  train_size: 600

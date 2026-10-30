@@ -1,0 +1,37 @@
+# @package _global_
+# ^ REQUIRED (config group simurgh_dev): see _base.yaml.
+########################################################
+# SIMURGH — shared rMD17 settings.  Not a run; compose it from
+# simurgh_dev_rmd17_<molecule>.yaml.  N = 950 train + 50 validation, the
+# rest of the trajectory is the test set; for N = 50 run with
+#   data.train_size=50 data.val_size=50 task_name=simurgh_dev_rmd17_<molecule>_n50
+# MFC is off on single-molecule benchmarks.
+# E0: the base carries the GMD isolated-atom energies (PBE D3BJ def2-TZVP).
+# rMD17 (PBE/def2-SVP) labels use other DFT settings: replace atomic_energies.values with
+# matching isolated-atom energies, otherwise the network has to learn the
+# constant offset.
+########################################################
+
+defaults:
+  - _base
+  - _self_
+
+data:
+  dataset_type: rmd17
+  train_dir: null
+  val_dir: null
+  test_dir: null
+  root: ${paths.data_dir}/md17
+  molecule: aspirin
+  revised: true
+  train_size: 950
+  val_size: 50
+  test_size: null
+  seed: 42
+  monitor_test_during_training: false
+  batch_size: 5
+  compute_fragment_index: false
+  fragment_smarts: null
+
+trainer:
+  max_epochs: 2000

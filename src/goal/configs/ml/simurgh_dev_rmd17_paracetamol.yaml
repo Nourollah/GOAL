@@ -1,0 +1,18 @@
+########################################################
+# SIMURGH (simurgh_dev) on rMD17 paracetamol (950 train / 50 validation).
+#   goal-train --config-name simurgh_dev_rmd17_paracetamol
+########################################################
+
+defaults:
+  - simurgh_dev/_rmd17
+  - _self_
+
+experiment:
+  name: "simurgh_dev_rmd17_paracetamol"
+  description: "SIMURGH on rMD17 paracetamol"
+  tags: ["simurgh", "simurgh_dev", "rmd17", "paracetamol"]
+
+task_name: "simurgh_dev_rmd17_paracetamol"
+
+data:
+  molecule: paracetamol
