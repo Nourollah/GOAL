@@ -33,6 +33,9 @@ trainer:
 
 # Optional JSON file for the test metrics
 output_file: null
+# Per-structure predictions (.npz, GOAL's evaluation format) plus dataset-level
+# metrics: centred / offset energy MAE, per-molecule signed error, force tails.
+predictions_file: null
 
 hydra:
   run:

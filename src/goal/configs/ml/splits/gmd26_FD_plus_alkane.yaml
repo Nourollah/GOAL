@@ -1,0 +1,46 @@
+# @package data
+########################################################
+# GMD-26 split "gmd26_FD_plus_alkane"
+#
+# The FragmentDuplication training set plus ONE alkane trajectory (octane,
+# C8H18) taken from the FragmentChainExtension OOD split.  Validation
+# (TestID) and the OOD set (TestOOD) are Duplication's own, unchanged.
+#
+# Why: the monoacid training compositions make none of the six diacid OOD
+# energies identifiable; adding one alkane makes all of them identifiable.
+# Running this split next to plain Duplication separates missing
+# information from genuine compositional failure.  A model trained on this
+# split must never be evaluated on Chain Extension.
+#
+# Use with any GMD experiment config (it replaces the data paths only):
+#   goal-train --config-name <experiment> +splits@data=gmd26_FD_plus_alkane
+########################################################
+train_dir: null
+val_dir: null
+test_dir: null
+root: ${paths.data_dir}/GMD/FragmentDuplication # for logging
+train_paths:
+  - ${paths.data_dir}/GMD/FragmentDuplication/Training/O2C4H8_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/Training/O2C5H10_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/Training/O2C6H12_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/Training/O2C7H14_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/Training/O2C8H16_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/Training/O2C9H18_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/Training/O2C10H20_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentChainExtension/TestOOD/C8H18_PBE.traj
+val_paths:
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestID/O2C4H8_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestID/O2C5H10_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestID/O2C6H12_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestID/O2C7H14_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestID/O2C8H16_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestID/O2C9H18_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestID/O2C10H20_PBE.traj
+test_paths:
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestOOD/O4C4H6_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestOOD/O4C5H8_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestOOD/O4C6H10_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestOOD/O4C7H12_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestOOD/O4C8H14_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestOOD/O4C9H16_PBE.traj
+  - ${paths.data_dir}/GMD/FragmentDuplication/TestOOD/O4C10H18_PBE.traj

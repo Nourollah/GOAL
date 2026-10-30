@@ -190,6 +190,7 @@ A dataclass in `goal.md.core.batched` with the same settings. CLI flag names dif
 | `traj_0000.extxyz`, `traj_0001.extxyz`, ... | One per input structure (extxyz format): a frame every `log_every` steps, with `info["step"]`, `info["energy"]` and `arrays["forces"]`. Existing files of the same name are replaced at the start of a run |
 | `trajectory.zarr` | Instead of the extxyz trajectories with `--trajectory-format zarr`: one [GOAL Zarr store](zarr_data.md), split (group) `trajectory`, positions, cells, energies and forces of every frame, ordered by structure and then step, with `structure_index` and `step` stored per frame (`ds.structure_info(i)`) |
 | `final.extxyz` | All final structures with energy and forces, in input order |
+| `stability.json` | MD only: per structure, `unstable_step` / `onset_ps` (first logged step at which a bond deviates by more than 0.5 Å or two non-bonded atoms come closer than 0.7 Å, see `BondDeviationObserver`; `null` while stable) and `mean_temperature_K`, checked every `log_every` steps from positions the run already has (no extra force calls). Also in `result.stability`; summarise with `scripts/simurgh_dev/md_stability.py --batch <output_dir>` |
 
 > [!NOTE]
 > Both backends write `trajectory.zarr` in the same order — all frames of structure 0, then structure 1, … — and record `structure_index` and `step` for every frame via `write_zarr(..., info_keys=...)`. Read them back with `ZarrDataset(root=..., cutoff=..., split="trajectory").structure_info(i)`.

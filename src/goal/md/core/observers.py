@@ -12,7 +12,10 @@ import typing
 from pathlib import Path
 
 import ase
+import numpy as np
 from ase import io as ase_io
+from ase.data import covalent_radii
+from ase.geometry import get_distances
 from ase.md import MDLogger
 
 
@@ -115,6 +118,71 @@ class EnergyCollector:
             self.energies.append(float("nan"))
         self.steps.append(self._step)
         self._step += 1
+
+
+class BondDeviationObserver:
+    """Records the first step at which a structure falls apart or collapses.
+
+    Bonded pairs come from the first frame: atoms closer than
+    ``bond_factor`` × the sum of their covalent radii.  The structure is
+    unstable once any bonded distance deviates from its starting value by
+    more than ``max_bond_deviation`` (Å), or any non-bonded pair comes
+    closer than ``min_nonbonded_distance`` (Å).  Distances use the minimum
+    image convention when the cell is periodic.
+
+    Attach it like any observer, or call :meth:`check` on positions
+    obtained elsewhere (a batched run).  It never calls the calculator.
+
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        The simulated system, in its reference (first-frame) geometry.
+    dynamics : object, optional
+        ASE dynamics; its ``nsteps`` gives the step of a detection.  Without
+        it the observer counts its own calls.
+    """
+
+    def __init__(
+        self,
+        atoms: ase.Atoms,
+        dynamics: object | None = None,
+        bond_factor: float = 1.2,
+        max_bond_deviation: float = 0.5,
+        min_nonbonded_distance: float = 0.7,
+    ) -> None:
+        self._atoms = atoms
+        self._dynamics = dynamics
+        self.max_bond_deviation = max_bond_deviation
+        self.min_nonbonded_distance = min_nonbonded_distance
+        self._pairs = np.triu_indices(len(atoms), k=1)
+        radii = covalent_radii[atoms.numbers]
+        cutoff = bond_factor * (radii[:, None] + radii[None, :])[self._pairs]
+        self._d0 = self._distances(atoms.positions)
+        self._bonded = self._d0 < cutoff
+        self._calls = 0
+        #: Step of the first detection (``None`` while stable).
+        self.onset_step: int | None = None
+
+    def _distances(self, positions: np.ndarray) -> np.ndarray:
+        _, d = get_distances(positions, cell=self._atoms.cell, pbc=self._atoms.pbc)
+        return d[self._pairs]
+
+    def check(self, positions: np.ndarray) -> bool:
+        """``True`` if ``positions`` violate the bond or contact criterion."""
+        d = self._distances(np.asarray(positions))
+        broken = np.abs(d - self._d0)[self._bonded] > self.max_bond_deviation
+        clash = d[~self._bonded] < self.min_nonbonded_distance
+        return bool(broken.any() or clash.any())
+
+    def update(self, positions: np.ndarray, step: int) -> None:
+        """Record ``step`` as the onset if this is the first violation."""
+        if self.onset_step is None and self.check(positions):
+            self.onset_step = int(step)
+
+    def __call__(self) -> None:
+        step = getattr(self._dynamics, "nsteps", self._calls)
+        self._calls += 1
+        self.update(self._atoms.positions, step)
 
 
 def setup_observers(

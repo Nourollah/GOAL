@@ -1,0 +1,2 @@
+# Allowlisted false positives for test_naming_policy.py, one per line:
+# relative/path (whole file) or relative/path:line

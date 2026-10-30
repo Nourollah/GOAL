@@ -120,12 +120,15 @@ from goal.md import DynamicsFactory
 dyn = DynamicsFactory.create(key, atoms, **kwargs)
 ```
 
-`DynamicsFactory` (`goal.md.core.md_factory`) looks up a registered `DynamicsBuilder` and returns the integrator it builds. An unknown key raises `ValueError` with the list of registered keys. Two are built in:
+`DynamicsFactory` (`goal.md.core.md_factory`) looks up a registered `DynamicsBuilder` and returns the integrator it builds. An unknown key raises `ValueError` with the list of registered keys. Three are built in:
 
 | Key | Returns | Extra dependency |
 | --- | --- | --- |
 | `langevin_ase` | `ase.md.langevin.Langevin` | none |
+| `velocity_verlet` | `ase.md.verlet.VelocityVerlet` (NVE) | none |
 | `langevin_flashmd` | `flashmd.ase.langevin.Langevin` | `flashmd` |
+
+`velocity_verlet` takes `timestep_fs` (default 1.0 fs) or `timestep` in ASE units, like `langevin_ase`; `temperature_K` only sets the initial Maxwell–Boltzmann velocities that `Simulation` draws. For an NVE drift measurement, run it with a per-atom `log_file` and summarise with `python scripts/simurgh_dev/md_stability.py --nve-log md.log` (total-energy slope in meV/atom/ps).
 
 ### `langevin_ase`
 
@@ -266,6 +269,7 @@ obs = setup_observers(dyn, atoms, trajectory_file="md.traj", log_file="md.log",
   0.0000        -438.8616    -438.8900       0.0284   219.4
   ```
 
+- **`BondDeviationObserver(atoms, dynamics=None, bond_factor=1.2, max_bond_deviation=0.5, min_nonbonded_distance=0.7)`** records in `.onset_step` the first step at which a bonded distance (bonded = closer than 1.2 × the sum of covalent radii in the first frame) deviates by more than 0.5 Å from its start, or a non-bonded pair comes closer than 0.7 Å. It reads positions only; `.check(positions)` tests positions obtained elsewhere.
 - **`EnergyCollector(atoms)`** appends `atoms.get_potential_energy()` (or `nan` if that fails) to `.energies` and a running call counter to `.steps`. `.steps` counts calls, not MD steps; multiply by the interval to get MD steps.
 
 ### The run loop: `run_dynamics`

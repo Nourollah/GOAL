@@ -45,6 +45,16 @@ ASE_DYNAMICS_PARAMS = COMMON_DYNAMICS_PARAMS | {
     "friction_per_fs",
 }
 
+# NVE: no thermostat, so no friction or fixcm; temperature_K only sets the initial velocities.
+VERLET_DYNAMICS_PARAMS = {
+    "temperature_K",
+    "timestep",
+    "timestep_fs",
+    "trajectory",
+    "logfile",
+    "loginterval",
+    "append_trajectory",
+}
 FLASHMD_DYNAMICS_PARAMS = COMMON_DYNAMICS_PARAMS | {
     "model_name",  # FlashMD Langevin actually takes 'model'. It is internally handled by GOAL's DynamicsFactory.
     "time_constant",

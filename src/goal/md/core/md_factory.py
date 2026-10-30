@@ -8,6 +8,7 @@ import typing
 import torch
 from ase import Atoms, units
 from ase.md.langevin import Langevin
+from ase.md.verlet import VelocityVerlet
 
 # Any failure, not just ImportError: an installed-but-broken flashmd stack
 # must not take ``import goal.md`` down with it.  (Seen with torch 2.14 /
@@ -173,6 +174,48 @@ class LangevinASEBuilder(DynamicsBuilder):
             **kwargs,
         )
         return dyn
+
+
+@register_dynamics("velocity_verlet")
+class VelocityVerletBuilder(DynamicsBuilder):
+    """Create ASE velocity Verlet dynamics (NVE, no thermostat)."""
+
+    def build(
+        self,
+        atoms: Atoms,
+        timestep: float | None = None,
+        timestep_fs: float | None = None,
+        temperature_K: float | None = None,
+        **kwargs: typing.Any,
+    ) -> VelocityVerlet:
+        """Create ASE velocity Verlet dynamics.
+
+        Parameters
+        ----------
+        atoms : ase.Atoms
+            System to simulate; its current velocities are the initial ones.
+        timestep : float, optional
+            Timestep in ASE units, e.g. ``0.5 * ase.units.fs``.
+        timestep_fs : float, optional
+            Timestep in fs.  Default when neither timestep is given: 1.0 fs.
+        temperature_K : float, optional
+            Ignored: NVE has no target temperature.  Accepted because
+            :class:`~goal.md.core.simulation.Simulation` passes the
+            temperature it drew the initial velocities at to every builder.
+        **kwargs
+            Additional arguments for ``VelocityVerlet`` (``trajectory``,
+            ``logfile``, ``loginterval``, ...).
+
+        Returns
+        -------
+        ase.md.verlet.VelocityVerlet
+            Dynamics integrator
+        """
+        if timestep is not None and timestep_fs is not None:
+            raise ValueError("Pass either 'timestep' (ASE units) or 'timestep_fs', not both.")
+        if timestep is None:
+            timestep = (1.0 if timestep_fs is None else float(timestep_fs)) * units.fs
+        return VelocityVerlet(atoms, timestep=timestep, **kwargs)
 
 
 @register_dynamics("langevin_flashmd")

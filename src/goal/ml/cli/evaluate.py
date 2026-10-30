@@ -19,6 +19,13 @@ only says what to evaluate on:
 
 ``--config-name <experiment>`` still works: that experiment's ``data:``
 section then replaces the checkpoint's.
+
+``predictions_file=<path>.npz`` also writes every per-structure prediction
+in GOAL's evaluation format (see :data:`~goal.ml.training.metrics.EVALUATION_KEYS`)
+and reports the dataset-level metrics of
+:func:`~goal.ml.training.metrics.evaluation_metrics` (centred and offset
+energy MAE, per-molecule signed error, force tails) — one extra pass over
+the test split.
 """
 
 from __future__ import annotations
@@ -29,12 +36,14 @@ from pathlib import Path
 
 import hydra
 import lightning as L
+import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 from goal.ml.cli import CONFIGS_ML_DIR
 from goal.ml.cli.builders import instantiate_loggers
 from goal.ml.data.datamodule import GOALDataModule
+from goal.ml.training.metrics import evaluation_metrics
 
 #: Keys of a plain ``trainer:`` block (no ``_target_``) forwarded to ``L.Trainer``.
 _TRAINER_KEYS: tuple[str, ...] = (
@@ -88,6 +97,32 @@ def build_eval_trainer(cfg: DictConfig, ckpt_cfg: DictConfig) -> L.Trainer:
     return L.Trainer(**kwargs)
 
 
+def collect_predictions(module: typing.Any, dataloader: typing.Any) -> dict[str, np.ndarray]:
+    """Per-structure predictions and labels of every batch, in the evaluation format."""
+    device = next(module.parameters()).device
+    parts: dict[str, list[np.ndarray]] = {}
+
+    def _add(key: str, value: torch.Tensor) -> None:
+        parts.setdefault(key, []).append(value.detach().cpu().double().numpy())
+
+    module.eval()
+    for batch in dataloader:
+        batch = batch.to(device)
+        with torch.enable_grad():  # forces are -dE/dpos
+            out = module(batch)
+        _add("energy", out["energy"].reshape(-1))
+        _add("energy_ref", batch.energy.reshape(-1))
+        _add("num_atoms", torch.bincount(batch.batch, minlength=batch.num_graphs))
+        _add("atomic_numbers", batch.atomic_numbers)
+        if "forces" in out and batch.get("forces", None) is not None:
+            _add("forces", out["forces"])
+            _add("forces_ref", batch.forces)
+    data = {k: np.concatenate(v) for k, v in parts.items()}
+    data["num_atoms"] = data["num_atoms"].astype(np.int64)
+    data["atomic_numbers"] = data["atomic_numbers"].astype(np.int64)
+    return data
+
+
 @hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="eval")
 def evaluate(cfg: DictConfig) -> None:
     """GOAL evaluation entry point.
@@ -118,6 +153,19 @@ def evaluate(cfg: DictConfig) -> None:
 
     results: list[dict[str, float]] = trainer.test(loaded.module, datamodule=datamodule)
 
+    summary: dict[str, typing.Any] | None = None
+    predictions_file: typing.Any = cfg.get("predictions_file", None)
+    if predictions_file and trainer.is_global_zero:
+        data = collect_predictions(loaded.module, datamodule.test_dataloader())
+        out_npz = Path(str(predictions_file))
+        out_npz.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(out_npz, **data)
+        summary = evaluation_metrics(data)
+        print(f"[goal-eval] predictions written to {out_npz}")
+        for key, value in summary.items():
+            if not isinstance(value, list):
+                print(f"[goal-eval]   {key}: {value:.6g}")
+
     output_file: typing.Any = cfg.get("output_file", None)
     if output_file and trainer.is_global_zero:
         out = Path(str(output_file))
@@ -127,6 +175,8 @@ def evaluate(cfg: DictConfig) -> None:
             "weights": loaded.weights,
             "metrics": [{k: float(v) for k, v in r.items()} for r in results],
         }
+        if summary is not None:
+            payload["evaluation"] = summary
         out.write_text(json.dumps(payload, indent=2))
         print(f"[goal-eval] metrics written to {out}")
 

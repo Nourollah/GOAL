@@ -16,6 +16,7 @@ Every evaluation path (validation during training, the test-set monitor, `goal-e
 | `forces_rmse` | `test_forces/forces_rmse` | RMS error over every Cartesian force component | eV/Å |
 | `forces_cosine_similarity` | `test_forces/forces_cosine_similarity` | mean per-atom $\cos\angle(\mathbf F^{\text{pred}}_i, \mathbf F^{\text{ref}}_i)$, in $[-1, 1]$ | — |
 | `forces_magnitude_mae` | `test_forces/forces_magnitude_mae` | $\langle \lvert\, \lVert\mathbf F^{\text{pred}}_i\rVert - \lVert\mathbf F^{\text{ref}}_i\rVert \,\rvert \rangle_i$ | eV/Å |
+| `forces_mae_<symbol>` | `test_forces/forces_mae_O` … | `forces_mae` over the atoms of one element | eV/Å |
 | `newton_violation_{x,y,z}` | `test_forces/newton_violation_x` … | $\langle \lvert \sum_{i \in m} F^{\text{pred}}_{i,\alpha} \rvert \rangle_m$ per axis | eV/Å |
 | `newton_violation` | `test_forces/newton_violation` | sum of the three axes | eV/Å |
 
@@ -25,6 +26,8 @@ How to read them:
 - **Force MAE and RMSE** are the headline numbers in most MLIP papers. A large RMSE/MAE ratio means the error is concentrated in a few outlier atoms, which are often strained geometries or bond-breaking regions.
 - **Cosine similarity and magnitude MAE** split the force error into a direction part and a size part. A model can have a good MAE but a poor cosine on weak forces near equilibrium. That matters for geometry optimisation.
 - **Newton violation** checks translational invariance: the total force on an isolated structure should be zero. Conservative (autograd) force heads give about $10^{-15}$ (floating-point noise). Direct force heads give finite values, and this metric shows how far off they are.
+
+- **Epoch values are averages of batch values, weighted by structures per batch.** For per-atom energies that is the exact mean. For force metrics it is not the mean over all atoms when molecule sizes differ between batches: on the GMD Duplication OOD set (batches of 48, ordered by size) a legacy SIMURGH Simplified checkpoint logged a force MAE of 0.050 eV/Å, while the mean over every force component is 0.057 eV/Å. Use `goal-eval predictions_file=…` (below) for exact dataset-level numbers.
 
 Metrics are only computed when the labels exist. A dataset without forces (for example QM9) gives only the energy rows.
 
@@ -158,7 +161,8 @@ The default config is [`src/goal/configs/ml/eval.yaml`](https://github.com/Nouro
 | `use_ema` | `true` | evaluate the EMA weights when the checkpoint has them |
 | `data` | `{}` | merged onto the checkpoint's `data:`; add keys with `+` |
 | `trainer.accelerator` / `devices` / `precision` | `auto` / `1` / `null` | test-loop hardware; `precision: null` = the checkpoint's |
-| `output_file` | `null` | JSON file for the metrics (`checkpoint`, `weights`, `metrics`) |
+| `output_file` | `null` | JSON file for the metrics (`checkpoint`, `weights`, `metrics`, and `evaluation` with `predictions_file`) |
+| `predictions_file` | `null` | `.npz` of every per-structure prediction (`energy`, `energy_ref`, `num_atoms`, `atomic_numbers`, `forces`, `forces_ref`), plus dataset-level metrics: energy MAE / RMSE per structure and per atom, centred energy MAE (each molecule's mean offset removed), offset MAE, mean signed error per molecule against carbon count, force MAE / RMSE / cosine / magnitude MAE, per-element force MAE and the Q95 / Q99 / max force error. One extra pass over the test split. Score any file in this format with `scripts/simurgh_dev/score_predictions.py` |
 | `hydra.run.dir` | `logs/eval/<date>_<time>` | Hydra's run directory |
 
 ### More invocations

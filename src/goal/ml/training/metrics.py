@@ -25,9 +25,13 @@ for their sum.
 
 from __future__ import annotations
 
+import collections
+import itertools
 import typing
 
+import numpy as np
 import torch
+from ase.data import chemical_symbols
 
 # Names elevated to the Lightning progress bar.  The training loop
 # reads this so it can route only the headline metrics through
@@ -205,6 +209,14 @@ def mlip_metrics(
 
         out["forces_magnitude_mae"] = (norm_p - norm_t).abs().mean()
 
+        # Per-element MAE (``forces_mae_O`` …): element-resolved errors are
+        # where a compositional failure shows first (O on GMD).
+        numbers: typing.Any = getattr(batch, "atomic_numbers", None)
+        if numbers is not None and numbers.shape[0] == err.shape[0]:
+            atom_err: torch.Tensor = err.abs().mean(dim=-1)  # (N,)
+            for z in torch.unique(numbers).tolist():
+                out[f"forces_mae_{chemical_symbols[z]}"] = atom_err[numbers == z].mean()
+
     # ---------- Newton violation (translational-invariance check) ----------
     #
     # The net force on an isolated molecule must vanish:
@@ -241,4 +253,111 @@ def mlip_metrics(
             out[f"newton_violation_{axis}"] = per_component[axis_idx]
         out["newton_violation"] = per_component.sum()
 
+    return out
+
+
+# ----------------------------------------------------------------------
+# Dataset-level evaluation metrics
+# ----------------------------------------------------------------------
+#
+# Computed once over a whole evaluation set from per-structure
+# predictions, never per batch: offsets per molecule and force tail
+# quantiles do not average over batches.  The input is GOAL's evaluation
+# format (``goal-eval predictions_file=…`` writes it; an external
+# baseline exports the same keys so both are scored by the same code):
+#
+#   energy, energy_ref           (S,)    eV, total energy per structure
+#   num_atoms                    (S,)    atoms per structure
+#   atomic_numbers               (N,)    every atom, structures concatenated
+#   forces, forces_ref           (N, 3)  eV/Å, same atom order
+
+#: Keys of the evaluation format; ``forces``/``forces_ref`` are optional.
+EVALUATION_KEYS: tuple[str, ...] = (
+    "energy",
+    "energy_ref",
+    "num_atoms",
+    "atomic_numbers",
+    "forces",
+    "forces_ref",
+)
+
+
+def _formula(numbers: np.ndarray) -> str:
+    counts = collections.Counter(chemical_symbols[int(z)] for z in numbers)
+    order = sorted(counts, key=lambda s: (s not in ("C", "H"), s != "C", s))  # Hill order
+    return "".join(f"{s}{counts[s] if counts[s] > 1 else ''}" for s in order)
+
+
+def evaluation_metrics(data: typing.Mapping[str, np.ndarray]) -> dict[str, typing.Any]:
+    """Energy and force metrics over a whole evaluation set.
+
+    Energies are reported per structure (eV) and per atom (eV/atom).
+    With residual ``r_mj = E_pred - E_ref`` of conformer ``j`` of molecule
+    ``m`` and offset ``δ_m = mean_j r_mj``:
+
+    * ``energy_mae``: ``mean |r|`` (the GMD paper's total-energy MAE);
+    * ``energy_centred_mae``: ``mean |r_mj - δ_m|``, the error left after
+      removing each molecule's constant offset;
+    * ``energy_offset_mae``: ``mean_m |δ_m|``, the offset part alone;
+    * ``per_molecule``: ``δ_m`` (the mean signed error) per molecule with
+      its carbon count, sorted by chain length.
+
+    Forces: MAE, RMSE, cosine similarity, magnitude MAE, per-element MAE
+    (``forces_mae_<symbol>``) and the tail of the per-component absolute
+    error (``forces_q95``, ``forces_q99``, ``forces_max``).
+
+    shortcut: molecules are grouped by composition, which is exact for GMD
+    (one molecule per trajectory file); add an explicit id key if isomers
+    ever share an evaluation set.
+    """
+    n_at = np.asarray(data["num_atoms"], dtype=float)
+    numbers = np.asarray(data["atomic_numbers"])
+    offsets = np.concatenate([[0], np.cumsum(data["num_atoms"])]).astype(int)
+    out: dict[str, typing.Any] = {"num_structures": len(n_at)}
+
+    r = np.asarray(data["energy"], dtype=float) - np.asarray(data["energy_ref"], dtype=float)
+    molecules = [_formula(numbers[lo:hi]) for lo, hi in itertools.pairwise(offsets)]
+    groups: dict[str, list[int]] = collections.defaultdict(list)
+    for s, m in enumerate(molecules):
+        groups[m].append(s)
+    delta = np.empty_like(r)
+    rows: list[dict[str, typing.Any]] = []
+    for m, idx in groups.items():
+        delta[idx] = r[idx].mean()
+        z = numbers[offsets[idx[0]] : offsets[idx[0] + 1]]
+        rows.append(
+            {
+                "molecule": m,
+                "num_carbon": int(np.count_nonzero(z == 6)),
+                "num_atoms": len(z),
+                "num_structures": len(idx),
+                "mean_signed_error": float(r[idx].mean()),
+                "mean_signed_error_per_atom": float(r[idx].mean() / len(z)),
+            }
+        )
+    for suffix, scale in (("", 1.0), ("_per_atom", n_at)):
+        out[f"energy_mae{suffix}"] = float(np.mean(np.abs(r / scale)))
+        out[f"energy_rmse{suffix}"] = float(np.sqrt(np.mean((r / scale) ** 2)))
+        out[f"energy_centred_mae{suffix}"] = float(np.mean(np.abs((r - delta) / scale)))
+    out["energy_offset_mae"] = float(np.mean([abs(row["mean_signed_error"]) for row in rows]))
+    out["energy_offset_mae_per_atom"] = float(
+        np.mean([abs(row["mean_signed_error_per_atom"]) for row in rows])
+    )
+    out["per_molecule"] = sorted(rows, key=lambda row: (row["num_carbon"], row["molecule"]))
+
+    if data.get("forces") is not None and data.get("forces_ref") is not None:
+        f = np.asarray(data["forces"], dtype=float)
+        t = np.asarray(data["forces_ref"], dtype=float)
+        err = np.abs(f - t)
+        out["forces_mae"] = float(err.mean())
+        out["forces_rmse"] = float(np.sqrt(np.mean((f - t) ** 2)))
+        out["forces_q95"], out["forces_q99"] = (float(q) for q in np.quantile(err, [0.95, 0.99]))
+        out["forces_max"] = float(err.max())
+        norm_f, norm_t = np.linalg.norm(f, axis=1), np.linalg.norm(t, axis=1)
+        out["forces_magnitude_mae"] = float(np.mean(np.abs(norm_f - norm_t)))
+        nonzero = norm_t > 0
+        cos = np.sum(f * t, axis=1)[nonzero] / np.maximum(norm_f * norm_t, 1e-8)[nonzero]
+        out["forces_cosine_similarity"] = float(cos.mean()) if nonzero.any() else float("nan")
+        for z in np.unique(numbers):
+            out[f"forces_mae_{chemical_symbols[int(z)]}"] = float(err[numbers == z].mean())
     return out

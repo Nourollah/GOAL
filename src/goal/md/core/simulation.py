@@ -42,13 +42,18 @@ from ase.calculators.calculator import Calculator
 from ase.md.langevin import Langevin
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
-from goal.md.core import ASE_DYNAMICS_PARAMS, FLASHMD_DYNAMICS_PARAMS
+from goal.md.core import (
+    ASE_DYNAMICS_PARAMS,
+    FLASHMD_DYNAMICS_PARAMS,
+    VERLET_DYNAMICS_PARAMS,
+)
 from goal.md.core.observers import setup_observers
 from goal.md.core.runner import RunResult, run_dynamics
 
 SUPPORTED_DYNAMICS_PARAMS = {
     "langevin_ase": ASE_DYNAMICS_PARAMS,
     "langevin_flashmd": FLASHMD_DYNAMICS_PARAMS,
+    "velocity_verlet": VERLET_DYNAMICS_PARAMS,
 }
 
 
@@ -180,7 +185,7 @@ class Simulation:
 
         assert (
             self.dynamics_key in SUPPORTED_DYNAMICS_PARAMS.keys()
-        ), f"`dynamics_key` must be either 'langevin_ase' or 'langevin_flashmd'. Got '{self.dynamics_method}'"
+        ), f"`dynamics_key` must be one of {sorted(SUPPORTED_DYNAMICS_PARAMS)}. Got '{self.dynamics_key}'"
 
         self.dynamics_cfg |= self.dyn_kwargs
 

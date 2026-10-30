@@ -35,6 +35,7 @@ or ``goal-simulate-batch --checkpoint ... --structures data/frames.xyz``.
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import time
 import typing
@@ -149,6 +150,11 @@ class BatchSimulationResult:
     ``steps_completed`` is the number of steps actually taken: the largest
     per-structure count for ASE (a relaxation stops at convergence), the
     integrated step count for nvalchemi.
+
+    ``stability`` (MD only, also written to ``stability.json``): one entry
+    per structure with ``unstable_step`` / ``onset_ps`` (``None`` while
+    stable; see :class:`~goal.md.core.observers.BondDeviationObserver`) and
+    ``mean_temperature_K``, all from the frames at every ``log_every`` step.
     """
 
     backend: str
@@ -157,6 +163,45 @@ class BatchSimulationResult:
     steps_completed: int
     wall_time_s: float
     output_files: list[str] = dataclasses.field(default_factory=list)
+    stability: list[dict[str, typing.Any]] = dataclasses.field(default_factory=list)
+
+
+class _StabilityTracker:
+    """Instability onset and temperature per structure, from the logged frames.
+
+    Reads positions and velocities the run already has every ``log_every``
+    steps, so it costs no force call.
+    """
+
+    def __init__(self, frames: list[Atoms], config: BatchSimulationConfig) -> None:
+        from goal.md.core.observers import BondDeviationObserver
+
+        self.enabled = config.mode == "md"
+        self.timestep_fs = config.timestep_fs
+        self.frames = frames
+        self.monitors = [BondDeviationObserver(a) for a in frames] if self.enabled else []
+        self.temperatures: list[list[float]] = [[] for _ in frames]
+
+    def add(self, index: int, atoms: Atoms, step: int) -> None:
+        if self.enabled:
+            self.monitors[index].update(atoms.positions, step)
+            self.temperatures[index].append(float(atoms.get_temperature()))
+
+    def summary(self) -> list[dict[str, typing.Any]]:
+        if not self.enabled:
+            return []
+        return [
+            {
+                "index": i,
+                "num_atoms": len(self.frames[i]),
+                "unstable_step": m.onset_step,
+                "onset_ps": (
+                    None if m.onset_step is None else m.onset_step * self.timestep_fs / 1e3
+                ),
+                "mean_temperature_K": float(np.mean(t)) if t else float("nan"),
+            }
+            for i, (m, t) in enumerate(zip(self.monitors, self.temperatures))
+        ]
 
 
 def resolve_backend(requested: str) -> str:
@@ -221,21 +266,41 @@ def run_batched_simulation(config: BatchSimulationConfig) -> BatchSimulationResu
         backend,
     )
     start = time.perf_counter()
+    tracker = _StabilityTracker(frames, config)
     if backend == "nvalchemi":
         try:
-            final, files, steps = _run_nvalchemi(frames, config, out_dir)
+            final, files, steps = _run_nvalchemi(frames, config, out_dir, tracker)
         except NotImplementedError as exc:  # e.g. a fragment-aware checkpoint
             if config.backend != "auto":
                 raise ValueError(f"backend 'nvalchemi' cannot run this checkpoint: {exc}") from exc
             log.warning("nvalchemi backend unavailable for this checkpoint (%s); using ASE.", exc)
             backend = "ase"
     if backend == "ase":
-        final, files, steps = _run_ase(frames, config, out_dir)
+        tracker = _StabilityTracker(frames, config)  # discard a failed nvalchemi attempt
+        final, files, steps = _run_ase(frames, config, out_dir, tracker)
     from ase.io import write
 
     final_path = out_dir / "final.extxyz"
     write(final_path, final, format="extxyz")
     files.append(str(final_path))
+    stability = tracker.summary()
+    if stability:
+        stability_path = out_dir / "stability.json"
+        stability_path.write_text(
+            json.dumps(
+                {
+                    "timestep_fs": config.timestep_fs,
+                    "steps": steps,
+                    "temperature_K": config.temperature_K,
+                    "log_every": config.log_every,
+                    "structures": stability,
+                },
+                indent=2,
+            )
+        )
+        files.append(str(stability_path))
+        n_unstable = sum(s["unstable_step"] is not None for s in stability)
+        log.info("Stability: %d/%d structure(s) unstable", n_unstable, len(stability))
     energies = [float(a.info.get("energy", np.nan)) for a in final]
     return BatchSimulationResult(
         backend=backend,
@@ -244,6 +309,7 @@ def run_batched_simulation(config: BatchSimulationConfig) -> BatchSimulationResu
         steps_completed=steps,
         wall_time_s=time.perf_counter() - start,
         output_files=files,
+        stability=stability,
     )
 
 
@@ -314,7 +380,7 @@ def _labelled(atoms: Atoms, energy: float, forces: np.ndarray, step: int) -> Ato
 
 
 def _run_ase(
-    frames: list[Atoms], config: BatchSimulationConfig, out_dir: Path
+    frames: list[Atoms], config: BatchSimulationConfig, out_dir: Path, tracker: _StabilityTracker
 ) -> tuple[list[Atoms], list[str], int]:
     from ase.md.langevin import Langevin
     from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
@@ -352,6 +418,7 @@ def _run_ase(
                     index,
                     _labelled(atoms, atoms.get_potential_energy(), atoms.get_forces(), dyn.nsteps),
                 )
+                tracker.add(index, atoms, dyn.nsteps)
 
         dyn.attach(_record, interval=config.log_every)
         if config.mode == "md":
@@ -427,7 +494,7 @@ def _from_batch(batch: typing.Any, templates: list[Atoms], step: int) -> list[At
 
 
 def _run_nvalchemi(
-    frames: list[Atoms], config: BatchSimulationConfig, out_dir: Path
+    frames: list[Atoms], config: BatchSimulationConfig, out_dir: Path, tracker: _StabilityTracker
 ) -> tuple[list[Atoms], list[str], int]:
     import torch
     from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
@@ -480,5 +547,6 @@ def _run_nvalchemi(
         done += chunk
         for index, frame in enumerate(_from_batch(batch, frames, done)):
             writer.add(index, frame)
+            tracker.add(index, frame, done)
         log.info("[nvalchemi] step %d/%d", done, config.steps)
     return _from_batch(batch, frames, done), writer.close(), done
