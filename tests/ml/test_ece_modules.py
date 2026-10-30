@@ -13,8 +13,16 @@ from goal.ml.nn.heads.edge_energy import EdgeEnergyHead, reverse_edges
 from goal.ml.nn.primitives.edge_frame import EdgeFrames, edge_rotation
 from goal.ml.nn.primitives.o2 import FourierActivation, O2Linear, O2Product
 
-torch.set_default_dtype(torch.float64)
 M = 2
+
+
+@pytest.fixture(autouse=True)
+def _float64():
+    """Float64 inside this module only (a module-level default would leak)."""
+    previous = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    yield
+    torch.set_default_dtype(previous)
 
 
 def rotate_about_axis(x: torch.Tensor, psi: float) -> torch.Tensor:
