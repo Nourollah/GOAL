@@ -19,6 +19,8 @@ experiment:
 task_name: "simurgh_dev_gmd26_FD"
 
 data:
+  energy_key: energy
+  forces_key: forces
   train_dir: ${paths.data_dir}/GMD/FragmentDuplication/Training
   val_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestID
   test_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestOOD

@@ -77,3 +77,30 @@ def test_ablation_arm_builds_its_model(name: str) -> None:
     backbone.update(avg_num_neighbors=10.0, scale=1.0, num_channels=channels)
     backbone["message_irreps"] = backbone["message_irreps"].replace("128x", f"{channels}x")
     MODEL_REGISTRY.get(name_key)(**backbone)
+
+
+@pytest.mark.parametrize("name", TASKS)
+def test_dataset_accepts_every_forwarded_data_key(name: str) -> None:
+    """The datamodule forwards non-meta data keys to the dataset class."""
+    import inspect
+
+    import goal.ml.data.datasets  # noqa: F401  (registers the datasets)
+    from goal.ml.data.datamodule import _FRAGMENT_KEYS, GOALDataModule
+    from goal.ml.registry import DATASET_REGISTRY
+
+    cfg = _compose(name)
+    cls = DATASET_REGISTRY.get(cfg.data.dataset_type)
+    params = inspect.signature(cls.__init__).parameters
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        accepted = None
+    else:
+        accepted = set(params)
+    forwarded = {
+        k for k in cfg.data if k not in GOALDataModule._META_KEYS and k not in _FRAGMENT_KEYS
+    }
+    forwarded -= {"dataset_type", "root"}
+    if accepted is not None:
+        assert forwarded <= accepted, sorted(forwarded - accepted)
+    else:  # **kwargs datasets: the benchmark loaders take named arguments only
+        known = set(params) - {"self", "kwargs", "fragment_kwargs"}
+        assert forwarded <= known, sorted(forwarded - known)

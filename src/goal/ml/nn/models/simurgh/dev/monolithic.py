@@ -846,7 +846,9 @@ class _AtomLine(nn.Module):
             irreps_out = hidden
             if last:
                 irreps_out = scalars
-                if cfg["electrostatics"]["enabled"] and cfg["electrostatics"]["dipoles"]:
+                if "ece" in cfg["pair_line"]["mode"]:
+                    irreps_out = hidden  # the ECE bond line reads equivariant features
+                elif cfg["electrostatics"]["enabled"] and cfg["electrostatics"]["dipoles"]:
                     irreps_out = o3.Irreps(f"{c}x0e + {c}x1o")  # vectors for the dipole head
             layers.append(
                 _Interaction(
@@ -897,6 +899,175 @@ class _AtomLine(nn.Module):
             if t == len(self.layers) - 1 and self.pgs is not None:
                 energy = energy + self.pgs(scalars)
         return energy, h
+
+
+# =============================================================================
+# WP11: edge cluster expansion (core: ece, and the ECE bond line)
+# =============================================================================
+
+
+def _density_irreps(channels: int, lmax: int) -> o3.Irreps:
+    """``C x (0e + 1o + 2e + ...)`` up to ``lmax`` (natural parity)."""
+    return o3.Irreps([(channels, (ell, (-1) ** ell)) for ell in range(lmax + 1)])
+
+
+def _blocks(x: torch.Tensor, irreps: o3.Irreps) -> list[torch.Tensor]:
+    """e3nn layout ``(N, dim)`` -> per-degree ``[(N, C, 2l+1)]``."""
+    return [
+        x[:, sl].reshape(x.shape[0], mul, ir.dim) for (mul, ir), sl in zip(irreps, irreps.slices())
+    ]
+
+
+def _ece_block(ece: dict, num_rbf: int, channels: int) -> nn.Module:
+    """The GOAL ECE block configured from the ``ece:`` section."""
+    from goal.ml.nn.blocks.ece import ECEBlock
+
+    return ECEBlock(
+        channels=channels,
+        lmax=ece["lmax"],
+        mmax=ece["mmax"],
+        bottleneck=ece["bottleneck"],
+        message_width=ece["message_width"],
+        heads=ece["heads"],
+        num_mp_layers=ece["num_mp_layers"],
+        element_dim=ece["film"]["element_dim"],
+        film_mlp=list(ece["film"]["mlp"]),
+        num_rbf=num_rbf,
+        activation=ece["activation"],
+        grid_points=ece["grid_points"],
+    )
+
+
+class _ECECore(nn.Module):
+    """``core: ece``: energy as a sum over directed bonds.
+
+    Same interface as :class:`_AtomLine`: returns the atomic split of the
+    bond energies (unscaled) and per-atom invariants (bond invariants
+    summed over the atom's bonds, for the charge head).  Atomic densities
+    are the layer-1 uvu A-basis from the element embeddings, with SIMURGH's
+    radial basis, envelope and pair code.  The ECE gates take the place of
+    the attention; PGS acts on the bond invariants.
+    """
+
+    def __init__(self, cfg: dict, num_elements: int) -> None:
+        super().__init__()
+        from goal.ml.nn.heads.edge_energy import EdgeEnergyHead
+        from goal.ml.nn.primitives.edge_frame import EdgeFrames
+
+        ece = cfg["ece"]
+        c, lmax = ece["channels"], ece["lmax"]
+        self.cutoff, self.p, self.mmax = cfg["cutoff"], cfg["envelope_p"], ece["mmax"]
+        self.irreps_sh = o3.Irreps.spherical_harmonics(lmax)
+        self.irreps_dens = _density_irreps(c, lmax)
+        self.rbf = _BesselBasis(cfg["cutoff"], cfg["num_rbf"])
+        self.embedding = nn.Embedding(num_elements, cfg["embedding_dim"])
+        self.codes = nn.Embedding(num_elements, ece["film"]["element_dim"])
+        self.embed_to_h = nn.Linear(cfg["embedding_dim"], c, bias=False)
+        self.pair_code = (
+            nn.Linear(2 * cfg["embedding_dim"], cfg["embedding_dim"], bias=False)
+            if cfg["pair_conditioned_radial"]
+            else None
+        )
+        instructions = [(0, ell, ell, "uvu", True) for ell in range(lmax + 1)]
+        self.tp = o3.TensorProduct(
+            f"{c}x0e",
+            self.irreps_sh,
+            self.irreps_dens,
+            instructions,
+            shared_weights=False,
+            internal_weights=False,
+        )
+        in_dim = cfg["num_rbf"] + (cfg["embedding_dim"] if self.pair_code is not None else 0)
+        self.radial = _MLP([in_dim, *cfg["radial_mlp"], self.tp.weight_numel])
+        self.frames = EdgeFrames(lmax)
+        self.block = _ece_block(ece, cfg["num_rbf"], c)
+        self.head = EdgeEnergyHead(self.block.state, list(ece["energy_mlp"]))
+        rd = cfg["readout"]
+        self.pgs = (
+            _PGSReadout(self.block.state, rd["pgs_directions"], rd["pgs_beta"])
+            if rd["pgs"]
+            else None
+        )
+        self.channels = self.block.state  # width of the per-atom invariants
+        self.last_bond_energies: torch.Tensor | None = None
+
+    def forward(self, elem, edge_index, vectors, lengths, avg_num_neighbors):
+        """Atomic energies (unscaled) and per-atom invariants ``(N, state)``."""
+        n = elem.shape[0]
+        sender, receiver = edge_index
+        emb = self.embedding.weight
+        sh = o3.spherical_harmonics(
+            self.irreps_sh, vectors, normalize=True, normalization="component"
+        )
+        rbf = self.rbf(lengths)
+        env = polynomial_envelope(lengths / self.cutoff, self.p)
+        radial_in = [rbf]
+        if self.pair_code is not None:
+            ei, ej = emb[elem[sender]], emb[elem[receiver]]
+            radial_in.append(self.pair_code(torch.cat([ei + ej, ei * ej], dim=-1)))
+        weights = self.radial(torch.cat(radial_in, dim=-1)) * env.unsqueeze(-1)
+        messages = self.tp(self.embed_to_h(emb[elem])[sender], sh, weights)
+        dens = scatter(messages, receiver, dim=0, dim_size=n, reduce="sum") / avg_num_neighbors
+        frames = self.frames(vectors)
+        state = self.block(
+            _blocks(dens, self.irreps_dens),
+            edge_index,
+            frames,
+            self.codes.weight[elem],
+            rbf,
+            env,
+            avg_num_neighbors,
+        )
+        inv = state[..., self.mmax]
+        out = self.head(inv, env, edge_index, n)
+        atomic = out["atomic_energies"]
+        bond = out["bond_energies"]
+        if self.pgs is not None:
+            extra = 0.5 * self.pgs(inv) * env
+            atomic = atomic + scatter(extra, sender, dim=0, dim_size=n, reduce="sum")
+            atomic = atomic + scatter(extra, receiver, dim=0, dim_size=n, reduce="sum")
+        self.last_bond_energies = bond
+        h = scatter(inv * env.unsqueeze(-1), receiver, dim=0, dim_size=n, reduce="sum")
+        return atomic, h / avg_num_neighbors
+
+
+class _ECELine(nn.Module):
+    """ECE bond line on the ACE core (``pair_line.mode: ece | phi+ece``).
+
+    Atomic densities are the ACE core's final equivariant features,
+    projected to ``ece.channels`` per degree; the bond-energy head starts at
+    zero, so a fresh model equals the ACE-only model.
+    """
+
+    def __init__(self, cfg: dict, irreps_h: o3.Irreps) -> None:
+        super().__init__()
+        from goal.ml.nn.heads.edge_energy import EdgeEnergyHead
+        from goal.ml.nn.primitives.edge_frame import EdgeFrames
+
+        ece = cfg["ece"]
+        lmax = min(ece["lmax"], max(ir.l for _, ir in irreps_h))
+        self.cutoff, self.p = cfg["cutoff"], cfg["envelope_p"]
+        self.irreps_dens = _density_irreps(ece["channels"], lmax)
+        self.project = o3.Linear(irreps_h, self.irreps_dens)
+        self.rbf = _BesselBasis(cfg["cutoff"], cfg["num_rbf"])
+        self.frames = EdgeFrames(lmax)
+        self.block = _ece_block({**ece, "lmax": lmax}, cfg["num_rbf"], ece["channels"])
+        self.head = EdgeEnergyHead(self.block.state, list(ece["energy_mlp"]), zero_init=True)
+
+    def forward(self, h, codes, edge_index, vectors, lengths, avg_num_neighbors) -> dict:
+        """Bond energies (unscaled) of every directed edge and their atomic split."""
+        env = polynomial_envelope(lengths / self.cutoff, self.p)
+        dens = _blocks(self.project(h), self.irreps_dens)
+        state = self.block(
+            dens,
+            edge_index,
+            self.frames(vectors),
+            codes,
+            self.rbf(lengths),
+            env,
+            avg_num_neighbors,
+        )
+        return self.head(state[..., self.block.mmax], env, edge_index, h.shape[0])
 
 
 # =============================================================================
@@ -1560,6 +1731,8 @@ def _blocks_of(
         return lambda t, m=module: [w for w in m.weight_views(weight=t)]
     if isinstance(module, _ElementLinear):
         return lambda t: list(t)
+    if type(module).__name__ == "O2Linear" and name == "weight":
+        return lambda t: list(t)  # one matrix per |m|
     if isinstance(module, nn.Linear) and name == "weight" and module.out_features > 1:
         return lambda t: [t]
     return None
@@ -1727,9 +1900,7 @@ class SimurghDev(nn.Module):
                 "kernels: cuequivariance requested but cuequivariance-torch is not installed"
             )
         for flag, on in (
-            ("core: ece", cfg["core"] == "ece"),
             ("readout.pgs_edge", cfg["readout"]["pgs_edge"]),
-            ("pair_line.mode: ece", cfg["pair_line"]["mode"] != "phi"),
             ("pair_line.bond_order", cfg["pair_line"]["bond_order"]),
             ("diagnostics.calm", cfg["diagnostics"]["calm"]),
         ):
@@ -1767,8 +1938,25 @@ class SimurghDev(nn.Module):
         self._e0 = torch.tensor([e0[z] for z in elements], dtype=torch.float64)
         self.register_buffer("scale", torch.tensor(float(cfg["scale"])))
 
-        self.atom_line = _AtomLine(cfg, len(elements))
+        if cfg["core"] == "ece":
+            if cfg["pair_line"]["mode"] != "phi":
+                raise ValueError(
+                    "with core: ece the pair line stays phi (the core is edge-centred)"
+                )
+            if cfg["electrostatics"]["dipoles"]:
+                _not_yet("electrostatics.dipoles with core: ece")
+            if cfg["a_basis"]["regularity_prior_sigma"]:
+                _not_yet("a_basis.regularity_prior_sigma with core: ece")
+            self.atom_line = _ECECore(cfg, len(elements))
+        else:
+            self.atom_line = _AtomLine(cfg, len(elements))
+        self.ece_line = None
+        if cfg["core"] == "ace" and "ece" in cfg["pair_line"]["mode"]:
+            self.ece_line = _ECELine(cfg, self.atom_line.layers[-1].irreps_out)
+            self.ece_codes = nn.Embedding(len(elements), cfg["ece"]["film"]["element_dim"])
         pl = cfg["pair_line"]
+        if pl["mode"] == "ece":
+            pl = {**pl, "enabled": False}  # ECE bond line only
         self.pair_line = (
             _PairLine(pl, elements, cfg["embedding_dim"], cfg["cutoff"]) if pl["enabled"] else None
         )
@@ -1777,7 +1965,7 @@ class SimurghDev(nn.Module):
         if es["sigma"] != "learned" and not isinstance(es["sigma"], (int, float)):
             raise ValueError("electrostatics.sigma must be 'learned' or a width in Å")
         self.electrostatics = (
-            _Electrostatics(es, cfg["num_channels"], len(elements)) if es["enabled"] else None
+            _Electrostatics(es, self.atom_line.channels, len(elements)) if es["enabled"] else None
         )
         if pl["pair_first_epochs"] and not pl["enabled"]:
             raise ValueError("pair_line.pair_first_epochs needs pair_line.enabled")
@@ -1845,6 +2033,18 @@ class SimurghDev(nn.Module):
         emb = self.atom_line.embedding.weight
 
         e_atom, h_last = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
+        bond = getattr(self.atom_line, "last_bond_energies", None)
+        if self.ece_line is not None:
+            line = self.ece_line(
+                h_last,
+                self.ece_codes.weight[elem],
+                edge_index,
+                vectors,
+                lengths,
+                self.avg_num_neighbors,
+            )
+            e_atom = e_atom + line["atomic_energies"]
+            bond = line["bond_energies"]
         if self.training and self.epoch < self.config["pair_line"]["pair_first_epochs"]:
             e_atom = 0.0 * e_atom  # pair-first stage: the atom line gets zero gradients
         e_pair = torch.zeros_like(e_atom)
@@ -1895,6 +2095,8 @@ class SimurghDev(nn.Module):
         }
         if elec is not None:
             out["charges"], out["dipole"] = elec["charges"], elec["dipole"]
+        if bond is not None:
+            out["edge_energies"] = self.scale * bond
         fragments = graph.get("fragment_index", None)
         if fragments is not None:
             out.update(

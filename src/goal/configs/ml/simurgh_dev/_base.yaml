@@ -66,8 +66,6 @@ data:
   pin_memory: false
   persistent_workers: false
   prefetch_factor: null
-  energy_key: energy
-  forces_key: forces
   merge_strategy: sequential
   split_ratio: [0.8, 0.1, 0.1]
   split_seed: 97

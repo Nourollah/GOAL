@@ -33,6 +33,9 @@ def build(cfg, overrides: dict, stats: dict, device: str):
     if channels:
         backbone["num_channels"] = channels
         backbone["message_irreps"] = f"{channels}x0e + {channels}x1o + {channels}x2e"
+    core = overrides.pop("core", None)
+    if core:
+        backbone["core"] = core
     objectives = overrides.pop("mfc", None)
     if objectives is not None:
         backbone["mfc"].update(
