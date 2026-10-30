@@ -114,13 +114,14 @@ model:
       regularity_prior_sigma: null # null | 0.25 | 0.5 (Å)
       prior_weight_decay: null # required when the prior is on
     attention:
-      mode: gate # gate | softmax_null | none
+      mode: gate # gate | softmax_null | radial (scores from distance only) | none
       pan_gate: false
     readout:
       pgs: true
       pgs_edge: false
       pgs_beta: 4.0
       pgs_directions: 16
+      mlp_hidden: 16 # last-layer readout width (raise it for the equal-parameter no-PGS control)
     pair_line:
       enabled: true
       mode: phi # phi | ece | phi+ece

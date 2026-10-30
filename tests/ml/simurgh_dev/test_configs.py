@@ -56,3 +56,24 @@ def test_gmd_configs_use_directory_or_split_paths(name: str) -> None:
         assert data.train_dir is None and len(data.train_paths) == 8
     else:
         assert data.val_dir.endswith("/TestID") and data.test_dir.endswith("/TestOOD")
+
+
+ARMS = sorted(
+    "ablations/simurgh_dev/" + os.path.basename(p)[:-5]
+    for p in glob.glob(f"{CONFIGS_ML_DIR}/ablations/simurgh_dev/s*.yaml")
+)
+
+
+@pytest.mark.parametrize("name", ARMS)
+def test_ablation_arm_builds_its_model(name: str) -> None:
+    import goal.ml.nn.models  # noqa: F401
+    from goal.ml.registry import MODEL_REGISTRY
+
+    cfg = _compose(name)
+    assert cfg.task_name.startswith("simurgh_dev_abl_s") and cfg.data.val_dir.endswith("TestID")
+    backbone = OmegaConf.to_container(cfg.model.backbone, resolve=True)
+    name_key = backbone.pop("name")
+    channels = 8
+    backbone.update(avg_num_neighbors=10.0, scale=1.0, num_channels=channels)
+    backbone["message_irreps"] = backbone["message_irreps"].replace("128x", f"{channels}x")
+    MODEL_REGISTRY.get(name_key)(**backbone)

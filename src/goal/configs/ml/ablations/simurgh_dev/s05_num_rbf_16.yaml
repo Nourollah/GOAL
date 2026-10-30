@@ -1,0 +1,23 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 5: num_rbf 8 -> 16
+# Base: simurgh_dev_gmd26_FD (B0 with MFC).  Screen with seed 42; seeds 43
+# and 44 only if the change exceeds 2x the base seed s.d.
+#
+#   goal-train --config-name ablations/simurgh_dev/s05_num_rbf_16 seed=42
+# Another task: replace the first default (e.g. /simurgh_dev_gmd26_FF).
+########################################################
+
+defaults:
+  - /simurgh_dev_gmd26_FD
+  - _self_
+
+task_name: "simurgh_dev_abl_s05_num_rbf_16"
+experiment:
+  name: "simurgh_dev_abl_s05_num_rbf_16"
+  description: "SIMURGH ablation: num_rbf 8 -> 16"
+
+model:
+  backbone:
+    num_rbf: 16

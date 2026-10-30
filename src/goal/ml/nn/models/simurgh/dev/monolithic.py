@@ -72,7 +72,13 @@ DEFAULTS: dict[str, typing.Any] = {
     "radial": {"low_rank": None, "per_layer": None, "env_conditioned": False},
     "a_basis": {"regularity_prior_sigma": None, "prior_weight_decay": None},
     "attention": {"mode": "gate", "pan_gate": False},
-    "readout": {"pgs": True, "pgs_edge": False, "pgs_beta": 4.0, "pgs_directions": 16},
+    "readout": {
+        "pgs": True,
+        "pgs_edge": False,
+        "pgs_beta": 4.0,
+        "pgs_directions": 16,
+        "mlp_hidden": 16,
+    },
     "pair_line": {
         "enabled": True,
         "mode": "phi",
@@ -424,11 +430,13 @@ class _AttentionGate(nn.Module):
     ) -> None:
         super().__init__()
         self.mode = mode
-        self.query = o3.Linear(irreps_h, irreps_msg)
-        with torch.no_grad():
-            self.query.weight.zero_()
+        self.query = None  # radial: scores from the distance alone (removal control)
+        if mode != "radial":
+            self.query = o3.Linear(irreps_h, irreps_msg)
+            with torch.no_grad():
+                self.query.weight.zero_()
         self.bias = _MLP([num_rbf, 16, 1], zero_last=True)
-        self.temperature = nn.Parameter(torch.zeros(()))
+        self.temperature = nn.Parameter(torch.zeros(())) if self.query is not None else None
         # only the softmax arm reads it; a parameter outside the loss would break DDP
         self.null = nn.Parameter(torch.zeros(())) if mode == "softmax_null" else None
         self.dim = irreps_msg.dim
@@ -444,10 +452,13 @@ class _AttentionGate(nn.Module):
         avg_num_neighbors: float,
     ) -> torch.Tensor:
         """Aggregate ``messages`` at their receivers with the attention weights."""
-        tau = 0.25 + 3.75 * torch.sigmoid(self.temperature)
+        tau = 0.25 + 3.75 * torch.sigmoid(self.temperature) if self.query is not None else 0.0
         score = env * self.bias(rbf).squeeze(-1)
-        score = score + tau / math.sqrt(self.dim) * (self.query(h)[receiver] * messages).sum(-1)
-        if self.mode == "gate":
+        if self.query is not None:
+            score = score + tau / math.sqrt(self.dim) * (self.query(h)[receiver] * messages).sum(
+                -1
+            )
+        if self.mode in ("gate", "radial"):
             weighted = 2.0 * torch.sigmoid(score).unsqueeze(-1) * messages
             return (
                 scatter(weighted, receiver, dim=0, dim_size=num_nodes, reduce="sum")
@@ -461,6 +472,147 @@ class _AttentionGate(nn.Module):
         den = den + nn.functional.softplus(self.null) * torch.exp(-shift)
         weighted = (num / den).unsqueeze(-1) * messages
         return scatter(weighted, receiver, dim=0, dim_size=num_nodes, reduce="sum")
+
+
+class _LadderProductBasis(nn.Module):
+    """Fixed-width correlation ladder (``product_basis: ladder | ladder_reduced``).
+
+    ``φ1 = W1 A``; ``φq = Wq (φ_{q-1} ⊗ A)`` for ``q = 2..ν``, with ``⊗`` the
+    channel-wise Clebsch-Gordan product over every admissible path,
+    pseudo-tensor intermediates included (all parities up to the largest
+    degree of ``A``); ``B = P Σ_q φq``.  ``ladder``: ``Wq`` mixes channels and
+    paths per output degree (``element_indexed``: one map per element, the
+    coupled-product ablation).  ``ladder_reduced``: one weight per path and
+    channel, ``a = 1 + δ`` with ``δ = 0`` at start, and the channel mixing only
+    in ``P``.  The cost grows linearly with ν.  ``A`` and ``B`` are in e3nn
+    layout; ``A`` stays linear in the neighbours (no norm, no gate).
+    """
+
+    def __init__(
+        self,
+        irreps_a: o3.Irreps,
+        irreps_out: o3.Irreps,
+        correlation: int,
+        reduced: bool,
+        num_elements: int = 0,
+    ) -> None:
+        super().__init__()
+        channels, blocks = _irrep_blocks(irreps_a)
+        lmax = max(ell for ell, _ in blocks)
+        self.irreps_phi = o3.Irreps(
+            [(channels, (ell, p)) for ell in range(lmax + 1) for p in (1, -1)]
+        )
+        self.reduced = reduced
+        self.first = None if reduced else o3.Linear(irreps_a, self.irreps_phi)
+        tps, mixes = nn.ModuleList(), nn.ModuleList()
+        irreps_prev = irreps_a if reduced else self.irreps_phi
+        for _ in range(2, correlation + 1):
+            if reduced:
+                instructions = [
+                    (i, j, self._slot(ir_out), "uuu", True)
+                    for i, (_, ir1) in enumerate(irreps_prev)
+                    for j, (_, ir2) in enumerate(irreps_a)
+                    for ir_out in ir1 * ir2
+                    if ir_out.l <= lmax
+                ]
+                tp = o3.TensorProduct(irreps_prev, irreps_a, self.irreps_phi, instructions)
+                with torch.no_grad():
+                    tp.weight.fill_(1.0)
+                tps.append(tp)
+                mixes.append(nn.Identity())
+            else:
+                mid, instructions = [], []
+                for i, (_, ir1) in enumerate(irreps_prev):
+                    for j, (_, ir2) in enumerate(irreps_a):
+                        for ir_out in ir1 * ir2:
+                            if ir_out.l <= lmax:
+                                instructions.append((i, j, len(mid), "uuu", False))
+                                mid.append((channels, ir_out))
+                tp = o3.TensorProduct(irreps_prev, irreps_a, o3.Irreps(mid), instructions)
+                tps.append(tp)
+                if num_elements:
+                    mixes.append(_ElementLinear(o3.Irreps(mid), self.irreps_phi, num_elements))
+                else:
+                    mixes.append(o3.Linear(o3.Irreps(mid), self.irreps_phi))
+            irreps_prev = self.irreps_phi
+        self.tps, self.mixes = tps, mixes
+        self.out = o3.Linear(self.irreps_phi, irreps_out)
+        self.lift = o3.Linear(irreps_a, self.irreps_phi) if reduced else None
+        self.element_indexed = bool(num_elements)
+
+    def _slot(self, ir: o3.Irrep) -> int:
+        """Index of ``ir`` in ``irreps_phi``."""
+        return [irp for _, irp in self.irreps_phi].index(ir)
+
+    def forward(self, a: torch.Tensor, elem: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
+        """``A`` (e3nn layout) -> ``B`` over ``irreps_out`` (e3nn layout)."""
+        phi = a if self.reduced else self.first(a)
+        total = self.lift(a) if self.reduced else phi
+        for tp, mix in zip(self.tps, self.mixes):
+            x = tp(phi, a)
+            phi = mix(x, elem) if self.element_indexed else mix(x)
+            total = total + phi
+        return self.out(total)
+
+
+class _RMSNorm(nn.Module):
+    """Smooth equivariant RMS norm per irrep block with a per-channel scale (Muon arm only).
+
+    ``x / sqrt(mean(x²) + 1)``: an exact RMS norm sends the features of an
+    atom whose last neighbour leaves the cutoff from ~0 to unit size and
+    back to 0, a jump in the energy (0.029 eV measured on the cutoff-crossing
+    test); the ``+ 1`` keeps small features small and the energy smooth.
+    """
+
+    def __init__(self, irreps: o3.Irreps) -> None:
+        super().__init__()
+        self.irreps = irreps
+        self.scales = nn.ParameterList(nn.Parameter(torch.ones(mul)) for mul, _ in irreps)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalise every irrep block of ``x`` (e3nn layout)."""
+        parts = []
+        for (mul, ir), sl, scale in zip(self.irreps, self.irreps.slices(), self.scales):
+            block = x[:, sl].reshape(-1, mul, ir.dim)
+            rms = block.square().mean(dim=(1, 2), keepdim=True).add(1.0).sqrt()
+            parts.append((block / rms * scale[:, None]).reshape(-1, mul * ir.dim))
+        return torch.cat(parts, dim=-1)
+
+
+class _PANGate(nn.Module):
+    """Coordination and angular-variance gate on the scalar messages.
+
+    shortcut: reconstructed from the brief's one-line description (the
+    paper was not available): ``g_i = 2σ(w_n n_i/⟨N⟩ + w_v v_i)`` with the
+    enveloped coordination ``n_i = Σ_j u(r_ij)`` and the angular variance
+    ``v_i = 1 - |Σ_j u r̂_ij|² / n_i²`` (from the l = 1 moment), applied to
+    the 0e blocks of A; ``w`` start at zero, so ``g = 1``.  Check against
+    the paper before reporting the rung.
+    """
+
+    def __init__(self, irreps_mid: o3.Irreps) -> None:
+        super().__init__()
+        self.weights = nn.Parameter(torch.zeros(2))
+        self.scalar = torch.cat(
+            [
+                torch.full((mul * ir.dim,), ir == o3.Irrep("0e"), dtype=torch.bool)
+                for mul, ir in irreps_mid
+            ]
+        )
+
+    def forward(self, a, sh, env, receiver, avg_num_neighbors: float) -> torch.Tensor:
+        """Gate the scalar channels of the aggregated messages ``a``."""
+        n = scatter(env, receiver, dim=0, dim_size=a.shape[0], reduce="sum")
+        unit = sh[:, 1:4] / math.sqrt(3.0)  # component-normalised l = 1 block
+        moment = scatter(
+            env.unsqueeze(-1) * unit, receiver, dim=0, dim_size=a.shape[0], reduce="sum"
+        )
+        variance = 1.0 - moment.square().sum(-1) / (n.square() + 1e-12)
+        g = 2.0 * torch.sigmoid(
+            self.weights[0] * n / avg_num_neighbors + self.weights[1] * variance
+        )
+        mask = self.scalar.to(a.device)
+        return torch.where(mask, a * g.unsqueeze(-1), a)
 
 
 class _Interaction(nn.Module):
@@ -512,25 +664,47 @@ class _Interaction(nn.Module):
             in_dim += 16
         else:
             self.env_proj = None
+        rank = cfg["radial"]["low_rank"]
+        self.num_paths = len(instructions)
+        radial_out = self.tp.weight_numel
+        self.low_rank = None
+        if rank:
+            if not 1 <= int(rank) <= 4:
+                raise ValueError("radial.low_rank must be between 1 and 4")
+            radial_out = self.num_paths * int(rank)
+            mul = self.tp.weight_numel // self.num_paths
+            self.low_rank = nn.Parameter(
+                torch.randn(self.num_paths, int(rank), mul) / math.sqrt(rank)
+            )
         if self.linear_radial:
-            self.radial = nn.Linear(in_dim, self.tp.weight_numel, bias=False)
+            self.radial = nn.Linear(in_dim, radial_out, bias=False)
         else:
-            self.radial = _MLP([in_dim, *cfg["radial_mlp"], self.tp.weight_numel])
+            self.radial = _MLP([in_dim, *cfg["radial_mlp"], radial_out])
         mode = cfg["attention"]["mode"]
         self.attention = (
             _AttentionGate(mode, irreps_h, irreps_mid_sorted, cfg["num_rbf"])
             if mode != "none"
             else None
         )
+        self.pan_gate = _PANGate(irreps_mid_sorted) if cfg["attention"]["pan_gate"] else None
         self.linear_a = o3.Linear(irreps_mid_sorted, irreps_a)
-        self.product = _SymmetricProductBasis(
-            irreps_a,
-            irreps_out,
-            cfg["correlation"],
-            num_elements,
-            cfg["element_weights"],
-            cfg["embedding_dim"],
-        )
+        self.symmetric = cfg["product_basis"] == "symmetric"
+        if self.symmetric:
+            self.product = _SymmetricProductBasis(
+                irreps_a,
+                irreps_out,
+                cfg["correlation"],
+                num_elements,
+                cfg["element_weights"],
+                cfg["embedding_dim"],
+            )
+        else:
+            self.product = _LadderProductBasis(
+                irreps_a, irreps_out, cfg["correlation"], cfg["product_basis"] == "ladder_reduced"
+            )
+        self.norm = _RMSNorm(irreps_out) if cfg["node_norm"] == "rms" else None
+        #: Optional per-edge factor on the messages (literature ablations set it).
+        self.message_gate: nn.Module | None = None
         self.linear_b = o3.Linear(irreps_out, irreps_out)
         self.self_connection = (
             _ElementLinear(irreps_h, irreps_out, num_elements) if layer > 0 else None
@@ -556,19 +730,34 @@ class _Interaction(nn.Module):
         if self.env_proj is not None:
             scalars = h[:, : self.irreps_h.count("0e")]
             radial_in += [self.env_proj(scalars)[sender], self.env_proj(scalars)[receiver]]
-        weights = self.radial(torch.cat(radial_in, dim=-1)) * env.unsqueeze(-1)
+        weights = self.radial(torch.cat(radial_in, dim=-1))
+        if self.low_rank is not None:
+            factors = weights.reshape(weights.shape[0], self.num_paths, self.low_rank.shape[1])
+            weights = torch.einsum("epr,prc->epc", factors, self.low_rank).reshape(
+                weights.shape[0], self.tp.weight_numel
+            )
+        weights = weights * env.unsqueeze(-1)
         messages = self.tp(self.linear_up(h)[sender], sh, weights)
+        if self.message_gate is not None:
+            messages = messages * self.message_gate(h, edge_index, sh, env).unsqueeze(-1)
         n = h.shape[0]
         if self.attention is None:
             a = scatter(messages, receiver, dim=0, dim_size=n, reduce="sum") / avg_num_neighbors
         else:
             a = self.attention(messages, h, receiver, rbf, env, n, avg_num_neighbors)
-        a = _to_channels(self.linear_a(a), self.irreps_a)
-        b = _from_channels(self.product(a, elem, emb), self.irreps_out)
+        if self.pan_gate is not None:
+            a = self.pan_gate(a, sh, env, receiver, avg_num_neighbors)
+        a = self.linear_a(a)
+        if self.symmetric:
+            b = _from_channels(
+                self.product(_to_channels(a, self.irreps_a), elem, emb), self.irreps_out
+            )
+        else:
+            b = self.product(a, elem, emb)
         out = self.linear_b(b)
         if self.self_connection is not None:
             out = out + self.self_connection(h, elem)
-        return out
+        return out if self.norm is None else self.norm(out)
 
 
 def _es_kernel(z: torch.Tensor, beta: float) -> torch.Tensor:
@@ -671,7 +860,8 @@ class _AtomLine(nn.Module):
                     cfg["embedding_dim"] if self.pair_code is not None else 0,
                 )
             )
-            readouts.append(_MLP([c, 16, 1]) if last else nn.Linear(c, 1, bias=False))
+            hidden_width = cfg["readout"]["mlp_hidden"]
+            readouts.append(_MLP([c, hidden_width, 1]) if last else nn.Linear(c, 1, bias=False))
             irreps_h = irreps_out
         self.layers, self.readouts = nn.ModuleList(layers), nn.ModuleList(readouts)
         rd = cfg["readout"]
@@ -1530,7 +1720,7 @@ class SimurghDev(nn.Module):
         _choice(cfg, "node_norm", ("none", "rms"))
         _choice(cfg, "kernels", ("auto", "cuequivariance", "e3nn"))
         _choice(cfg, "dtype", ("float32", "float64"))
-        _choice(cfg["attention"], "mode", ("gate", "softmax_null", "none"), "attention.")
+        _choice(cfg["attention"], "mode", ("gate", "softmax_null", "radial", "none"), "attention.")
         _choice(cfg["pair_line"], "mode", ("phi", "ece", "phi+ece"), "pair_line.")
         if cfg["kernels"] == "cuequivariance":
             raise ImportError(
@@ -1538,10 +1728,6 @@ class SimurghDev(nn.Module):
             )
         for flag, on in (
             ("core: ece", cfg["core"] == "ece"),
-            ("product_basis: ladder", cfg["product_basis"] != "symmetric"),
-            ("node_norm: rms", cfg["node_norm"] == "rms"),
-            ("radial.low_rank", cfg["radial"]["low_rank"] is not None),
-            ("attention.pan_gate", cfg["attention"]["pan_gate"]),
             ("readout.pgs_edge", cfg["readout"]["pgs_edge"]),
             ("pair_line.mode: ece", cfg["pair_line"]["mode"] != "phi"),
             ("pair_line.bond_order", cfg["pair_line"]["bond_order"]),
@@ -1602,6 +1788,17 @@ class SimurghDev(nn.Module):
     def set_epoch(self, epoch: int) -> None:
         """Current training epoch (GOALModule calls this every step)."""
         self.epoch = int(epoch)
+
+    def extra_energy(
+        self,
+        h: torch.Tensor,
+        pos: torch.Tensor,
+        elem: torch.Tensor,
+        batch: torch.Tensor,
+        num_graphs: int,
+    ) -> torch.Tensor | None:
+        """Additional energy per molecule (eV); ``None`` here, set by ablation models."""
+        return None
 
     def build_optimizer(self, opt_cfg: typing.Any) -> torch.optim.Optimizer:
         """The recipe's optimiser; see :func:`build_simurgh_optimizer`."""
@@ -1675,6 +1872,9 @@ class SimurghDev(nn.Module):
         if self.electrostatics is not None:
             elec = self.electrostatics(h_last, pos_d, elem, batch, num_graphs)
             energy = energy + elec["energy"]
+        extra = self.extra_energy(h_last, pos_d, elem, batch, num_graphs)
+        if extra is not None:
+            energy = energy + extra
         forces = -torch.autograd.grad(
             energy.sum(),
             pos,

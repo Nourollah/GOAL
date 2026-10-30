@@ -1,0 +1,34 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 6: late energy-weight switch: last 20% of 400 epochs, energy weight x400, lr 2.5e-4
+# Base: simurgh_dev_gmd26_FD (B0 with MFC).  Screen with seed 42; seeds 43
+# and 44 only if the change exceeds 2x the base seed s.d.
+#
+#   goal-train --config-name ablations/simurgh_dev/s06_energy_switch seed=42
+# Another task: replace the first default (e.g. /simurgh_dev_gmd26_FF).
+########################################################
+
+defaults:
+  - /simurgh_dev_gmd26_FD
+  - _self_
+
+task_name: "simurgh_dev_abl_s06_energy_switch"
+experiment:
+  name: "simurgh_dev_abl_s06_energy_switch"
+  description: "SIMURGH ablation: late energy-weight switch: last 20% of 400 epochs, energy weight x400, lr 2.5e-4"
+
+training:
+  stages:
+    - {
+        name: energy_only,
+        epochs: 5,
+        loss_weights: { energy: 1.0, forces: 0.0 },
+      }
+    - { name: main, epochs: 315, loss_weights: { energy: 1.0, forces: 100.0 } }
+    - {
+        name: switch,
+        epochs: null,
+        lr: 2.5e-4,
+        loss_weights: { energy: 400.0, forces: 100.0 },
+      }

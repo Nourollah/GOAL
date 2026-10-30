@@ -1,0 +1,25 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 2: regularity prior sigma 0.25 A (weight decay 1e-2 on its groups)
+# Base: simurgh_dev_gmd26_FD (B0 with MFC).  Screen with seed 42; seeds 43
+# and 44 only if the change exceeds 2x the base seed s.d.
+#
+#   goal-train --config-name ablations/simurgh_dev/s02_prior_0.25 seed=42
+# Another task: replace the first default (e.g. /simurgh_dev_gmd26_FF).
+########################################################
+
+defaults:
+  - /simurgh_dev_gmd26_FD
+  - _self_
+
+task_name: "simurgh_dev_abl_s02_prior_0.25"
+experiment:
+  name: "simurgh_dev_abl_s02_prior_0.25"
+  description: "SIMURGH ablation: regularity prior sigma 0.25 A (weight decay 1e-2 on its groups)"
+
+model:
+  backbone:
+    a_basis:
+      regularity_prior_sigma: 0.25
+      prior_weight_decay: 1.0e-2

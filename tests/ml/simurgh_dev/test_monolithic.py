@@ -59,6 +59,13 @@ VARIANTS: dict[str, dict] = {
     "prior": {"a_basis": {"regularity_prior_sigma": 0.5, "prior_weight_decay": 1e-3}},
     "per_layer_linear_env": {"radial": {"per_layer": ["mlp", "linear"], "env_conditioned": True}},
     "no_pair_code": {"pair_conditioned_radial": False},
+    "ladder_nu4": {"product_basis": "ladder", "correlation": 4},
+    "ladder_reduced_nu5": {"product_basis": "ladder_reduced", "correlation": 5},
+    "low_rank_radial": {"radial": {"low_rank": 2}},
+    "pan_gate": {"attention": {"pan_gate": True}},
+    "rms_norm": {"node_norm": "rms"},
+    "radial_attention": {"attention": {"mode": "radial"}},
+    "l3_messages": {"message_irreps": "8x0e + 8x1o + 8x2e + 8x3o"},
 }
 
 
@@ -171,8 +178,9 @@ def test_separated_pair_is_sum_of_e0() -> None:
         {"attention": {"mode": "gate"}},
         {"readout": {"pgs": True}},
         {"radial": {"env_conditioned": True}},
+        {"attention": {"pan_gate": True}},
     ],
-    ids=["pair_line", "attention_gate", "pgs", "env_conditioned"],
+    ids=["pair_line", "attention_gate", "pgs", "env_conditioned", "pan_gate"],
 )
 def test_zero_init_equivalence(section: dict, ethanol: Atoms) -> None:
     off = {
@@ -451,9 +459,10 @@ def test_float32_model_keeps_float64_totals(ethanol: Atoms) -> None:
     assert float(out["energy"]) == pytest.approx(energy(double, ethanol), abs=1e-3)
 
 
-def test_every_parameter_gets_a_gradient(ethanol: Atoms) -> None:
+@pytest.mark.parametrize("variant", sorted(VARIANTS))
+def test_every_parameter_gets_a_gradient(variant: str, ethanol: Atoms) -> None:
     """DDP without find_unused_parameters: every parameter must reach the loss."""
-    model = awake(build()).train()
+    model = awake(build(**VARIANTS[variant])).train()
     out = model(_graph(ethanol))
     loss = out["energy"].sum() + out["forces"].square().sum() + out["aux_loss"]
     loss.backward()
@@ -483,3 +492,26 @@ def test_pair_potential_export() -> None:
     co = data["C-O"]
     np.testing.assert_allclose(co["total"], co["phi"] + co["wall"])
     assert co["total"][-1] == pytest.approx(0.0, abs=1e-12)  # at the pair cutoff
+
+
+@pytest.mark.parametrize("reduced", [False, True])
+def test_ladder_terms_are_homogeneous(reduced: bool) -> None:
+    from e3nn import o3
+
+    from goal.ml.nn.models.simurgh.dev.monolithic import _LadderProductBasis
+
+    torch.manual_seed(0)
+    irreps = o3.Irreps("4x0e + 4x1o + 4x2e")
+    ladder = _LadderProductBasis(irreps, irreps, 4, reduced).double()
+    a = torch.randn(3, irreps.dim, dtype=torch.float64)
+    ts = torch.tensor([0.5, 0.8, 1.0, 1.5, 2.0, 3.0], dtype=torch.float64)
+    outs = torch.stack([ladder(t * a, None, None) for t in ts])
+    vander = torch.stack([ts**q for q in range(1, 5)], dim=1)  # degrees 1..4, no constant
+    coef = torch.linalg.lstsq(vander, outs.reshape(len(ts), -1)).solution
+    assert torch.allclose(vander @ coef, outs.reshape(len(ts), -1), atol=1e-9)
+
+
+def test_radial_only_attention_is_uniform_when_fresh(ethanol: Atoms) -> None:
+    radial, uniform = build(attention={"mode": "radial"}), build(attention={"mode": "none"})
+    load_shared(uniform, radial)
+    assert energy(radial, ethanol) == energy(uniform, ethanol)

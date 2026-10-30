@@ -1,0 +1,23 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 7: num_interactions 2 -> 3 (control for every long-range rung)
+# Base: simurgh_dev_gmd26_FD (B0 with MFC).  Screen with seed 42; seeds 43
+# and 44 only if the change exceeds 2x the base seed s.d.
+#
+#   goal-train --config-name ablations/simurgh_dev/s07_depth_3 seed=42
+# Another task: replace the first default (e.g. /simurgh_dev_gmd26_FF).
+########################################################
+
+defaults:
+  - /simurgh_dev_gmd26_FD
+  - _self_
+
+task_name: "simurgh_dev_abl_s07_depth_3"
+experiment:
+  name: "simurgh_dev_abl_s07_depth_3"
+  description: "SIMURGH ablation: num_interactions 2 -> 3 (control for every long-range rung)"
+
+model:
+  backbone:
+    num_interactions: 3
