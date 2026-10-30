@@ -29,8 +29,8 @@ from torch_geometric.data import Batch
 
 from goal.ml.data.fragments import compute_fragment_index
 from goal.ml.data.graph import AtomicGraph
-from goal.ml.nn.models.simurgh.arace import MonolithicArace
-from goal.ml.nn.models.simurgh.nf_simurgh import (
+from goal.ml.nn.models.simurgh.legacy.arace import MonolithicArace
+from goal.ml.nn.models.simurgh.legacy.nf_simurgh import (
     MonolithicNFSimurgh,
     NFSimurghBackbone,
     NFSimurghOutputs,

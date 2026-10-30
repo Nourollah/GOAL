@@ -145,7 +145,7 @@ Some notes on the choices in this code:
 - **No `node_energies`.** The head's `ScalarReadout` makes per-atom energies from the `0e` channels. If your model computes per-atom energies itself (as SIMURGH does), put them in `NodeFeatures(node_energies=...)`, and `energy`, `energy_forces` and `dual_forces` will use them.
 - **Dtype.** Datasets usually ship float64 positions while parameters are float32. Cast geometry-derived tensors to the dtype of the features, as shown.
 
-Config (copy a self-contained file such as `src/goal/configs/ml/simurgh_gmd26.yaml` and replace the `model` section):
+Config (copy a self-contained file such as `src/goal/configs/ml/simurgh_legacy_gmd26.yaml` and replace the `model` section):
 
 ```yaml
 model:

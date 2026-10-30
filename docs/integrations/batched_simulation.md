@@ -57,7 +57,7 @@ Writing trajectories as Zarr (`--trajectory-format zarr`) needs `zarr>=3`, which
 
 ```bash
 pixi run -e cuda-full goal-simulate-batch \
-    --checkpoint logs/simurgh_gmd26/runs/<run>/checkpoints \
+    --checkpoint logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
     --structures frames.xyz --steps 2000 --temperature 300 --timestep 0.5
 ```
 
@@ -91,7 +91,7 @@ from goal.md.core.batched import BatchSimulationConfig, run_batched_simulation
 
 result = run_batched_simulation(
     BatchSimulationConfig(
-        checkpoint="logs/simurgh_gmd26/runs/<run>/checkpoints",
+        checkpoint="logs/simurgh_legacy_gmd26/runs/<run>/checkpoints",
         structures=["frames.xyz"],
         steps=2000, temperature_K=300.0, timestep_fs=0.5,
     )

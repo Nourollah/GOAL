@@ -35,7 +35,7 @@ from torch_geometric.data import Batch
 
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.data.statistics import compute_atomic_references, compute_energy_scale
-from goal.ml.nn.models.simurgh.backbone import SimurghBackbone
+from goal.ml.nn.models.simurgh.legacy.backbone import SimurghBackbone
 
 # ---------------------------------------------------------------------------
 # Synthetic multi-molecule dataset

@@ -24,7 +24,7 @@ import torch
 from torch_geometric.data import Batch
 
 from goal.ml.nn.heads.dual_forces import DualForcesHead
-from goal.ml.nn.models.simurgh.backbone import SimurghBackbone
+from goal.ml.nn.models.simurgh.legacy.backbone import SimurghBackbone
 
 
 def _small_simurgh(

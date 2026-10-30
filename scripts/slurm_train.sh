@@ -38,7 +38,7 @@ mkdir -p logs/slurm
 # Experiment = one self-contained file in src/goal/configs/ml/ (override
 # with EXPERIMENT=<name> sbatch scripts/slurm_train.sh).  Devices and nodes
 # must match the #SBATCH lines above; strategy.name=ddp shards the batches.
-EXPERIMENT="${EXPERIMENT:-simurgh_gmd26}"
+EXPERIMENT="${EXPERIMENT:-simurgh_legacy_gmd26}"
 
 srun pixi run -e cuda python -m goal.ml.cli.train \
     --config-name "$EXPERIMENT" \

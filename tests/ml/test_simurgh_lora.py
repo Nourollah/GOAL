@@ -39,7 +39,7 @@ def _base_config():
         {
             "model": {
                 "backbone": {
-                    "name": "simurgh_arace",
+                    "name": "simurgh_legacy_arace",
                     "elements": [1, 6, 8],
                     "num_rounds": 1,
                     "cutoff": 4.0,
@@ -58,7 +58,7 @@ def _base_config():
 
 def _base_module():
     from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-    from goal.ml.nn.models.simurgh.backbone_arace import SimurghAraceBackbone
+    from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
     from goal.ml.training.loss import CompositeLoss
     from goal.ml.training.module import GOALModule
 
@@ -286,7 +286,7 @@ class TestFromCheckpoint:
 
 @pytest.mark.slow
 def test_goal_finetune_lora_end_to_end(base_ckpt: Path, tmp_path: Path) -> None:
-    """``goal-finetune`` with the default ``finetune/simurgh_lora`` config,
+    """``goal-finetune`` with the default ``finetune/simurgh_legacy_lora`` config,
     2 epochs on a tiny dataset, writes a loadable checkpoint."""
     from ase.calculators.emt import EMT
     from ase.io import write

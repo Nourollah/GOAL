@@ -1538,7 +1538,7 @@ class _AracePairArtisan(nn.Module):
     from Hydra configs and hyperparameter-search spaces.
 
     Parameters mirror the ``artisan`` sub-config of the ARACE models;
-    see :class:`goal.ml.nn.models.simurgh.arace.MonolithicArace`.
+    see :class:`goal.ml.nn.models.simurgh.legacy.arace.MonolithicArace`.
     """
 
     def __init__(

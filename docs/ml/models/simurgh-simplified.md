@@ -1,12 +1,14 @@
 # SIMURGH Simplified
 
-SIMURGH Simplified is a pair of experimental monolithic models that replace SIMURGH's *sequential* pipeline with **three parallel lines** (atom, pair, fragment). The lines share one input and meet only at the readout. The two registered models, `simurgh_simplified_monolithic` and `simurgh_simplified_routed`, run the identical skeleton and differ in exactly one thing: the processor plugged into each line. That makes them a clean ablation pair for the question "do routed artisans and experts beat plain stacks?".
+> **Legacy model.** This model lives in `goal.ml.nn.models.simurgh.legacy` under a `simurgh_legacy*` registry key. Its previous key still loads, with a deprecation warning, until the new SIMURGH model is released; `scripts/simurgh_dev/migrate_legacy_checkpoints.py` rewrites saved checkpoints.
+
+SIMURGH Simplified is a pair of experimental monolithic models that replace SIMURGH's *sequential* pipeline with **three parallel lines** (atom, pair, fragment). The lines share one input and meet only at the readout. The two registered models, `simurgh_legacy_simplified_monolithic` and `simurgh_legacy_simplified_routed`, run the identical skeleton and differ in exactly one thing: the processor plugged into each line. That makes them a clean ablation pair for the question "do routed artisans and experts beat plain stacks?".
 
 Source:
 
-- [`simurgh_simplified_layers.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/simurgh_simplified_layers.py): the shared skeleton, units, readouts and the base `SimurghSimplifiedModel`
-- [`simurgh_simplified_monolithic.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/simurgh_simplified_monolithic.py)
-- [`simurgh_simplified_routed.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/simurgh_simplified_routed.py)
+- [`simurgh_simplified_layers.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/simurgh_simplified_layers.py): the shared skeleton, units, readouts and the base `SimurghSimplifiedModel`
+- [`simurgh_simplified_monolithic.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/simurgh_simplified_monolithic.py)
+- [`simurgh_simplified_routed.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/simurgh_simplified_routed.py)
 
 > [!NOTE]
 > "Monolithic" here names the *processor style* (one stack per line). **Both** models are monolithic in the GOAL sense: they return the property dict directly and are configured with `head: null`.
@@ -49,7 +51,7 @@ flowchart TD
 
 ## Monolithic vs Routed
 
-| Line | `simurgh_simplified_monolithic` | `simurgh_simplified_routed` |
+| Line | `simurgh_legacy_simplified_monolithic` | `simurgh_legacy_simplified_routed` |
 |---|---|---|
 | atom | one node-wise unit plus one message unit per layer, for all atoms | **frequency-routed artisans**: each frequent element owns an artisan, and all other elements share one rare artisan. Routing is by the receiving atom's element. |
 | pair | one edge unit per layer, for all edges | **frequency-routed pair artisans** by unordered element pair, plus a shared rare pair artisan. The edge type is the element pair only, never geometric. |
@@ -67,17 +69,17 @@ Routing details in the routed model:
 ### When to use which
 
 - **Run both as a pair.** This is the reason they exist. The two GMD configs differ only in `model.backbone.name` and the two routed-only sections (`artisan:`, `fragment_experts:`), and a test in `tests/ml/simurgh/test_simurgh_simplified.py` fails if any other backbone key drifts between them. Any metric difference is therefore attributable to routing.
-- **`simurgh_simplified_monolithic`** is the simpler, cheaper model, and the right baseline. Prefer it when per-type data is thin. The [ablation study](ablation-study.md) found that an element-pair-specialised bank transferred much worse out of distribution on GMD-26, because each specialised network sees only its own slice of the data.
-- **`simurgh_simplified_routed`** is useful when you specifically want to test per-type specialisation, or when chemically diverse fragments give the MoE something to separate. On GMD-26 there are only about three fragment chemistries (COOH, CH2, CH3). That is why its config keeps `balance_loss_weight: 0.0`: identical compositions cannot be split across experts.
+- **`simurgh_legacy_simplified_monolithic`** is the simpler, cheaper model, and the right baseline. Prefer it when per-type data is thin. The [ablation study](ablation-study.md) found that an element-pair-specialised bank transferred much worse out of distribution on GMD-26, because each specialised network sees only its own slice of the data.
+- **`simurgh_legacy_simplified_routed`** is useful when you specifically want to test per-type specialisation, or when chemically diverse fragments give the MoE something to separate. On GMD-26 there are only about three fragment chemistries (COOH, CH2, CH3). That is why its config keeps `balance_loss_weight: 0.0`: identical compositions cannot be split across experts.
 - **Prefer [NF_SIMURGH](nf-simurgh.md)** if you want ARACE rounds with a fragment channel added on top, rather than a separate three-line design.
 
 ## Configuration
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_simplified_monolithic_gmd26
-pixi run -e cuda goal-train --config-name simurgh_simplified_routed_gmd26
-pixi run -e cuda goal-train --config-name simurgh_simplified_monolithic_md17
-pixi run -e cuda goal-train --config-name simurgh_simplified_routed_md17
+pixi run -e cuda goal-train --config-name simurgh_legacy_simplified_monolithic_gmd26
+pixi run -e cuda goal-train --config-name simurgh_legacy_simplified_routed_gmd26
+pixi run -e cuda goal-train --config-name simurgh_legacy_simplified_monolithic_md17
+pixi run -e cuda goal-train --config-name simurgh_legacy_simplified_routed_md17
 ```
 
 Shared keys (shipped GMD-26 values, code defaults in brackets):
@@ -115,7 +117,7 @@ fragment_experts:
 
 With these thresholds on GMD-26 (measured in the config: pairs H–C 39.9%, H–H 36.5%, H–O 9.5%, C–C 8.8%, C–O 5.0%, O–O 0.39%; receivers H 61.2%, C 31.2%, O 7.6%), H, C and O all get dedicated atom artisans. The rare atom artisan therefore gets **no** training data and acts only as a safety net for unseen elements. Five pair artisans are dedicated, and the rare pair artisan trains on O–O.
 
-The **rMD17 aspirin** pair (`*_md17.yaml`) is derived from `nf_simurgh_md17.yaml`: same split, custom K=3 fragments, `precision: "64"`, batch 6, `avg_num_neighbors: 14.3806`. The routed version uses `min_pair_frequency: 0.05` (so only O–O is rare and the rare pair artisan trains) and `num_experts: 3` (aspirin has exactly three fragment compositions).
+The **rMD17 aspirin** pair (`*_md17.yaml`) is derived from `simurgh_legacy_nf_md17.yaml`: same split, custom K=3 fragments, `precision: "64"`, batch 6, `avg_num_neighbors: 14.3806`. The routed version uses `min_pair_frequency: 0.05` (so only O–O is rare and the rare pair artisan trains) and `num_experts: 3` (aspirin has exactly three fragment compositions).
 
 ### Outputs
 

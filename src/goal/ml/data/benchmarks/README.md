@@ -10,17 +10,17 @@ with `--config-name` and override individual keys. There are no `data=` /
 
 ```bash
 # Train on rMD17 aspirin (revised MD17)
-goal-train --config-name nf_simurgh_md17
+goal-train --config-name simurgh_legacy_nf_md17
 
 # Another rMD17 molecule: also set the elements it contains
 # (the table is under model.backbone.elements in the config)
-goal-train --config-name nf_simurgh_md17 data.molecule=ethanol 'model.backbone.elements=[1,6,8]'
+goal-train --config-name simurgh_legacy_nf_md17 data.molecule=ethanol 'model.backbone.elements=[1,6,8]'
 
 # Train on QM9 predicting the HOMO-LUMO gap instead of U0
-goal-train --config-name nf_simurgh_qm9 data.target=gap
+goal-train --config-name simurgh_legacy_nf_qm9 data.target=gap
 
 # Override the cutoff (the backbone cutoff interpolates data.cutoff)
-goal-train --config-name nf_simurgh_md17 data.cutoff=6.0
+goal-train --config-name simurgh_legacy_nf_md17 data.cutoff=6.0
 ```
 
 ANI-1/ANI-1x and SPICE have no shipped experiment config: copy one of the

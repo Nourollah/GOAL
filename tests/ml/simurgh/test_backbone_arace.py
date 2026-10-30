@@ -1,4 +1,4 @@
-"""Tests for the modular ARACE backbone (``simurgh_arace``).
+"""Tests for the modular ARACE backbone (``simurgh_legacy_arace``).
 
 Coverage (Part 7 of the ARACE-modularisation task):
 
@@ -28,8 +28,8 @@ from omegaconf import OmegaConf
 from torch_geometric.data import Batch
 
 from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-from goal.ml.nn.models.simurgh.arace import MonolithicArace
-from goal.ml.nn.models.simurgh.backbone_arace import SimurghAraceBackbone
+from goal.ml.nn.models.simurgh.legacy.arace import MonolithicArace
+from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 from tests.ml.simurgh.conftest import random_so3
 
@@ -122,10 +122,12 @@ class TestModularForwardPass:
             )
 
     def test_registered_in_registries(self) -> None:
-        assert BACKBONE_REGISTRY.get("simurgh_arace") is SimurghAraceBackbone
-        assert MODEL_REGISTRY.get("simurgh_arace") is SimurghAraceBackbone
+        assert BACKBONE_REGISTRY.get("simurgh_legacy_arace") is SimurghAraceBackbone
+        assert MODEL_REGISTRY.get("simurgh_legacy_arace") is SimurghAraceBackbone
         # Legacy ACE-first backbone stays reachable under both names.
-        assert BACKBONE_REGISTRY.get("simurgh") is BACKBONE_REGISTRY.get("simurgh_ace_first")
+        assert BACKBONE_REGISTRY.get("simurgh_legacy") is BACKBONE_REGISTRY.get(
+            "simurgh_legacy_ace_first"
+        )
 
     def test_gates_keyed_by_round_and_pair(self) -> None:
         backbone = _build_backbone(num_rounds=2)
@@ -325,9 +327,9 @@ class TestHpoConfig:
 
         os.environ.setdefault("PROJECT_ROOT", str(_CONFIGS_ML_DIR.parents[1]))
         with initialize_config_dir(config_dir=str(_CONFIGS_ML_DIR), version_base=None):
-            cfg = compose(config_name="simurgh_gmd26_hpo")
+            cfg = compose(config_name="simurgh_legacy_gmd26_hpo")
 
-        assert cfg.model.backbone.name == "simurgh_arace"
+        assert cfg.model.backbone.name == "simurgh_legacy_arace"
         assert cfg.hparams_search.method == "ray"
 
         sig = inspect.signature(SimurghAraceBackbone.__init__)
@@ -353,7 +355,7 @@ class TestHpoConfig:
 
         os.environ.setdefault("PROJECT_ROOT", str(_CONFIGS_ML_DIR.parents[1]))
         with initialize_config_dir(config_dir=str(_CONFIGS_ML_DIR), version_base=None):
-            cfg = compose(config_name="simurgh_gmd26")
-            legacy = compose(config_name="simurgh_ace_first_gmd26")
-        assert cfg.model.backbone.name == "simurgh_arace"
-        assert legacy.model.backbone.name in ("simurgh", "simurgh_ace_first")
+            cfg = compose(config_name="simurgh_legacy_gmd26")
+            legacy = compose(config_name="simurgh_legacy_ace_first_gmd26")
+        assert cfg.model.backbone.name == "simurgh_legacy_arace"
+        assert legacy.model.backbone.name in ("simurgh_legacy", "simurgh_legacy_ace_first")

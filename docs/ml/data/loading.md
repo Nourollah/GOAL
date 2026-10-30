@@ -116,7 +116,7 @@ flowchart TD
 
 > [!IMPORTANT]
 > `train_dir` beats `train_paths`, which beats `root`. Most shipped configs
-> (for example `simurgh_gmd26`) set `train_dir`/`val_dir`/`test_dir` **and**
+> (for example `simurgh_legacy_gmd26`) set `train_dir`/`val_dir`/`test_dir` **and**
 > `root`, and in those configs `root` is only used in the run name. To switch
 > such a config to a `root` split from the command line, null out the
 > directories:
@@ -342,16 +342,16 @@ reads several model inputs from the **train split**:
 
 | Quantity | Function | Injected when |
 |---|---|---|
-| `elements` | `compute_unique_elements` | backbone is `simurgh`, `simurgh_ace_first`, `simurgh_arace`, `simurgh_monolithic` or `monolithic_arace` (overwrites the config) |
+| `elements` | `compute_unique_elements` | backbone is `simurgh_legacy`, `simurgh_legacy_ace_first`, `simurgh_legacy_arace`, `simurgh_legacy_monolithic` or `simurgh_legacy_monolithic_arace` (overwrites the config) |
 | atomic reference energies (E0s) | `compute_atomic_references` | `atomic_energies.mode: dataset` (or `compute_from_dataset: true`) and no `values` given |
 | `scale` | `compute_energy_scale` | atomic-energy mode is `dataset` or `provided` and `scale` is null |
-| `avg_num_neighbors` | `compute_avg_num_neighbors` | `dressing_kwargs.avg_num_neighbors: null`, or backbone `simurgh_arace` with a null top-level key |
+| `avg_num_neighbors` | `compute_avg_num_neighbors` | `dressing_kwargs.avg_num_neighbors: null`, or backbone `simurgh_legacy_arace` with a null top-level key |
 | `pair_counts` | `compute_pair_counts` | `rare_artisan.enabled: true` and `pair_counts: null` |
 
 Every injected value is also written back into the config the run saves (`hparams` and `checkpoints/config.yaml`), so a model rebuilt from a checkpoint — `GOALCalculator`, `goal-eval`, a bare `.ckpt` — gets exactly these values. (Before October 2026 only `pair_counts` was written back.)
 
 > [!WARNING]
-> `nf_simurgh` and the SIMURGH Simplified backbones are **not** on the
+> `simurgh_legacy_nf` and the SIMURGH Simplified backbones are **not** on the
 > `elements` list. Their configs hard-code `elements` and
 > `avg_num_neighbors`. When you change the dataset, the molecule or
 > `data.cutoff`, recompute both, because an element missing from `elements`
@@ -381,7 +381,7 @@ Starting from a shipped config, override from the command line. Null out its
 directory keys so Mode 1 is used:
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_gmd26 \
+pixi run -e cuda goal-train --config-name simurgh_legacy_gmd26 \
     data.dataset_type=xyz data.root=/data/my_system/all_frames.extxyz \
     data.train_dir=null data.val_dir=null data.test_dir=null \
     'data.split_ratio=[0.9,0.05,0.05]'
@@ -398,7 +398,7 @@ Put them in one directory as `train.xyz`, `val.xyz` and `test.xyz` and set
 `root` to that directory. Or name them explicitly:
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_gmd26 data.dataset_type=xyz \
+pixi run -e cuda goal-train --config-name simurgh_legacy_gmd26 data.dataset_type=xyz \
     data.train_dir=null data.val_dir=null data.test_dir=null \
     '+data.train_paths=[/data/A/train.xyz]' \
     '+data.val_paths=[/data/A/val.xyz]' \

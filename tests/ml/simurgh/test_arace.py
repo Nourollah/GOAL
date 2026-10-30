@@ -18,7 +18,7 @@ import pytest
 import torch
 from torch_geometric.data import Batch
 
-from goal.ml.nn.models.simurgh.arace import MonolithicArace
+from goal.ml.nn.models.simurgh.legacy.arace import MonolithicArace
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 from tests.ml.simurgh.conftest import random_so3
 
@@ -82,8 +82,8 @@ class TestForwardPass:
         assert net_force < 1e-5, f"Newton violated: ‖Σ F‖ = {net_force:.3e}"
 
     def test_registered_in_registries(self) -> None:
-        assert BACKBONE_REGISTRY.get("monolithic_arace") is MonolithicArace
-        assert MODEL_REGISTRY.get("monolithic_arace") is MonolithicArace
+        assert BACKBONE_REGISTRY.get("simurgh_legacy_monolithic_arace") is MonolithicArace
+        assert MODEL_REGISTRY.get("simurgh_legacy_monolithic_arace") is MonolithicArace
 
 
 # ----------------------------------------------------------------------

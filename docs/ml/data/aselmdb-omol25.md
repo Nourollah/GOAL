@@ -192,7 +192,7 @@ elements means 3,486 pairs per round. Two ways to handle that:
 - **Keep every element and route rare pairs** into one shared artisan
   (`model.backbone.artisan.rare_artisan.enabled: true`). The pairs that
   carry the corpus keep dedicated artisans and the long tail shares one.
-  This is what `nf_simurgh_omol25.yaml` does now.
+  This is what `simurgh_legacy_nf_omol25.yaml` does now.
 
 > [!WARNING]
 > If you set `allowed_elements`, make `model.backbone.elements` the same
@@ -302,9 +302,9 @@ ahead of the training step. Eight workers is what the shipped config uses.
 > 5.3 s. One such structure stalls its worker. If you need those schemes,
 > close the size window as well (for example `max_atoms: 60`).
 
-## Worked example: `nf_simurgh_omol25.yaml`
+## Worked example: `simurgh_legacy_nf_omol25.yaml`
 
-[`src/goal/configs/ml/nf_simurgh_omol25.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_omol25.yaml)
+[`src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml)
 is a complete, commented NF_SIMURGH run on OMol25:
 
 | Choice | Value | Reason |
@@ -316,16 +316,16 @@ is a complete, commented NF_SIMURGH run on OMol25:
 | `split_ratio` | `[0.96, 0.02, 0.02]` | 2% is already thousands of structures per evaluation set |
 | `cutoff` | `6.0` | at 8 Å the edge count roughly doubles, for interactions the virtual-node channel is meant to carry |
 | `fragment_scheme` | `connected` | about half the subset is multi-species (electrolyte clusters, reacting complexes, solvated ions), so `connected` gives K ≥ 2 on ~50% of structures, with whole molecules and ions as fragments |
-| `model.backbone.elements`, `atomic_energies`, `scale`, `avg_num_neighbors` | hard-coded | `nf_simurgh` is not auto-instrumented by `train.py`; the values come from `omol25_prepare.py` |
+| `model.backbone.elements`, `atomic_energies`, `scale`, `avg_num_neighbors` | hard-coded | `simurgh_legacy_nf` is not auto-instrumented by `train.py`; the values come from `omol25_prepare.py` |
 
 After the charge, spin and size filters, the pool contains about 1.9 M
 structures. Run it with:
 
 ```bash
 pixi run -e cuda python scripts/omol25_prepare.py --root data/OMol25/train_4M --workers 8   # once
-pixi run -e cuda goal-train --config-name nf_simurgh_omol25
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_omol25
 # smoke test: ~20k structures
-pixi run -e cuda goal-train --config-name nf_simurgh_omol25 data.max_samples=250
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_omol25 data.max_samples=250
 ```
 
 To restrict the chemistry again:
@@ -346,7 +346,7 @@ is the way into the corpus. It uses only `ASELMDBReader` and
 
 - an **overview** of sub-corpora, size distribution, charges, spins and
   elements, computed from the catalogue without decoding any geometry;
-- the **training subset**, read straight from `nf_simurgh_omol25.yaml` so
+- the **training subset**, read straight from `simurgh_legacy_nf_omol25.yaml` so
   the notebook cannot drift from the config;
 - **lookup** by reader position, by `(shard, row id)` address, by formula,
   by metadata combinations, by provenance (`data["source"]`), and by

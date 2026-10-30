@@ -134,8 +134,8 @@ flowchart LR
 ### 1. Train
 
 ```bash
-pixi run -e cuda-full goal-train --config-name simurgh_gmd26        # see the ML training guide
-# → logs/simurgh_gmd26/runs/<timestamp>_<name>/checkpoints/best_val_forces_mae.simurgh
+pixi run -e cuda-full goal-train --config-name simurgh_legacy_gmd26        # see the ML training guide
+# → logs/simurgh_legacy_gmd26/runs/<timestamp>_<name>/checkpoints/best_val_forces_mae.simurgh
 ```
 
 See [Training a model](../../ml/training/training.md).
@@ -145,7 +145,7 @@ See [Training a model](../../ml/training/training.md).
 ```python
 from goal.md import CalculatorFactory, MoleculeFactory, Simulation
 
-CKPT = "logs/simurgh_gmd26/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh"
+CKPT = "logs/simurgh_legacy_gmd26/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh"
 
 atoms = MoleculeFactory.create("from_smiles", smiles="CCO")
 calc = CalculatorFactory.create("goal_model", checkpoint=CKPT, device="cuda")

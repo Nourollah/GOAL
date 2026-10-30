@@ -77,7 +77,7 @@ data:
   test_paths: [data/gmd.zarr]
 ```
 
-or on the command line. The default experiment (`simurgh_gmd26`) loads its splits from `data.train_dir` / `val_dir` / `test_dir`, which take precedence over per-split paths, so switch those off and add the paths with `+`:
+or on the command line. The default experiment (`simurgh_legacy_gmd26`) loads its splits from `data.train_dir` / `val_dir` / `test_dir`, which take precedence over per-split paths, so switch those off and add the paths with `+`:
 
 ```bash
 pixi run -e cuda goal-train data.dataset_type=zarr \

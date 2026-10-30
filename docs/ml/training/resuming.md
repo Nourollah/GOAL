@@ -8,13 +8,13 @@ The logic lives in [`src/goal/ml/training/resume.py`](https://github.com/Nouroll
 
 ```bash
 # Continue an interrupted run, writing to a new run directory
-pixi run -e cuda goal-train resume.from=logs/simurgh_gmd26/runs/<old_run>
+pixi run -e cuda goal-train resume.from=logs/simurgh_legacy_gmd26/runs/<old_run>
 
 # Continue an interrupted run in place (works when the run was launched with a fixed name)
 pixi run -e cuda goal-train run_name=arace_gmd26_seed42          # same command as the original launch
 
 # Extend a finished 1500-epoch run to 3000 epochs
-pixi run -e cuda goal-train trainer.max_epochs=3000 resume.from=logs/simurgh_gmd26/runs/<old_run>/checkpoints
+pixi run -e cuda goal-train trainer.max_epochs=3000 resume.from=logs/simurgh_legacy_gmd26/runs/<old_run>/checkpoints
 
 # Same, but with a fresh cosine cycle over the extra 1500 epochs
 pixi run -e cuda goal-train trainer.max_epochs=3000 resume.from=<...>/checkpoints resume.lr_schedule=restart
@@ -63,7 +63,7 @@ The "stop" outcomes print their reason and return without error, which is what k
 ```text
 .../checkpoints/last.ckpt has already completed 1500 epochs and trainer.max_epochs=1500 — nothing left to train.
 To continue this run, raise the budget above 1500, e.g.
-    goal-train --config-name simurgh_gmd26 trainer.max_epochs=3000 resume.from=.../checkpoints
+    goal-train --config-name simurgh_legacy_gmd26 trainer.max_epochs=3000 resume.from=.../checkpoints
 ```
 
 `epochs_completed` comes from Lightning's fit-loop progress counters stored in the checkpoint, not from the `epoch` field. GOAL saves `last.ckpt` at the end of validation, before Lightning's epoch counter advances, so the raw `processed` count is one short. `read_epochs_completed` applies the same correction Lightning applies on restore, which means the number printed (`[ckpt/resume] Resuming from … — 412 epochs done`) is the number Lightning compares with `max_epochs`. The checkpoint is opened with `mmap=True`, so under DDP no rank loads the full state dict just to read one integer.
@@ -93,7 +93,7 @@ The continued run writes to **its own** output directory, `training.checkpoint_d
 To extend **in place** instead, so that everything stays in one folder, point both directories at the old run and leave `resume.from` unset:
 
 ```bash
-OLD=logs/simurgh_gmd26/runs/<old_run>
+OLD=logs/simurgh_legacy_gmd26/runs/<old_run>
 pixi run -e cuda goal-train trainer.max_epochs=3000 \
     training.checkpoint_dir=$OLD/checkpoints \
     checkpoint_manager.dirpath=$OLD/checkpoints
@@ -206,8 +206,8 @@ You decide whether the stored values suit new data. List the statistics to deriv
 
 ```bash
 # Continue a finished run on a bigger dataset, re-deriving the normalisers from it
-pixi run -e cuda goal-train --config-name simurgh_gmd26 trainer.max_epochs=3000 \
-    resume.from=logs/simurgh_gmd26/runs/<run> \
+pixi run -e cuda goal-train --config-name simurgh_legacy_gmd26 trainer.max_epochs=3000 \
+    resume.from=logs/simurgh_legacy_gmd26/runs/<run> \
     data.train_dir=/data/GMD/Training_v2 \
     'dataset_stats.recompute=[scale,avg_num_neighbors]'
 

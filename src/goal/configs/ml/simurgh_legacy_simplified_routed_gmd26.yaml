@@ -1,45 +1,54 @@
 ########################################################
 # GOAL ML Experiment Configuration
-# Model  : SIMURGH ACE-FIRST (legacy) — E(3)-equivariant
-#          artisan-bank force field with ACE environment dressing
-#          FIRST and the artisan bank as the FINAL readout.
-# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
+# Model  : SIMURGH Simplified — Routed (less simplified)
+#          Three parallel lines (atom / pair / fragment) over one
+#          shared input, combined only at the readout. Atom and pair lines
+#          use frequency-routed artisans (dedicated per frequent type +
+#          one shared rare artisan); the fragment line is a mixture of
+#          experts with a composition gate.
+#          (see goal.ml.nn.models.simurgh.legacy.simurgh_simplified_routed)
+# Dataset: GMD-26 FragmentDuplication (O2CnH2n, PBE/def2-SVP DFT)
 #
-# NOTE — this is the LEGACY SIMURGH architecture.  The project
-# default is now the ARACE architecture (artisans primary at every
-# layer, ACE aggregating their edge features between rounds); see
-# src/goal/configs/ml/simurgh_gmd26.yaml.  Switching between the two modes is
-# purely a config choice:
-#   ARACE  (default): model.backbone.name: simurgh_arace
-#   ACE-first (this):  model.backbone.name: simurgh
-#                      (alias: simurgh_ace_first — identical class)
-# Run this file with:
-#   goal-train --config-name simurgh_ace_first_gmd26
+# Self-contained config. It does NOT inherit from, interpolate into, or
+# share keys with any other config file.
 #
-# Self-contained config. Every parameter the project supports is
-# listed here — either set to its value for this experiment, or
-# documented in comments showing what else is available.
-# No other file needs to be opened to understand what is possible.
+# Compared against src/goal/configs/ml/simurgh_legacy_simplified_monolithic_gmd26.yaml.
+# The two files are IDENTICAL except for model.backbone.name and the two
+# routed-only sections (artisan:, fragment_experts:) — a test
+# (tests/ml/simurgh/test_simurgh_simplified.py) fails if any other
+# backbone key drifts between them. Data, optimiser, loss, schedule and
+# checkpointing are the same text.
+#
+# EXPERIMENTAL research model.
 ########################################################
 
 # ─────────────────────────────────────────────────────
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "simurgh_ace_first_gmd26"
-  description: "Legacy ACE-first SIMURGH on GMD-26 FragmentDuplication (HCO elements)"
-  tags: ["simurgh", "ace_first", "gmd", "fragment_duplication"]
+  name: "simurgh_legacy_simplified_routed_gmd26"
+  description: "SIMURGH Simplified Routed — frequency-routed artisans + fragment MoE, additive readout"
+  tags:
+    [
+      "simurgh_legacy",
+      "simurgh_simplified",
+      "routed",
+      "gmd",
+      "fragment_duplication",
+      "experimental",
+      "ablation",
+    ]
 
 seed: 42
 
 # task_name: used by Hydra to namespace the output directory.
 # Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
-task_name: "simurgh_ace_first_gmd26"
+task_name: "simurgh_legacy_simplified_routed_gmd26"
 
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
 # Example: "fragment_duplication" → 2026-06-02_18-30_trajectory_simurgh_fragment_duplication
-run_name_suffix: "_fragment_duplication" # prepend "_"; set to "" for no suffix
+run_name_suffix: "" # prepend "_"; set to "" for no suffix
 
 # run_name: leaf of the log directory AND the W&B run name — always in sync.
 # Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
@@ -167,75 +176,174 @@ data:
   split_ratio: [0.8, 0.1, 0.1]
   split_seed: 97
 
+  # ══ FRAGMENT LABELS — MANDATORY FOR THIS MODEL ═══════════════════
+  # The fragment line builds its virtual nodes from these labels and
+  # ALWAYS runs: with compute_fragment_index: false the model raises at
+  # the first batch instead of silently dropping a line.
+  #
+  # Attaches (N,) int64 labels to every graph, computed once at
+  # dataset-load time and renumbered per graph during batching.
+  compute_fragment_index: true
+
+  # Bond threshold for the distance-graph part of the decomposition (Å).
+  fragment_covalent_cutoff: 1.8
+
+  # ── fragment_scheme: HOW a structure is split ─────────────────────
+  #   connected        distance graph (no rdkit, PBC-correct, never fails)
+  #   rdkit_components components of the perceived molecule
+  #   rotatable        non-ring single bonds → CH3/CH2/COOH groups
+  #   brics            BRICS retrosynthetic rules
+  #   recap            RECAP cleavage rules
+  #   custom           cut exactly the bonds named in fragment_smarts
+  #
+  # `connected` IS THE WRONG CHOICE HERE: every GMD structure is one
+  # covalently connected acid, so it gives K=1 — one virtual node, no
+  # fragment pairs, and a fragment line that only ever sees itself.
+  #
+  # `custom` with the two patterns below cuts each acid into chemical
+  # groups (measured on this dataset):
+  #   butanoic acid (C4, 14 atoms)  → K= 4  sizes [4,3,3,4]
+  #   decanoic acid (C10, 32 atoms) → K=10  = [COOH] + 8x[CH2] + [CH3]
+  # Centroid separations reach ~9.8 Å, beyond the 8 Å atom cutoff — the
+  # range only the fragment line covers (vnode_cutoff 15 Å below).
+  fragment_scheme: custom
+
+  # Total charge handed to rdkit's bond perception (rdkit schemes only).
+  fragment_charge: 0
+
+  # "fallback" — warn ONCE and use `connected` for that structure
+  # "raise"    — stop the run (a silent fallback would give K=1 and bias
+  #              the comparison)
+  fragment_on_failure: raise
+
+  # SMARTS whose matched atoms must stay in one fragment. null = none.
+  fragment_keep_groups: null
+
+  # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`.
+  #   [CX4]-[CX4]   sp3 C to sp3 C → CH2 inside the chain, CH3 at the end
+  #   [CX4]-[CX3]   sp3 C to the sp2 carboxyl carbon → detaches COOH
+  fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]"]
+
 # ─────────────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────────────
-# backbone.name options:
-#   "simurgh_arace"       — DEFAULT: ARACE (artisan + ACE alternating), modular
-#   "simurgh"             — legacy ACE-dressing-first artisan-bank model (this file)
-#   "simurgh_ace_first"   — alias for "simurgh" (same class)
-#   "simurgh_monolithic"  — legacy SIMURGH without backbone/head split (inference)
-#   "monolithic_arace"   — SIMURGH ARACE: artisans + ACE alternating, monolithic
-#   "hyperspec"          — E(3)-equivariant GNN (HyperSpec)
-#   "invariant_gnn"      — invariant SchNet-like GNN
-#   "monolithic_example" — minimal reference monolithic model
+# backbone.name options for this family:
+#   "simurgh_legacy_simplified_monolithic" — one monolithic stack per line
+#   "simurgh_legacy_simplified_routed"     — routed artisans + fragment MoE
+# Both are monolithic models: head MUST be null (they return energy,
+# autograd forces and the per-line energies directly).
 #
-# head.name options (set null for monolithic backbones):
-#   "energy_forces"  — energy + autograd forces F=-∂E/∂r (conservative)
-#   "dual_forces"    — energy + forces with selectable mode (see below)
-#   "direct_forces"  — energy + direct equivariant force projection
-#   "energy"         — energy only (no forces; for datasets without forces)
-#   "stress"         — energy + virial stress (periodic systems)
-#   "dipole"         — dipole moment from learned partial charges
-#   "scalar"         — generic per-structure scalar (HOMO, LUMO, ...)
-#   "multi"          — run multiple heads simultaneously
-#   null             — monolithic backbone handles output directly
+# WHAT THE MODEL DOES, in one pass:
+#   shared input   element embedding (0e) + Bessel RBF + SH + envelope
+#   atom line      L1 node-wise (each atom alone), L2+ message passing
+#                  → per-atom energy e_i
+#   pair line      symmetric edge features (even-l harmonics) with a
+#                  private node state → per-edge energy ε_ij = ε_ji
+#   fragment line  equivariant virtual nodes from each fragment's atoms
+#                  (relative to its centroid) + fragment-fragment message
+#                  passing → per-fragment energy E_k (readout zero-init)
+#   readout        E = Σ E0 + scale·(E_atom + E_pair + E_frag)
+#                  F = -∂E/∂r (autograd; there is no force head)
+#
+# The lines never read each other's features. Every line carries l > 0
+# channels to its final readout; the collapse to invariants happens only
+# there. All nonlinearities are e3nn gates (SiLU on 0e, sigmoid gates on
+# l > 0 channels).
 # ─────────────────────────────────────────────────────
 model:
   backbone:
-    name: simurgh
+    name: simurgh_legacy_simplified_routed
 
-    # ── NOTE: the optional add-on modules are ARACE-only ───────────────
-    # `fragment_interaction` (equivariant fragment convolution) and `adaptive_gate`
-    # (adaptive depth gate) attach to an ARACE *round* — one artisan layer
-    # plus one ACE block.  This legacy backbone has no such round: ACE
-    # dressing runs once up front and the artisan bank is a final readout,
-    # so there is nothing for either module to hang off and
-    # `SimurghBackbone.__init__` does not accept those keys (adding them
-    # here raises TypeError at startup).
-    # To use them, switch to the ARACE architecture:
-    #   src/goal/configs/ml/simurgh_gmd26.yaml          (modular, default)
-    #   src/goal/configs/ml/monolithic_arace_gmd26.yaml (monolithic, head: null)
-    # Both document the modules inline and enable them by uncommenting.
-    # The same applies to data.compute_fragment_index — the labels only
-    # feed fragment CA, so this file deliberately omits it.
+    # Neighbour cutoff radius (Å) — must match data.cutoff.
+    cutoff: ${data.cutoff}
 
-    # Pairwise-expert cutoff (Å). Linked to dressing cutoff by default.
-    # Override to decouple: model.backbone.cutoff=5.0
-    cutoff: ${model.backbone.dressing_kwargs.cutoff}
+    # ── Shared input ────────────────────────────────────────────────
+    # The ONLY thing the three lines share. Learnable part: the element
+    # embedding table. RBF / SH / envelope are fixed functions of the
+    # geometry. No message passing happens here.
+    embedding_dim: 32 # width of the 0e element embedding
+    num_elements: 120 # embedding table size; must exceed max(Z)
+    num_rbf: 8 # Bessel basis functions (every radial branch)
+    radial_hidden: 32 # radial-MLP hidden width (every unit)
+    sh_lmax:
+      2 # spherical-harmonic order; >= 2 (the pair line
+      # needs an even l > 0 harmonic)
+
+    # Mean neighbours per atom — normalises the atom-line and pair-line
+    # aggregations. train.py does NOT auto-inject it for this model, so
+    # it is set by hand: the exact mean degree over all 7,000 GMD-26
+    # FragmentDuplication training frames at cutoff 8.0 (same value the
+    # ablation study pins). null = no normalisation.
+    avg_num_neighbors: 20.861964
+
+    # ── Combination rule ────────────────────────────────────────────
+    #   "additive" — E = Σ E0 + scale·(E_atom + E_pair + E_frag)
+    #   "learned"  — per-atom line weights g = 1 + tanh(MLP(0e of the atom
+    #                line)), applied to per-atom line energies (pair
+    #                energy split ½/½ between its atoms, fragment energy
+    #                shared equally by its atoms). Bounded and local, so
+    #                size-extensive; zero-initialised, so it starts EQUAL
+    #                to additive.
+    # Either way the forward returns energy_atom_line / energy_pair_line /
+    # energy_fragment_line, which sum (with energy_baseline) to energy.
+    combination: additive
+
+    # ── Atom line ───────────────────────────────────────────────────
+    # Layer 1 is node-wise; layers 2..num_layers pass messages. The shared
+    # input is scalar, so layer 1's l > 0 blocks are structurally empty
+    # and fill from layer 2 — hence num_layers >= 2.
+    atom_line:
+      hidden_irreps: "16x0e + 16x1o + 16x2e"
+      num_layers: 3
+
+    # ── Pair line ───────────────────────────────────────────────────
+    # Edge features use EVEN-l harmonics only — that is what makes
+    # ε_ij == ε_ji exact — so the irreps must be even parity throughout
+    # (odd blocks could never be populated; the model refuses them).
+    # The 1e block fills from the second edge layer.
+    pair_line:
+      hidden_irreps: "16x0e + 16x1e + 16x2e"
+      num_layers: 2
+
+    # ── Fragment line ───────────────────────────────────────────────
+    fragment_line:
+      hidden_irreps: "16x0e + 16x1o + 16x2e"
+      num_layers: 2 # fragment-fragment message-passing layers
+
+      # Centroid separation (Å) at which the fragment interaction envelope
+      # reaches zero. Far above the atom cutoff: fragment pairs between 8
+      # and 15 Å are exactly what the local lines cannot see. The pair SET
+      # is every k != l of a structure (never truncated), so pairs never
+      # enter or leave as atoms move — only the smooth envelope decays.
+      vnode_cutoff: 15.0
+
+      # Length scale (Å) of the atom → virtual-node basis (atom positions
+      # relative to their fragment centroid). GMD groups are ~1-1.5 Å in
+      # radius.
+      fragment_radius: 3.0
+
+      # Normaliser of the fragment-pair aggregation (a FIXED constant —
+      # a per-fragment count would break separability). null = 1.
+      avg_num_fragment_neighbors: null
+
+      # Safety cap on K per batch: pair enumeration is O(K²).
+      max_fragments: 512
+
+    # ── Line readouts (the only irreps → 0e collapses) ──────────────
+    # Bias-free. Atom and pair readouts: default init (primary energy
+    # terms). Fragment readout: ZERO-init (a design invariant, not a key),
+    # so the fragment line starts at exactly zero and its energy growing
+    # in energy_fragment_line is the signal it is being used.
+    readout:
+      n_scalar: 16
+      hidden: 16
 
     # ── Atomic-energy baseline ──────────────────────────────────────
-    # Subtracts per-element reference energies so the model learns
-    # residuals rather than absolute energies (O(thousand eV)).
-    # Dramatically improves training stability on multi-molecule datasets.
-    #
-    # Elements are discovered automatically from the training set.
-    # You never need to specify which elements are present.
-    #
-    # mode options:
     #   "learned"  — nn.Parameter, zero-init, jointly optimised.
-    #                Works without any prior knowledge.
-    #                Slowest to converge but always valid.
-    #   "dataset"  — least-squares regression on training set.
-    #                Recommended when isolated-atom DFT is unavailable.
-    #                Leave values: null; computed automatically.
-    #   "provided" — hand-set values from isolated-atom DFT.
-    #                Most accurate baseline.
-    #                REQUIRED: every element in the dataset must have a
-    #                value here or training will raise an error with
-    #                instructions on how to fix it.
-    #
-    # For "provided" mode, values in eV (PBE/def2-SVP example):
+    #   "dataset"  — least-squares on the training set (values: null;
+    #                train.py injects them).
+    #   "provided" — hand-set isolated-atom DFT values (eV).
+    # Same values as the other GMD-26 SIMURGH configs.
     atomic_energies:
       mode: provided
       values:
@@ -243,188 +351,76 @@ model:
         6: -1028.481145 # C
         7: -1483.895483 # N
         8: -2041.117735 # O
-      compute_from_dataset: false # set true to force "dataset" mode
+      compute_from_dataset: false
 
-    # Multiplicative scale on the artisan bank interaction energy.
-    # null = 1.0 for "learned" mode, auto-computed for "dataset"/"provided".
+    # Multiplicative gain on all three line energies.
+    # null = auto-computed by train.py for "dataset"/"provided".
     scale: null
 
-    # elements: removed — automatically extracted from the training set
-    #           by train.py via compute_unique_elements(). K elements
-    #           → K*(K+1)/2 pair experts created automatically.
+    # ══ ROUTED-ONLY SECTIONS ════════════════════════════════════════
+    # Everything above is identical to the monolithic config.
 
-    # ── Environment dressing (ACE-style message passing) ─────────────
-    # Produces per-atom equivariant features A_i before the pairwise artisan bank.
-    # Each interaction layer is a tensor-product message-passing round
-    # (MACE-style), optionally followed by an ACE body-order expansion.
-    dressing_kwargs:
-      # Atom-type embedding dimension (input to all dressing layers)
-      embedding_dim: 64
-
-      # Equivariant hidden width per l-block.
-      # irreps_hidden = hidden_channels × (0e + 1o + 2e + ...)
-      hidden_channels: 32
-
-      # Maximum spherical-harmonic order:
-      #   0 = scalars only (invariant, no equivariance)
-      #   1 = + vectors (captures bond directions)
-      #   2 = + rank-2 tensors / quadrupoles (captures angles) — default
-      #   3 = + rank-3 / octupoles (captures dihedrals, ~2× memory)
-      lmax: 2
-
-      # Bessel radial basis functions (standard: 8; more = finer radial detail)
-      num_radial_basis: 8
-
-      # Radial MLP hidden width (maps RBF → TP weights)
-      radial_mlp_hidden: 32
-
-      # Neighbour cutoff radius (Å) — must match data.cutoff
-      cutoff: 8.0
-
-      # Number of ACE message-passing rounds (num_interactions = num_message_passing)
-      # More rounds → longer-range interactions but slower.
-      # 1–3 typical; 2 is the recommended default.
-      num_interactions: 2
-      num_message_passing: 2 # legacy alias, keep in sync with num_interactions
-
-      # ACE body-order expansion on the final layer output:
-      #   1 → A_i           (already 3-body via the MP tensor product)
-      #   2 → B² = A ⊗ A   (captures bond angles, 4-body)
-      #   3 → B³ = B² ⊗ A  (captures dihedrals, 5-body; expensive)
-      body_order: 1
-
-      # Element-conditioned tensor product weights.
-      # true  → TP weights multiplied by per-element scale per destination atom
-      #         (carbon and nitrogen in identical environments → different messages)
-      # false → element-agnostic (ablation)
-      element_conditioned: true
-
-      # Per-layer energy readout.
-      # true  → small MLP readout after each interaction layer contributes its
-      #         own per-node energy (MACE-style body-order decomposition)
-      # false → only the final layer is read out (original SIMURGH behaviour)
-      per_layer_readout: true
-
-      # MACE-style SymmetricContraction for body_order >= 2.
-      # true  → per-element learnable CG weights (more expressive, recommended
-      #         for MLIP production runs with body_order=2)
-      # false → shared-weight CG path (fast, bitwise-reproducible)
-      symmetric_contraction: false
-
-      # Mean neighbours per atom in the training set.
-      # null = auto-computed by train.py via compute_avg_num_neighbors.
-      avg_num_neighbors: null
-
-      # Aggregation normalisation exponent:
-      #   1.0 → divide by N̄       (MACE-style, recommended)
-      #   0.5 → divide by sqrt(N̄) (original SIMURGH behaviour)
-      agg_norm_exponent: 1.0
-
-      # Embedding table size — must be > max(Z) of any element in the dataset.
-      # 9 covers H–F (Z=1–9). Increase for heavier elements (e.g. 37 for up to Kr).
-      # Elements are discovered automatically; this only sizes the embedding table.
-      num_elements: 9
-
-    # ── Pairwise potential artisans ──────────────────────────────────
-    # One artisan per element pair (e.g. H-H, H-C, H-O, C-C, C-O, O-O).
-    # Routed by edge type: each edge selects exactly one artisan.
-    artisan_config:
-      # Artisan architecture:
-      #   "scalar"      — invariant-scalar artisan (default, original
-      #                   behaviour; reads [scalars_A, scalars_B, d_ij])
-      #   "equivariant" — full equivariant artisan: shared equivariant
-      #                   linear on both endpoints (symmetric sum), CG
-      #                   tensor product with the bond direction weighted
-      #                   by a radial MLP of the bond length, invariant
-      #                   scalar readout. Gate + cosine cutoff unchanged.
-      architecture: "equivariant"
-
-      # Equivariant-artisan sub-config (used only when
-      # architecture: "equivariant"; ignored otherwise).
-      equivariant:
-        hidden_irreps: "16x0e + 16x1o + 16x2e" # internal equivariant width
-        num_layers: 1 # 1 = TP only; >1 adds residual EquivLinear+Norm layers
-        num_rbf: 8 # Bessel radial basis functions
-        radial_hidden: 32 # radial MLP hidden width
-        n_scalar_out: 16 # invariant scalars before the energy MLP
-        final_hidden: 16 # energy MLP hidden width
-        element_conditioned: true # modulate TP weights by destination element
-        n_elements: auto # conditioning-table rows = max(Z)+1 of the elements (absent → legacy 120)
-
-      # Width of the invariant scalar projection of each atom's features
-      # fed to each artisan (applied independently on each endpoint).
-      # ("scalar" architecture only.)
-      scalar_channels: 32
-
-      # Scalar-artisan backbone: "linear" (MLP) or "transformer"
-      #
-      # "linear" (default): per-pair MLP reading
-      #   [scalars_A, scalars_B, pair_distance] → 1 scalar energy
-      #   hidden_dims specifies MLP hidden widths; final layer is always
-      #   Linear→1 (no activation). Fast, recommended.
-      #
-      # "transformer": E(3)-safe transformer on invariant scalars.
-      #   Treats [scalars_A, scalars_B, distance_embedding] as 3 tokens.
-      #   Slower but captures more complex many-body patterns within a pair.
-      expert_type: linear
-      hidden_dims: [128, 64] # MLP hidden widths for "linear" expert
-      dropout_rate: 0.1 # dropout between Linear layers; 0.0 = off
-
-      # Transformer-specific (only used when expert_type: "transformer")
-      # transformer_heads: 4
-      # transformer_layers: 2
-
-      # Data-driven routing for rare element pairs.
-      # Prevents overfit on rare pairs (e.g. S-I) with few training examples.
-      # Pairs below min_pair_frequency are routed to a shared RarePotentialArtisan
-      # conditioned on a learned pair-type embedding rather than getting a
-      # dedicated expert with insufficient training data.
+    # ── Frequency-routed artisans (atom + pair lines) ───────────────
+    # Spelled `artisan.rare_artisan` like the ARACE family, so train.py's
+    # existing injection counts the TRAINING SPLIT's element pairs and
+    # writes them into artisan.pair_counts (and into the run's saved
+    # config.yaml). Validation/test data never touch routing — the model
+    # is evaluated on compositional OOD splits.
+    #
+    # Element frequency is derived exactly from the same counts: the share
+    # of directed edges whose RECEIVER has element Z (= share of messages
+    # Z processes).
+    #
+    # The type → artisan maps are model buffers (saved in checkpoints).
+    # ANY type not dedicated — rare, or never seen, or beyond the table —
+    # routes to the rare artisan and never raises. Rare artisans therefore
+    # ALWAYS exist here, and their zero-initialised type code makes an
+    # unseen type use the plain shared rare artisan.
+    #
+    # Measured on GMD-26 FD Training at 8 Å (7,000 frames):
+    #   pairs (share of directed edges):  H-C 39.9%  H-H 36.5%  H-O 9.5%
+    #                                     C-C 8.8%   C-O 5.0%   O-O 0.39%
+    #   elements (share of messages):     H 61.2%    C 31.2%    O 7.6%
+    # With the thresholds below:
+    #   atom line: H, C, O dedicated — the rare atom artisan gets NO
+    #     training data on GMD; it is the safety net for unseen elements.
+    #     Raise min_element_frequency above 0.076 to train it on O.
+    #   pair line: 5 dedicated pair artisans + the rare one, which trains
+    #     on O-O (0.39% of edges).
+    artisan:
       rare_artisan:
-        enabled: false # set true to activate
-        min_pair_frequency: 0.01 # pairs below 1% of edges → RarePotentialArtisan
-        pair_embed_dim: 16 # embedding dim for rare pair type encoding
-
-      # pair_counts injected by train.py when rare_artisan.enabled=true
+        enabled: true # REQUIRED — the flag train.py reads
+        min_element_frequency: 0.05 # fraction of received messages
+        min_pair_frequency: 0.02 # fraction of directed edges
+        type_embed_dim: 16 # rare-artisan type-code width
+      # Injected by train.py from the training split. Set by hand to skip
+      # the counting pass ({"Zlo_Zhi": directed_edges}).
       pair_counts: null
 
-    # Whether to compute per-pair forces via autograd through each expert.
-    # Required for head.mode="pairwise". Adds compute overhead.
-    compute_pairwise_forces: false
+    # ── Fragment mixture of experts ─────────────────────────────────
+    # Gate = softmax(Linear(composition)), composition = [mean element
+    # embedding of the fragment ‖ log1p(n_atoms)] — a 0e code that does
+    # NOT depend on positions, so hard top-k never switches along a
+    # trajectory and the energy stays smooth. Cost: experts specialise by
+    # fragment chemistry, not conformation.
+    #   top_k == 1 → weight = gate probability (Switch-style, gate still
+    #                learns); top_k >= 2 → renormalised over the top-k.
+    # All experts run every step (DDP static graph); non-selected experts
+    # get weight exactly zero.
+    #
+    # balance_loss_weight: Switch load-balancing loss, added to the total
+    # by GOALModule as aux_loss (logged under *_gate/). 0.0 on GMD: there
+    # are only ~3 fragment chemistries (COOH, CH2, CH3) and identical
+    # compositions cannot be split across experts, so the loss could only
+    # distort gate probabilities. Use ~1e-2 on chemically diverse data.
+    fragment_experts:
+      num_experts: 4
+      top_k: 1
+      balance_loss_weight: 0.0
 
   # ── Task head ──────────────────────────────────────────────────────
-  # Consumes NodeFeatures from backbone and predicts energy + forces.
-  #
-  # Force-prediction modes (for "dual_forces" and "energy_forces"):
-  #   "autograd"  — F = -∂E/∂r, energy-conserving. Default.
-  #   "direct"    — equivariant 1x1o projection. Non-conservative, cheaper.
-  #   "hybrid"    — autograd + correction_weight * direct_forces.
-  #                 Keep correction_weight small (0.05) to stay near-conservative.
-  #   "pairwise"  — per-pair autograd with exact Newton's 3rd law.
-  #                 Requires backbone.compute_pairwise_forces=true.
-  #
-  # For "energy" head (no forces):
-  #   Remove irreps_in and hidden_dim; head needs no additional config.
-  #
-  # For "scalar" head:
-  #   property_name: "homo"
-  #   reduction: "mean"   # "mean" (intensive) or "sum" (extensive)
-  #
-  # For "multi" head:
-  #   heads:
-  #     - name: energy_forces
-  #     - name: scalar
-  #       property_name: homo
-  #
-  # irreps_in must match dressing_kwargs:
-  #   {hidden_channels}x0e + {hidden_channels}x1o + {hidden_channels}x2e
-  head:
-    name: dual_forces
-    mode: hybrid # "autograd" | "direct" | "hybrid" | "pairwise"
-    irreps_in: "${model.backbone.dressing_kwargs.hidden_channels}x0e+${model.backbone.dressing_kwargs.hidden_channels}x1o+${model.backbone.dressing_kwargs.hidden_channels}x2e"
-    hidden_dim: 128
-    # compute_stress: false # set true for periodic systems with stress labels
-    # mode / correction_weight / pairwise_correction_weight only apply to
-    # name: dual_forces — remove this comment block when switching heads.
+  # Monolithic model — a task head is incompatible.
+  head: null
 
 # ─────────────────────────────────────────────────────
 # TRAINER
@@ -608,7 +604,6 @@ training:
         energy: 1.0
         forces: 0.0
         newton: 0.0
-        gate_reg: 1.0e-4
 
     - name: "energy_forces"
       epochs: 85
@@ -616,7 +611,6 @@ training:
         energy: 1.0
         forces: 1.0
         newton: 0.0
-        gate_reg: 1.0e-4
 
     - name: "full"
       epochs: null # open-ended — runs to max_epochs
@@ -624,7 +618,6 @@ training:
         energy: 1.0
         forces: 1.0
         newton: 0.01
-        gate_reg: 1.0e-4
 
   # ── Loss functions ────────────────────────────────────────────────
   # Declares which loss components exist and their base weights.
@@ -666,10 +659,6 @@ training:
       fn: mae
       weight: 1.0
       normalize_by_n_atoms: true
-
-    - name: gate_reg
-      fn: mse
-      weight: 1.0e-4
 
     # Newton violation (force conservation penalty) — included in stages
     # but only active when loss_weights.newton > 0:
@@ -736,12 +725,16 @@ checkpoint_manager:
     enabled: true
     filename: "last.ckpt"
 
-  # Self-contained .simurgh archives (weights + resolved config +
-  # metadata + frozen model source in a single shippable zip).
-  # The model source is always frozen to {dirpath}/frozen_source/ at
-  # training start; these knobs only control archive packing.
-  save_archive: true # pack best checkpoint at end of training
-  archive_interval: false # also pack at every interval checkpoint (large!)
+  # ── Self-contained .simurgh archives ─────────────────────────────
+  # A .simurgh archive bundles weights, config and the FROZEN MODEL
+  # SOURCE so a run can be reloaded without the repo at that commit.
+  # The model file, the shared simurgh_simplified_layers module and the
+  # primitives it imports are frozen together (import-graph walk).
+  #   save_archive     — write one alongside the best checkpoint
+  #   archive_interval — also write one at every interval checkpoint
+  #                      (costs disk; useful for long research runs)
+  save_archive: true
+  archive_interval: false
 
 # ─────────────────────────────────────────────────────
 # CALLBACKS
@@ -780,9 +773,30 @@ callbacks:
     # that finished epoch with no metrics logged, which strict mode rejects.
     check_on_train_epoch_end: false
     monitor: "val_forces/forces_mae"
-    patience: 50 # epochs with no improvement before stopping
+
+    # ── min_delta IS IN THE METRIC'S OWN UNITS ───────────────────────
+    # val_forces/forces_mae is reported in eV/A, so the
+    # inherited 1.0e-4 meant "an epoch only counts as an improvement if
+    # it beats the best by 1e-4 eV/A". Late in training the
+    # per-epoch gain is far below that, so EVERY epoch scores as
+    # stalled and the run stops while the curve is still descending —
+    # on rMD17 aspirin that ended a 3,000-epoch budget at ~970 with
+    # val_forces/forces_mae still falling.
+    #
+    # 0.0 = any improvement counts, which is what you want when the
+    # metric is a slowly converging error. Set a positive value only if
+    # you know the noise floor of your validation set and want to stop
+    # inside it.
+    min_delta: 0.0
+
+    # Counted in epochs.
+    # 200 (200 epochs) is deliberately generous: this is a
+    # divergence guard, not a convergence detector. To remove the guard
+    # entirely, comment out this whole block — checkpoint_manager.top_k
+    # still keeps the best weights.
+    patience: 200
+
     mode: "min"
-    min_delta: 1.0e-4 # minimum improvement to count
     strict: true # crash if monitor not found in metrics
     check_finite: true # stop if monitor becomes NaN or Inf
     stopping_threshold: null # stop immediately if metric < threshold
@@ -841,7 +855,7 @@ callbacks:
 # data.monitor_test_during_training is on, otherwise only by an explicit
 # trainer.test() run).  Select on val_*, read test_*.
 #
-# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+# Full section reference: src/goal/configs/ml/simurgh_legacy_gmd26.yaml
 #
 # Multiple loggers can be active simultaneously.
 # Metrics are logged to all enabled loggers.
@@ -875,7 +889,15 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags: ["simurgh", "gmd"]
+    tags:
+      [
+        "simurgh_legacy",
+        "simurgh_simplified",
+        "routed",
+        "gmd",
+        "experimental",
+        "ablation",
+      ]
 
   # TensorBoard:
   # tensorboard:

@@ -1,77 +1,35 @@
 ########################################################
 # GOAL ML Experiment Configuration
-# Model  : SIMURGH Simplified — Routed (less simplified)
-#          Three parallel lines (atom / pair / fragment) over one
-#          shared input, combined only at the readout. Atom and pair lines
-#          use frequency-routed artisans (dedicated per frequent type +
-#          one shared rare artisan); the fragment line is a mixture of
-#          experts with a composition gate.
-#          (see goal.ml.nn.models.simurgh.simurgh_simplified_routed)
-# Dataset: rMD17 aspirin (revised MD17, PBE/def2-SVP DFT MD at 500 K)
+# Model  : SIMURGH ARACE (ARtisan + Atomic Cluster Expansion) —
+#          monolithic variant alternating equivariant pair artisans
+#          with ACE message passing
+#          (see goal.ml.nn.models.simurgh.legacy.arace)
+# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
 #
-# Self-contained config. It does NOT inherit from, interpolate into, or
-# share keys with any other config file.
-#
-# Compared against src/goal/configs/ml/simurgh_simplified_monolithic_md17.yaml.
-# The two files are IDENTICAL except for model.backbone.name and the two
-# routed-only sections (artisan:, fragment_experts:) — a test
-# (tests/ml/simurgh/test_simurgh_simplified.py) fails if any other
-# backbone key drifts between them.
-#
-# Data split, fragmentation and the training recipe are the ones tuned on
-# src/goal/configs/ml/nf_simurgh_md17.yaml (precision 64, batch 6, two-stage
-# curriculum, no early stopping), so all three models see the same
-# benchmark protocol.
-#
-# ── WHAT rMD17 ASKS OF THIS MODEL ────────────────────────────────────
-# One molecule (C9H8O4, 21 atoms), 950 training frames, scored on force
-# MAE (MACE published: 6.6 meV/Å).
-#
-#  1. FRAGMENTS MUST BE CUT. An MD17 frame is one covalently bonded
-#     molecule, so `connected` gives K=1: the fragment line would see a
-#     single virtual node with no partners. The `custom` cuts below give
-#     K=3 (ring+ester-O · acetyl · carboxyl), one topology for every
-#     frame, so rdkit perception runs once and is cached.
-#  2. THE FRAGMENT LINE IS AN INDUCTIVE BIAS HERE, NOT MISSING REACH.
-#     Aspirin spans 8.48 Å; two 5 Å message-passing layers already see
-#     every atom pair. Do not expect the fragment line to close the MACE
-#     gap on its own — watch energy_fragment_line to see whether it is
-#     used at all.
-#  3. ROUTING HAS LITTLE TO ROUTE. Three elements, six pairs, all common
-#     (numbers in the routed artisan block). The routed model's extra
-#     capacity is the variable under test, not its rare-type handling.
-#
-# EXPERIMENTAL research model.
+# Self-contained config. Every parameter the project supports is
+# listed here — either set to its value for this experiment, or
+# documented in comments showing what else is available.
+# No other file needs to be opened to understand what is possible.
 ########################################################
 
 # ─────────────────────────────────────────────────────
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "simurgh_simplified_routed_md17"
-  description: "SIMURGH Simplified Routed on rMD17 aspirin"
-  tags:
-    [
-      "simurgh",
-      "simurgh_simplified",
-      "routed",
-      "md17",
-      "rmd17",
-      "aspirin",
-      "experimental",
-      "ablation",
-    ]
+  name: "simurgh_legacy_monolithic_arace_gmd26"
+  description: "SIMURGH ARACE on GMD-26 FragmentDuplication (HCO elements)"
+  tags: ["simurgh_legacy", "arace", "gmd", "fragment_duplication"]
 
 seed: 42
 
 # task_name: used by Hydra to namespace the output directory.
 # Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
-task_name: "simurgh_simplified_routed_md17"
+task_name: "simurgh_legacy_monolithic_arace_gmd26"
 
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
-# Example: "aspirin" → 2026-06-02_18-30_rmd17_simurgh_simplified_routed_aspirin
-run_name_suffix: "_aspirin" # prepend "_"; set to "" for no suffix
+# Example: "fragment_duplication" → 2026-06-02_18-30_trajectory_simurgh_fragment_duplication
+run_name_suffix: "_fragment_duplication" # prepend "_"; set to "" for no suffix
 
 # run_name: leaf of the log directory AND the W&B run name — always in sync.
 # Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
@@ -111,8 +69,7 @@ paths:
 # dataset_type options:
 #   "xyz"        — ExtXYZ files (.xyz, .extxyz)
 #   "hdf5"       — HDF5 pre-processed graphs (.h5, .hdf5)
-#   "lmdb"       — FairChem/OCP pickled-graph LMDB (.lmdb)
-#   "aselmdb"    — FairChem ASE-LMDB shards (.aselmdb): OMol25 et al.
+#   "lmdb"       — FairChem/OCP LMDB format (.lmdb)
 #   "trajectory" — ASE trajectory files (.traj, .db)
 #   "md17"       — MD17/rMD17 benchmark (goal.ml.data.benchmarks.md17)
 #   "qm9"        — QM9 quantum chemistry (goal.ml.data.benchmarks.qm9)
@@ -135,329 +92,252 @@ paths:
 #     split_ratio: [0.8, 0.1, 0.1]
 #     merge_strategy: "sequential"    # or "random"
 #
-#   Mode 4 — directory per split:
+#   Mode 4 — directory per split (used here for GMD):
 #     train_dir: /path/train/
 #     val_dir:   /path/val/
 #     test_dir:  /path/test/          # optional
 # ─────────────────────────────────────────────────────
 data:
-  # "rmd17" and "md17" are the same class (goal.ml.data.benchmarks.md17) — the
-  # `revised:` flag below is what picks the corpus, and the registry name
-  # is only a label. Kept as "rmd17" so the run name says which one.
+  dataset_type: trajectory
+
+  # Mode 4 — directory-based per-split (GMD directory layout)
+  train_dir: ${paths.data_dir}/GMD/FragmentDuplication/Training
+  val_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestID
+  test_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestOOD
+  root: ${paths.data_dir}/GMD/FragmentDuplication # for logging
+
+  # ── MONITOR THE OOD SET DURING TRAINING ──────────────────────────
+  # true → the test split above also runs through the validation loop
+  # every validation epoch, reported in its OWN logger sections
+  # (test/, test_energy/, test_forces/) beside the val ones.  With
+  # val_dir=TestID and test_dir=TestOOD that makes the generalisation
+  # gap a curve you watch while training instead of a number you learn
+  # afterwards, and the two sets are never averaged together.
   #
-  # NOTE this is a benchmark adapter from src/goal/ml/data/benchmarks/, not one of
-  # the core goal.ml.data.datasets loaders. It downloads and caches
-  # itself, does its own train/val/test split, and holds every frame in
-  # memory as a pre-built graph — so `root` below is a cache directory,
-  # not a file to read.
-  dataset_type: rmd17
-
-  root: ${paths.data_dir}/md17
-  molecule: aspirin # avg_num_neighbors / fragment cuts below are aspirin's
-  revised: true # rMD17 (PBE/def2-SVP, consistent reference frame)
-
-  # ── Split ────────────────────────────────────────────────────────
-  # The dataset splits ITSELF from these sizes; the DataModule just asks
-  # it for "train" / "val" / "test" in turn. data.split_ratio and
-  # data.split_seed are therefore ignored here and are not set.
+  # Costs one extra forward pass over test_dir per validation epoch
+  # (no backward), so it scales with len(TestOOD)/len(TestID).
   #
-  # 950/50 is the revised MD17 benchmark protocol (Schütt et al. 2017) — every
-  # published MD17 number you might compare against uses it. The
-  # remaining ~99,000 frames become the test split.
-  train_size: 950
-  val_size: 50
-  test_size: 50
-  seed: 42
-
-  # float64 labels: rMD17 energies are ~-17,617 eV with a spread of
-  # 0.27 eV, so the signal is the 5th significant figure of the label.
-  # trainer.precision below still runs the network in float32.
-  dtype: float64
-
-  # ── MONITOR THE TEST SET DURING TRAINING ─────────────────────────
-  # false, and not negotiable here: the test split is everything the
-  # 950+50 did not take — about 99,000 frames. Running it through the
-  # validation loop every epoch would cost ~100x the validation pass
-  # for a set that is drawn from the same trajectory as val, so it is
-  # not even out-of-distribution. Evaluate it once at the end with
-  # goal-eval instead.
-  monitor_test_during_training: True
+  # Do NOT point checkpoint_manager.top_k.metric or
+  # early_stopping.monitor at a test/ curve: selecting on a set makes
+  # it a second validation set and its OOD number stops meaning
+  # anything.  Select on val_*, read test_*.
+  #
+  # false → unchanged behaviour: the test split is loaded only by an
+  # explicit trainer.test() run.
+  monitor_test_during_training: true
 
   # Neighbour cutoff radius (Å). Must match model.backbone.cutoff.
-  # 5.0 is the MD17 convention. Aspirin is 7.94 Å across, so this is a
-  # genuine cutoff rather than a formality — and it is what leaves 3 of
-  # the 15 fragment-centroid pairs out of reach of atom-level message
-  # passing (see the header).
-  cutoff: 5.0
+  # Increasing slows O(N·r³) but improves long-range interactions.
+  cutoff: 8.0
 
-  # ── DataLoader ───────────────────────────────────────────────────
-  # 6 structures x 21 atoms = 126 atoms and ~1,790 edges per batch,
-  # which is 159 optimiser steps per epoch over the 950 training frames.
-  #
-  # SMALL DATA WANTS STEPS, NOT THROUGHPUT. At batch 24 this set gives
-  # only 40 steps per epoch, and memory is nowhere near the constraint
-  # (1.9 GiB at batch 6, 7.5 GiB at 24). MACE trains rMD17 at batch 5.
-  #
-  # MEASURED peak CUDA memory for a full train step (forward + autograd
-  # forces + backward + AdamW), at precision "32" — double it for the
-  # "64" this file now uses:
-  #
-  #   batch_size   atoms   edges   peak
-  #        6         126    1,790   1.9 GiB   <- this file
-  #       12         252    3,596   3.8 GiB
-  #       24         504    7,208   7.5 GiB
-  batch_size: 6
+  # DataLoader
+  batch_size: 48 # structures per mini-batch; 8–32 typical for atomistics
+  num_workers: 0 # 0 = single-process (required for Python 3.14 / some envs)
+  pin_memory: false # true when using CUDA; false for CPU
+  persistent_workers: false # true only when num_workers > 0
+  prefetch_factor: null # null = PyTorch default; set 2–4 with num_workers > 0
 
-  # num_workers: 0 IS THE RIGHT VALUE FOR THIS DATASET, unlike the
-  # lazily-decoded ones. Every frame is already a built graph in the
-  # parent process's memory, so __getitem__ is a list index — there is
-  # no work to hand to a worker, and forking would copy the whole
-  # trajectory per worker (Python refcounting defeats copy-on-write)
-  # while adding IPC to move graphs back. It also keeps the lazily
-  # attached fragment labels in ONE process, so each frame is
-  # decomposed once for the whole run rather than once per worker.
-  num_workers: 0
-  pin_memory: false # true if you move to CUDA and profile a win
-  persistent_workers: false # only meaningful with num_workers > 0
-  prefetch_factor: null
+  # Dataset kwargs forwarded to the dataset class (not used by DataModule itself)
+  energy_key: energy # key in ASE atoms.info / ExtXYZ properties
+  forces_key: forces # key in ASE atoms.arrays / ExtXYZ arrays
 
-  # Label keys do NOT apply: this adapter reads the .npz fields itself
-  # and builds AtomicGraphs directly. Setting energy_key/forces_key here
-  # would be forwarded to the dataset and raise TypeError.
-  # energy_key: energy
-  # forces_key: forces
+  # Custom label keys (MACE/FairChem-style) — overrides the *_key lines above.
+  # Missing configured key → clear error listing the keys present in the file.
+  # key_mapping:
+  #   energy: REF_energy
+  #   forces: REF_forces
+  #   stress: virial
 
-  # ══ FRAGMENT LABELS — MANDATORY FOR THIS MODEL ═══════════════════
-  # The fragment line builds its virtual nodes from these labels and
-  # ALWAYS runs: with compute_fragment_index: false the model raises at
-  # the first batch instead of silently dropping a line.
-  #
-  # The benchmark adapters in src/goal/ml/data/benchmarks/ accept these options
-  # too, and attach the labels lazily on first access — so each frame is
-  # decomposed exactly once per process, not once per epoch.
-  compute_fragment_index: true
+  # Merge strategy for multi-file splits (Mode 2/3/4)
+  # "sequential" — concatenate in sorted order (reproducible)
+  # "random"     — shuffle once at load time
+  merge_strategy: sequential
 
-  # Bond threshold for the distance-graph part of the decomposition (Å).
-  fragment_covalent_cutoff: 1.8
+  # Auto-split ratio (Mode 1/3 only, ignored for Mode 4)
+  split_ratio: [0.8, 0.1, 0.1]
+  split_seed: 97
 
-  # ── fragment_scheme: HOW a structure is split ─────────────────────
+  # ── Fragment labels (for model.backbone.fragment_interaction) ─────
+  # Attach (N,) int64 connected-component labels under a SHORT covalent
+  # cutoff to every graph, so separate molecules get separate labels even
+  # though they sit inside the (much longer) interaction cutoff.  Computed
+  # once at dataset-load time and renumbered per graph during batching.
+  # Needed only when model.backbone.fragment_interaction is enabled — false
+  # here since this file has both add-ons off.  See
+  # src/goal/configs/ml/simurgh_legacy_gmd26.yaml for the full explanation.
+  compute_fragment_index: false
+  fragment_covalent_cutoff: 1.8 # Å; ~2.4 for metal-ligand bonds
+
+  # How to split a structure into fragments:
   #   connected        distance graph (no rdkit, PBC-correct, never fails)
   #   rdkit_components components of the perceived molecule
   #   rotatable        non-ring single bonds → CH3/CH2/COOH groups
   #   brics            BRICS retrosynthetic rules
   #   recap            RECAP cleavage rules
-  #   custom           cut exactly the bonds named in fragment_smarts
-  #
-  # Measured on rMD17 aspirin (C9H8O4, 21 atoms). "far" counts centroid
-  # pairs separated by more than the 5 Å atom cutoff:
-  #
-  #   scheme                          K  far    fragments
-  #   connected                       1  0/0    the whole molecule
-  #   rdkit_components                1  0/0    the whole molecule
-  #   rotatable                       6  3/15   ring · CH3 · CO · CO · HO · O
-  #   brics                           5  2/10   ring · CH3CO · CO · HO · O
-  #   custom (this file)              3  1/3    ring+O · acetyl · COOH
-  #
-  # `rotatable` IS THE WRONG CUT FOR THIS MOLECULE, which is why this
-  # file does not use it. Look at what it produces: a bare 'O', a lone
-  # 'HO', and the carboxyl split across two fragments. Those are not
-  # chemical groups, they are whatever fell out of cutting every
-  # non-ring single bond — and the model is being asked to learn a
-  # pooled representation of each one.
-  #
-  # The custom patterns below cut the two bonds that actually separate
-  # aspirin's three chemical units, and `fragment_keep_groups` then
-  # forbids the carboxyl from being split:
-  #
-  #   [C:1](=O)-[O:2]   the ester bond, detaching the acetyl group
-  #   c-[CX3]           the aromatic-to-carboxyl bond
-  #
-  # giving ring+ester-O (11 atoms), acetyl (6), carboxyl (4).
-  #
-  # NOTE a 3-atom pattern needs ':1'/':2' atom maps to say WHICH bond to
-  # cut — '[CX3](=O)-[OX2]' is rejected as ambiguous. Two-atom patterns
-  # need no maps.
-  #
-  # THE HONEST CAVEAT: on aspirin this is a second-order knob. Two
-  # rounds of 5 Å message passing give a 10 Å receptive field against
-  # the molecule's 8.48 Å extent, so the atom-level backbone already
-  # sees every atom pair and the virtual-node channel is supplying an
-  # inductive bias, not missing reach. Expect chemistry, not a large
-  # accuracy jump.
-  fragment_scheme: custom
+  # GMD structures are single connected molecules, so `connected` gives
+  # K=1 and the fragment module is a no-op; `rotatable` is the scheme
+  # that produces usable fragments there.  Full table with measured
+  # fragment counts in src/goal/configs/ml/simurgh_legacy_gmd26.yaml.
+  fragment_scheme: connected
+  fragment_charge: 0 # total charge for rdkit bond perception
+  fragment_on_failure: fallback # or "raise"
 
-  # Total charge handed to rdkit's bond perception. rMD17 molecules are
-  # all neutral closed-shell.
-  fragment_charge: 0
-
-  # "fallback" — warn ONCE and use `connected` for that structure
-  # "raise"    — stop the run
-  #
-  # `raise` here, as in the GMD config and for the same reason: there is
-  # ONE topology in this dataset. If perception fails it fails for every
-  # frame, and the run would quietly train K=1 — the fragment line with
-  # no partners — rather than stopping. A fallback that fires
-  # 100% of the time is not a fallback.
-  fragment_on_failure: raise
-
-  # SMARTS whose matched atoms must stay in one fragment. Works with
-  # every scheme. Without this the carboxyl comes apart into 'CO' and
-  # 'HO' even under the custom cuts below.
-  fragment_keep_groups: ["C(=O)[OX2H1]"]
-
-  # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`.
-  # See the scheme block above for what each one separates.
-  fragment_smarts: ["[C:1](=O)-[O:2]", "c-[CX3]"]
+  # Hints — BRICS/RECAP rules are hard-coded in rdkit, so chemistry hints
+  # live here.  keep_groups works with every scheme; smarts drives
+  # `fragment_scheme: custom`.  Measured examples in
+  # src/goal/configs/ml/simurgh_legacy_gmd26.yaml.
+  fragment_keep_groups: null # e.g. ["C(=O)O"] — atoms that stay together
+  fragment_smarts: null # e.g. ["[CX4]-[CX4]"] — bonds to cut (custom)
 
 # ─────────────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────────────
-# backbone.name options for this family:
-#   "simurgh_simplified_monolithic" — one monolithic stack per line
-#   "simurgh_simplified_routed"     — routed artisans + fragment MoE
-# Both are monolithic models: head MUST be null (they return energy,
-# autograd forces and the per-line energies directly).
+# backbone.name options:
+#   "simurgh_legacy_monolithic_arace"   — SIMURGH ARACE: artisans + ACE alternating,
+#                          monolithic (this file)
+#   "simurgh_legacy_arace"       — DEFAULT: same ARACE architecture, modular
+#                          (backbone + head; see src/goal/configs/ml/simurgh_legacy_gmd26.yaml)
+#   "simurgh_legacy"             — legacy ACE-dressing-first artisan-bank model
+#                          (alias: "simurgh_legacy_ace_first")
+#   "simurgh_legacy_monolithic"  — legacy SIMURGH without backbone/head split
+#   "hyperspec"          — E(3)-equivariant GNN (HyperSpec)
+#   "invariant_gnn"      — invariant SchNet-like GNN
+#   "monolithic_example" — minimal reference monolithic model
 #
-# WHAT THE MODEL DOES, in one pass:
-#   shared input   element embedding (0e) + Bessel RBF + SH + envelope
-#   atom line      L1 node-wise (each atom alone), L2+ message passing
-#                  → per-atom energy e_i
-#   pair line      symmetric edge features (even-l harmonics) with a
-#                  private node state → per-edge energy ε_ij = ε_ji
-#   fragment line  equivariant virtual nodes from each fragment's atoms
-#                  (relative to its centroid) + fragment-fragment message
-#                  passing → per-fragment energy E_k (readout zero-init)
-#   readout        E = Σ E0 + scale·(E_atom + E_pair + E_frag)
-#                  F = -∂E/∂r (autograd; there is no force head)
-#
-# The lines never read each other's features. Every line carries l > 0
-# channels to its final readout; the collapse to invariants happens only
-# there. All nonlinearities are e3nn gates.
+# head.name options (set null for monolithic backbones):
+#   "energy_forces"  — energy + autograd forces F=-∂E/∂r (conservative)
+#   "dual_forces"    — energy + forces with selectable mode (see below)
+#   "direct_forces"  — energy + direct equivariant force projection
+#   "energy"         — energy only (no forces; for datasets without forces)
+#   "stress"         — energy + virial stress (periodic systems)
+#   "dipole"         — dipole moment from learned partial charges
+#   "scalar"         — generic per-structure scalar (HOMO, LUMO, ...)
+#   "multi"          — run multiple heads simultaneously
+#   null             — monolithic backbone handles output directly
 # ─────────────────────────────────────────────────────
 model:
   backbone:
-    name: simurgh_simplified_routed
+    name: simurgh_legacy_monolithic_arace
 
     # Neighbour cutoff radius (Å) — must match data.cutoff.
-    cutoff: ${data.cutoff}
-
-    # ── Shared input ────────────────────────────────────────────────
-    embedding_dim: 32 # width of the 0e element embedding
-    num_elements: 120 # embedding table size; must exceed max(Z)
-    num_rbf: 8 # Bessel basis functions (every radial branch)
-    radial_hidden: 32 # radial-MLP hidden width (every unit)
-    sh_lmax: 2 # spherical-harmonic order; >= 2
-
-    # Mean neighbours per atom at cutoff 5.0 — normalises the atom-line
-    # and pair-line aggregations. train.py does NOT auto-inject it for
-    # this model. Aspirin's value (same as nf_simurgh_md17.yaml); a
-    # different data.molecule needs its own number.
-    avg_num_neighbors: 14.3806
-
-    # ── Combination rule ────────────────────────────────────────────
-    #   "additive" — E = Σ E0 + scale·(E_atom + E_pair + E_frag)
-    #   "learned"  — per-atom line weights g = 1 + tanh(MLP(0e of the atom
-    #                line)) on per-atom line energies; bounded and local
-    #                (size-extensive), zero-initialised (starts = additive).
-    combination: additive
-
-    # ── Atom line ───────────────────────────────────────────────────
-    # Layer 1 node-wise, layers 2..num_layers pass messages (>= 2).
-    atom_line:
-      hidden_irreps: "16x0e + 16x1o + 16x2e"
-      num_layers: 3
-
-    # ── Pair line ───────────────────────────────────────────────────
-    # Even-l harmonics only (exact ε_ij == ε_ji) → even-parity irreps.
-    pair_line:
-      hidden_irreps: "16x0e + 16x1e + 16x2e"
-      num_layers: 2
-
-    # ── Fragment line ───────────────────────────────────────────────
-    fragment_line:
-      hidden_irreps: "16x0e + 16x1o + 16x2e"
-      num_layers: 2
-
-      # Envelope zero point for fragment-fragment interactions (Å).
-      # Aspirin's three centroids sit at most ~6 Å apart, so 10 Å keeps
-      # every pair inside the smooth part of the envelope (same value as
-      # nf_simurgh_md17.yaml).
-      vnode_cutoff: 10.0
-
-      # Length scale (Å) of the atom → virtual-node basis. The largest
-      # fragment (ring + ester O, 11 atoms) is ~2.5 Å in radius.
-      fragment_radius: 3.0
-
-      avg_num_fragment_neighbors: null # fixed normaliser; null = 1
-      max_fragments: 512
-
-    # ── Line readouts (the only irreps → 0e collapses) ──────────────
-    # Bias-free; fragment readout zero-initialised (design invariant).
-    readout:
-      n_scalar: 16
-      hidden: 16
+    cutoff: 8.0
 
     # ── Atomic-energy baseline ──────────────────────────────────────
-    #   "learned" / "dataset" / "provided" — see the GMD configs.
-    # "dataset" as in nf_simurgh_md17.yaml: train.py regresses the
-    # per-element references on the training split and injects them,
-    # then derives `scale` from the residual spread.
+    # Same three modes as simurgh_legacy_gmd26.yaml:
+    #   "learned"  — nn.Parameter, zero-init, jointly optimised.
+    #   "dataset"  — least-squares regression on training set
+    #                (leave values: null; train.py injects them).
+    #   "provided" — hand-set isolated-atom DFT values (eV).
     atomic_energies:
-      mode: dataset
-      values: null # train.py injects the regression result
-      compute_from_dataset: true
+      mode: provided
+      values:
+        1: -13.595298 # H
+        6: -1028.481145 # C
+        7: -1483.895483 # N
+        8: -2041.117735 # O
+      compute_from_dataset: false # set true to force "dataset" mode
 
-    # Multiplicative gain on all three line energies (null = auto).
+    # Multiplicative scale on the artisan interaction energy.
+    # null = 1.0 for "learned" mode, auto-computed for "dataset"/"provided".
     scale: null
 
-    # ══ ROUTED-ONLY SECTIONS ════════════════════════════════════════
-    # Everything above is identical to the monolithic config.
+    # elements: auto-extracted from the training set by train.py —
+    # never specify them here.
 
-    # ── Frequency-routed artisans (atom + pair lines) ───────────────
-    # `artisan.rare_artisan.enabled: true` makes train.py count the
-    # TRAINING SPLIT's element pairs into artisan.pair_counts (also saved
-    # in the run's config.yaml). Element frequency = share of directed
-    # edges an element RECEIVES, derived exactly from the same counts.
-    # The maps are model buffers; any non-dedicated type — rare, unseen
-    # or beyond the table — routes to the rare artisan and never raises.
-    #
-    # Measured on rMD17 aspirin at 5 Å (950 frames, 14.37 neighbours):
-    #   pairs (share of directed edges):  H-C 31.9%  C-O 21.7%  C-C 21.4%
-    #                                     H-O 13.3%  H-H 8.2%   O-O 3.6%
-    #   elements (share of messages):     C 48.2%    H 30.8%    O 21.1%
-    # With the thresholds below:
-    #   atom line: H, C, O dedicated — no element is rare on aspirin, so
-    #     the rare atom artisan gets no training data (it is the safety
-    #     net for unseen elements only).
-    #   pair line: 5 dedicated pair artisans + the rare one, which trains
-    #     on O-O (3.6% of edges). min_pair_frequency 0.05 is chosen for
-    #     exactly that: at the GMD value 0.02 nothing would route and the
-    #     rare pair artisan would sit untrained too.
+    # ── ARACE stacking ──────────────────────────────────────
+    # Each round = one artisan layer (per-element-pair equivariant
+    # artisans on edges) + one ACE block (edge → node aggregation with
+    # equivariant linear + residual + RMS norm):
+    #   nodes → edges (artisan) → nodes (ACE) → edges (artisan) → ...
+    num_rounds: 2 # number of artisan + ACE rounds
+
+    # true  → one artisan bank shared by every round (fewer params)
+    # false → independent bank per round (default, more expressive)
+    share_artisan_weights: false
+
+    # Initial node features: atomic-number embedding lookup projected
+    # into the artisans' equivariant space.  There is NO separate
+    # environment-dressing phase — the first artisan layer operates
+    # directly on these embeddings.
+    embedding_dim: 64
+    num_elements: 9 # embedding table size; must be > max(Z) in the data
+
+    # Mean neighbours per atom for the ACE aggregation normalisation.
+    # null = no normalisation (this backbone has no dressing_kwargs, so
+    # train.py does not auto-inject it; set a value to enable).
+    avg_num_neighbors: null
+
+    # ── Equivariant pair artisans (primary learning component) ──────
+    # One artisan per unordered element pair per layer (shared across
+    # layers when share_artisan_weights is true).  Architecture must be
+    # "equivariant" — the ARACE variant is equivariant
+    # throughout; invariants appear only in each layer's scalar readout.
     artisan:
-      rare_artisan:
-        enabled: true # REQUIRED — the flag train.py reads
-        min_element_frequency: 0.05 # fraction of received messages
-        min_pair_frequency: 0.05 # fraction of directed edges
-        type_embed_dim: 16 # rare-artisan type-code width
-      pair_counts: null # injected by train.py
+      architecture: "equivariant"
+      hidden_irreps: "16x0e + 16x1o + 16x2e" # node/pair equivariant width
+      num_layers: 1 # 1 = TP only; >1 adds residual EquivLinear+Norm layers
+      num_rbf: 8 # Bessel radial basis functions
+      radial_hidden: 32 # radial MLP hidden width
+      n_scalar_out: 16 # invariant scalars before the energy MLP
+      final_hidden: 16 # energy MLP hidden width
+      element_conditioned: true # modulate TP weights by destination element
+      n_elements: auto # conditioning-table rows = max(Z)+1 of the elements (absent → legacy 120)
 
-    # ── Fragment mixture of experts ─────────────────────────────────
-    # Gate on a position-independent 0e composition code (mean element
-    # embedding ‖ log1p(n_atoms)) → hard top-k is continuous in the
-    # positions. Aspirin has exactly THREE fragment compositions
-    # (ring+ester-O, acetyl, carboxyl), identical in every frame, so the
-    # gate can at most give each its own expert: num_experts 3, top_k 1
-    # makes the MoE a learned per-fragment-type assignment. More experts
-    # than compositions would leave some permanently unselected.
-    # balance_loss_weight 0: identical compositions cannot be split, so
-    # the loss could only distort the gate probabilities.
-    fragment_experts:
-      num_experts: 3
-      top_k: 1
-      balance_loss_weight: 0.0
+    # ══ OPTIONAL ADD-ON MODULES ═════════════════════════════════════
+    # The monolithic variant accepts the same two optional add-ons as the
+    # modular backbone, with identical keys and identical physics.  Both
+    # are OFF here.  Each is enabled purely by the PRESENCE of its config
+    # section, so the switch is a comment: uncomment the block to enable,
+    # comment it out to disable (an empty section also counts as absent).
+    # Disabled means the block never builds the module — zero parameters,
+    # zero overhead, forward pass bit-identical to plain ARACE.
+    # Full documentation of both modules, including how to run the
+    # four-way ablation from a single file, lives in
+    # src/goal/configs/ml/simurgh_legacy_gmd26.yaml.
+    #
+    # ── Equivariant Fragment Interaction (optional) ─────────────────
+    # A convolution over the fragment graph, from the same e3nn
+    # primitives as the pair artisans:
+    #   f_k = mean_{i∈k} h_i,  c_k = mean_{i∈k} r_i
+    #   Δh_i = Linear( Σ_l TP(f_l, Y^l(r̂_kl); w(d_kl)) / n_k )
+    # Equivariant at every angular order — the correction spans l=0, l=1
+    # AND l=2, and carries WHERE the other fragment is via the spherical
+    # harmonics of the inter-centroid direction.  Pairs are cut off at
+    # `cutoff` (defaults to the backbone radius) and tapered, so the model
+    # stays local.  A lone fragment (K=1) gets exactly zero correction.
+    # REQUIRES data.compute_fragment_index: true.
+    # fragment_interaction:
+    #   irreps_hidden: null # null = reuse artisan.hidden_irreps
+    #   num_rbf: 8
+    #   radial_hidden: 32
+    #   num_layers: 1
+    #   init_zero: true # start as an exact no-op, learn to activate
+    #   max_fragments: 512 # guard: pair enumeration is O(K²)
+    #   # cutoff: 8.0 # omit to inherit the backbone cutoff
+    #
+    # ── Adaptive Depth Gate (optional) ──────────────────────────────
+    # Per-atom gate over each round's update: soft and differentiable
+    # during training, hard-thresholded at inference so converged atoms
+    # exit early.  Invariant inputs (l=0 scalars + ‖Δh‖/‖h‖); the gate
+    # value must be invariant or equivariance breaks, which is exactly
+    # how e3nn's own nn.Gate works.  `per_irrep: true` gives one gate per
+    # irrep block instead of one for the whole vector.
+    # Adds λ·mean(g) to the loss as "aux_loss" (returned in this model's
+    # property dict, folded into train/total) and logs
+    # {train,val}_gate/gate_mean_round_{L} per round — all gate curves go
+    # to the train_gate/ and val_gate/ sections so they stay out of the
+    # energy/force metrics.  See src/goal/configs/ml/simurgh_legacy_gmd26.yaml, LOGGING,
+    # for the full section map.
+    # adaptive_gate:
+    #   n_scalar: 16
+    #   hard_threshold: 0.5 # inference cut: g > threshold → atom updates
+    #   aux_loss_weight: 0.01 # λ; 0.0 disables the sparsity penalty
+    #   init_bias: 1.0 # sigmoid(1) ≈ 0.73 → the gate starts OPEN
+    #   per_irrep: true # one invariant gate per irrep block
 
   # ── Task head ──────────────────────────────────────────────────────
-  # Monolithic model — a task head is incompatible.
+  # Monolithic backbone — returns the property dict (energy + autograd
+  # forces) directly; a task head is incompatible.
   head: null
 
 # ─────────────────────────────────────────────────────
@@ -492,27 +372,13 @@ trainer:
   default_root_dir: ${paths.output_dir}
 
   # Epoch budget — max_epochs is THE authoritative epoch count.
-  #
-  # An epoch here is 159 optimiser steps (950 frames / batch 6), so
-  # 1000 epochs is ~159k steps — the order the MD17 literature trains
-  # at. Early stopping on val_forces/forces_mae usually ends it first.
-  min_epochs: 50 # prevents premature early stopping
-  max_epochs: 3000 # total epochs; scheduler T_max follows this value
+  min_epochs: 10 # prevents premature early stopping
+  max_epochs: 1500 # total epochs; scheduler T_max follows this value
 
-  accelerator: gpu # "cpu" also finishes this one in reasonable time
+  accelerator: gpu # change to "gpu" for CUDA training
   devices: 1
   num_nodes: 1
-  # ── precision: "64", NOT "32" ────────────────────────────────────
-  # rMD17 labels are total energies around -17,617 eV and the energy
-  # loss is the difference of two numbers that size. float32 resolves
-  # ~2e-3 eV there — roughly 10% of the energy error being chased — so
-  # the label is quantised at the scale of the signal. MACE trains
-  # rMD17 in float64 for the same reason.
-  #
-  # Costs ~2x memory and time. On a 21-atom molecule that is nothing;
-  # revisit it for MD22's larger molecules or OMol25, where "32" (or
-  # "bf16-mixed" on A100/H100) is the right call.
-  precision: "64"
+  precision: "32" # use "bf16-mixed" on A100/H100 for ~2x speedup
 
   # Strategy — "auto" works for single-GPU and CPU.
   # For DDP: strategy: ddp (and set devices: N, accelerator: gpu)
@@ -647,36 +513,32 @@ training:
   # Rationale for the three-stage curriculum:
   #   Stage 1 — energy only: warm up the backbone on energies alone.
   #             Forces are noisy early when the energy surface is wrong.
-  #   Stage 2 — force-heavy, open-ended: the phase that actually trains
-  #             this model, weighted the way the benchmark is scored.
-  #
-  # ── FORCE WEIGHT: 10.0 ──────────────────────────────────────────
-  # Matches src/goal/configs/ml/nf_simurgh_md17.yaml as of 2026-10-04 (its first
-  # run above parity), so the simplified models and NF_SIMURGH are
-  # trained to the same objective. No SIMURGH Simplified result exists at
-  # any weight yet. MACE trains rMD17 at forces:energy = 1000:1 with a
-  # squared-error loss, which does not map directly onto these per-atom
-  # MAE terms.
-  #
-  # NO `newton` KEY. There is no `newton` loss in LOSS_REGISTRY
-  # (available: charge, dipole, energy, forces, gate_reg,
-  # scalar_property, stress), so listing it here does nothing except
-  # make train.py warn that the label is undeclared on every run.
-  # Newton violation is a logged METRIC — watch
-  # {split}_forces/newton_violation, which should sit at ~0 because
-  # these forces are -dE/dr by autograd.
+  #   Stage 2 — add forces: once energy is stable, add force supervision.
+  #   Stage 3 — full: add Newton violation penalty, increase force weight.
   stages:
     - name: "energy_only"
       epochs: 5
       loss_weights:
         energy: 1.0
         forces: 0.0
+        newton: 0.0
+        gate_reg: 1.0e-4
 
-    - name: "forces"
+    - name: "energy_forces"
+      epochs: 85
+      loss_weights:
+        energy: 1.0
+        forces: 1.0
+        newton: 0.0
+        gate_reg: 1.0e-4
+
+    - name: "full"
       epochs: null # open-ended — runs to max_epochs
       loss_weights:
         energy: 1.0
-        forces: 10.0
+        forces: 1.0
+        newton: 0.01
+        gate_reg: 1.0e-4
 
   # ── Loss functions ────────────────────────────────────────────────
   # Declares which loss components exist and their base weights.
@@ -719,20 +581,15 @@ training:
       weight: 1.0
       normalize_by_n_atoms: true
 
-    # NO gate_reg ENTRY: this model has no artisan gate parameters (the
-    # GOAL loss would see no gate_values and contribute exactly 0).
+    - name: gate_reg
+      fn: mse
+      weight: 1.0e-4
 
-    # NO "newton" ENTRY, and none in the stages above either. The GMD
-    # configs carry a commented-out one and list `newton` in every
-    # stage's loss_weights, which makes train.py warn that the label is
-    # undeclared and will be ignored — there is no `newton` loss in
-    # LOSS_REGISTRY to declare (available: charge, dipole, energy,
-    # forces, gate_reg, scalar_property, stress). Newton violation is a
-    # logged METRIC, not an objective: goal.ml.training.metrics emits
-    # {split}_forces/newton_violation and its _x/_y/_z components every
-    # epoch regardless. For this model it should sit at ~0 by
-    # construction, since forces are -dE/dr by autograd — watch the
-    # curve as a conservation check.
+    # Newton violation (force conservation penalty) — included in stages
+    # but only active when loss_weights.newton > 0:
+    # - name: newton
+    #   fn: mse
+    #   weight: 0.01
 
   # Strict stage label validation.
   # false = silently skip unknown stage labels (default, allows forward-decl)
@@ -764,13 +621,12 @@ training:
 #   "val_energy/energy_mae_per_atom"      — per-atom energy MAE (min)
 #   "val/total"                           — total weighted loss (min)
 #
-# "val_forces/forces_mae" is kept as the selection metric because it is
-# the number MD17 is published on — every comparison you might draw is
-# a force MAE in meV/Å on the held-out frames.
-#
-# data.monitor_test_during_training is off here (the test split is
-# ~99,000 frames from the same trajectory), so nothing is logged under
-# test/ during training; run goal-eval on the test split at the end.
+# Select on the ID validation set only.  With
+# data.monitor_test_during_training the OOD set is logged every epoch
+# under test/, test_energy/ and test_forces/ — watch those curves, but
+# never point top_k.metric or early_stopping.monitor at them: selecting
+# on a set turns it into a second validation set and the OOD number
+# stops meaning anything.
 #
 # Atomic writes (write .tmp then os.replace) prevent corrupted files.
 # Pool state is persisted to checkpoint_state.json for correct resume.
@@ -794,14 +650,7 @@ checkpoint_manager:
     enabled: true
     filename: "last.ckpt"
 
-  # ── Self-contained .simurgh archives ─────────────────────────────
-  # A .simurgh archive bundles weights, config and the FROZEN MODEL
-  # SOURCE so a run can be reloaded without the repo at that commit.
-  # The model file, the shared simurgh_simplified_layers module and the
-  # primitives it imports are frozen together (import-graph walk).
-  #   save_archive     — write one alongside the best checkpoint
-  #   archive_interval — also write one at every interval checkpoint
-  #                      (costs disk; useful for long research runs)
+  # Self-contained .simurgh archives — see simurgh_legacy_gmd26.yaml for docs.
   save_archive: true
   archive_interval: false
 
@@ -835,37 +684,20 @@ callbacks:
     max_depth: 1 # nesting depth to display (-1 = all)
 
   # Early stopping — uncomment to enable:
-  # ── EARLY STOPPING IS OFF FOR THIS BENCHMARK RUN ─────────────────
-  # The LR schedule is cosine with T_max = trainer.max_epochs (3000).
-  # Stopping at epoch 1,200 does not just cut the run short — it ends
-  # it with the learning rate still at a large fraction of its initial
-  # value, and the last stretch of accuracy on rMD17 comes precisely
-  # from the decay to min_lr. A "plateau" observed at a high LR is
-  # usually the LR, not the model.
-  #
-  # So: run the full schedule. checkpoint_manager.top_k still keeps the
-  # best five weights by val_forces/forces_mae, so nothing is lost by
-  # letting it run past its best.
-  #
-  # Uncomment to restore the guard. Note min_delta must stay 0.0 — it
-  # is in the metric's units, and 1.0e-4 there means 0.1 meV/A, which
-  # scores every late epoch as stalled (that is what ended a 3,000
-  # epoch budget at ~970 with the curve still descending).
-  #
-  # early_stopping:
-  #   _target_: lightning.pytorch.callbacks.EarlyStopping
-  # Check right after validation, not at the end of the training epoch:
-  # a run resumed from a checkpoint saved after validation first closes
-  # that finished epoch with no metrics logged, which strict mode rejects.
-  check_on_train_epoch_end: false
-  #   monitor: "val_forces/forces_mae"
-  #   min_delta: 0.0
-  #   patience: 200
-  #   mode: "min"
-  #   strict: true
-  #   check_finite: true
-  #   stopping_threshold: null
-  #   divergence_threshold: null
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    # Check right after validation, not at the end of the training epoch:
+    # a run resumed from a checkpoint saved after validation first closes
+    # that finished epoch with no metrics logged, which strict mode rejects.
+    check_on_train_epoch_end: false
+    monitor: "val_forces/forces_mae"
+    patience: 50 # epochs with no improvement before stopping
+    mode: "min"
+    min_delta: 1.0e-4 # minimum improvement to count
+    strict: true # crash if monitor not found in metrics
+    check_finite: true # stop if monitor becomes NaN or Inf
+    stopping_threshold: null # stop immediately if metric < threshold
+    divergence_threshold: null # stop if metric > threshold (diverging)
 
   # Backbone finetuning (for transfer learning from pretrained models):
   # backbone_finetuning:
@@ -920,7 +752,7 @@ callbacks:
 # data.monitor_test_during_training is on, otherwise only by an explicit
 # trainer.test() run).  Select on val_*, read test_*.
 #
-# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+# Full section reference: src/goal/configs/ml/simurgh_legacy_gmd26.yaml
 #
 # Multiple loggers can be active simultaneously.
 # Metrics are logged to all enabled loggers.
@@ -946,7 +778,7 @@ logger:
   # Weights & Biases (recommended for research tracking):
   wandb:
     _target_: lightning.pytorch.loggers.wandb.WandbLogger
-    name: ${run_name} # format: YYYY-MM-DD_HH-MM-SS_rmd17_simurgh_simplified_routed
+    name: ${run_name} # format: YYYY-MM-DD_HH-MM-SS_trajectory_simurgh
     project: "goal"
     entity: null # null = your default W&B entity
     save_dir: "${paths.output_dir}"
@@ -954,16 +786,7 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags:
-      [
-        "simurgh",
-        "simurgh_simplified",
-        "routed",
-        "md17",
-        "rmd17",
-        "experimental",
-        "ablation",
-      ]
+    tags: ["simurgh_legacy", "arace", "gmd"]
 
   # TensorBoard:
   # tensorboard:
@@ -976,7 +799,7 @@ logger:
   # MLflow:
   # mlflow:
   #   _target_: lightning.pytorch.loggers.mlflow.MLFlowLogger
-  #   experiment_name: "simurgh-md17"
+  #   experiment_name: "simurgh-gmd"
   #   tracking_uri: "http://localhost:5000"
   #   tags: null
 
@@ -991,7 +814,7 @@ logger:
   # aim:
   #   _target_: aim.pytorch_lightning.AimLogger
   #   repo: ${paths.log_dir}/aim
-  #   experiment: "simurgh-md17"
+  #   experiment: "simurgh-gmd26"
   #   system_tracking_interval: 10   # seconds; null = disable system metrics
   #   log_system_params: true
   #   capture_terminal_logs: false   # avoid console log loop

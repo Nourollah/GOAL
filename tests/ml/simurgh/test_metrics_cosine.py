@@ -7,7 +7,7 @@ Guards two specific failure modes:
    :class:`DualForcesHead` fell back to all-zero forces, and the
    cosine metric collapsed to exactly ``0.0`` regardless of the
    target.  The autograd fix lives in
-   ``goal.ml.nn.models.simurgh.backbone.SimurghBackbone.forward`` —
+   ``goal.ml.nn.models.simurgh.legacy.backbone.SimurghBackbone.forward`` —
    this test enforces that forces survive a backbone+head forward
    with cold positions.
 
@@ -25,7 +25,7 @@ import torch
 from torch_geometric.data import Batch
 
 from goal.ml.nn.heads.dual_forces import DualForcesHead
-from goal.ml.nn.models.simurgh.backbone import SimurghBackbone
+from goal.ml.nn.models.simurgh.legacy.backbone import SimurghBackbone
 from goal.ml.training.metrics import mlip_metrics
 
 

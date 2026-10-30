@@ -2,8 +2,8 @@
 ########################################################
 # GOAL fine-tuning config — LoRA on a trained SIMURGH checkpoint
 #
-#   goal-train --config-name finetune/simurgh_lora \
-#       model.backbone.checkpoint_path=/abs/path/logs/simurgh_gmd26/runs/<run>/checkpoints \
+#   goal-train --config-name finetune/simurgh_legacy_lora \
+#       model.backbone.checkpoint_path=/abs/path/logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
 #       'data.train_paths=[data/dicarboxylic/train.xyz]' \
 #       'data.val_paths=[data/dicarboxylic/val.xyz]'
 #
@@ -24,7 +24,7 @@
 experiment:
   name: "finetune_simurgh_lora"
   description: "SIMURGH LoRA fine-tuning on a small dataset"
-  tags: ["finetune", "simurgh", "lora"]
+  tags: ["finetune", "simurgh_legacy", "lora"]
 
 seed: 42
 task_name: "finetune_simurgh_lora"
@@ -50,7 +50,7 @@ paths:
 
 # ─────────────────────────────────────────────────────
 # DATA
-# data.cutoff MUST equal the base checkpoint's cutoff (simurgh_gmd26: 8.0 Å);
+# data.cutoff MUST equal the base checkpoint's cutoff (simurgh_legacy_gmd26: 8.0 Å);
 # the backbone refuses a mismatch.  If the base run used fragment labels,
 # copy its data.compute_fragment_index / data.fragment_* keys here too.
 # ─────────────────────────────────────────────────────

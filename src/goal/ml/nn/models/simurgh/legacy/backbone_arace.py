@@ -4,8 +4,8 @@
 architecture: potential artisans and ACE message passing alternate as
 equals, instead of the legacy pipeline of ACE dressing first and
 artisans as an auxiliary readout last (kept as
-:class:`~goal.ml.nn.models.simurgh.backbone.SimurghBackbone`,
-registered ``"simurgh"`` / ``"simurgh_ace_first"``).
+:class:`~goal.ml.nn.models.simurgh.legacy.backbone.SimurghBackbone`,
+registered ``"simurgh_legacy"`` / ``"simurgh_legacy_ace_first"``).
 
 One full round (stacked ``num_rounds`` times)::
 
@@ -31,7 +31,7 @@ with ``node_energies`` already populated, so the standard task heads
 (``energy``, ``energy_forces``, ``dual_forces``) consume it without
 modification and derive forces via ``-∂E/∂r`` autograd through
 ``graph.pos``.  The monolithic counterpart lives in
-:mod:`goal.ml.nn.models.simurgh.arace` (``"monolithic_arace"``).
+:mod:`goal.ml.nn.models.simurgh.legacy.arace` (``"simurgh_legacy_monolithic_arace"``).
 """
 
 from __future__ import annotations
@@ -63,8 +63,8 @@ from goal.ml.nn.primitives.linear import EquivariantLinear
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 
 
-@MODEL_REGISTRY.register("simurgh_arace")
-@BACKBONE_REGISTRY.register("simurgh_arace")
+@MODEL_REGISTRY.register("simurgh_legacy_arace")
+@BACKBONE_REGISTRY.register("simurgh_legacy_arace")
 class SimurghAraceBackbone(nn.Module):
     """ARACE backbone for modular SIMURGH.
 

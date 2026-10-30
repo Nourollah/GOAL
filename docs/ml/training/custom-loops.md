@@ -70,7 +70,7 @@ if __name__ == "__main__":
 ```
 
 ```bash
-pixi run -e cuda python train_custom.py --config-name simurgh_gmd26 trainer.max_epochs=200
+pixi run -e cuda python train_custom.py --config-name simurgh_legacy_gmd26 trainer.max_epochs=200
 pixi run -e cuda python train_custom.py --config-dir src/goal/configs +debug=fdr trainer.accelerator=gpu   # quick check
 ```
 
@@ -101,7 +101,7 @@ from goal.ml.registry import BACKBONE_REGISTRY
 
 with initialize_config_dir(config_dir=CONFIGS_ML_DIR, version_base=None):
     cfg = compose(
-        config_name="simurgh_gmd26",
+        config_name="simurgh_legacy_gmd26",
         overrides=[
             "paths.output_dir=/tmp/goal_custom",  # ${hydra:runtime.output_dir} is undefined outside an app
             "data.monitor_test_during_training=false",

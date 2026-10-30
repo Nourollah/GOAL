@@ -13,10 +13,10 @@ The project ships four reference models:
                           e3nn primitives (educational baseline).
 * ``monolithic_example``— Minimal **monolithic** model returning the
                           property dict directly (educational baseline).
-* ``simurgh`` / ``simurgh_monolithic`` — The **native** SIMURGH model
-                          (equivariant force field with an element-pair
+* ``simurgh_legacy*``   — The older **native** SIMURGH models
+                          (equivariant force fields with an element-pair
                           bank of potential artisans).  See
-                          :mod:`goal.ml.nn.models.simurgh`.
+                          :mod:`goal.ml.nn.models.simurgh.legacy`.
 """
 
 from __future__ import annotations

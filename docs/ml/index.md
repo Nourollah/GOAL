@@ -6,13 +6,13 @@
 
 GOAL treats an MLIP as a **backbone** that turns an atomic structure into per-atom features, plus a **head** that turns those features into properties (energy, forces, stress, dipole, …), trained by one universal Lightning module, `GOALModule`. A backbone that already returns properties is a **monolithic model** and runs with `head: null`. Everything is assembled from registries by name, and every run is described by a single self-contained YAML file. Swapping architecture, dataset or loss is therefore a config change, not a code change.
 
-The native model family is **SIMURGH**, an E(3)-equivariant force field built around a bank of *potential artisans* (one small equivariant network per element pair). The default architecture is **ARACE** (`simurgh_arace`), which alternates artisan layers on edges with ACE message-passing blocks on nodes.
+The native model family is **SIMURGH**, an E(3)-equivariant force field built around a bank of *potential artisans* (one small equivariant network per element pair). The default architecture is **ARACE** (`simurgh_legacy_arace`), which alternates artisan layers on edges with ACE message-passing blocks on nodes.
 
 ## Features
 
 | | Feature | Details |
 |---|---|---|
-| 🔬 | Native SIMURGH force fields | `simurgh_arace` (default, modular), `monolithic_arace`, `nf_simurgh` (fragment virtual nodes), `simurgh_simplified_routed` / `_monolithic`, legacy ACE-first `simurgh`, plus the isolated `simurgh_ablation` study model |
+| 🔬 | Native SIMURGH force fields | `simurgh_legacy_arace` (default, modular), `simurgh_legacy_monolithic_arace`, `simurgh_legacy_nf` (fragment virtual nodes), `simurgh_legacy_simplified_routed` / `_monolithic`, legacy ACE-first `simurgh_legacy`, plus the isolated `simurgh_ablation` study model |
 | 🧱 | Modular and monolithic models | Backbone → head pipeline, or self-contained models with `head: null`. Baselines: `hyperspec`, `invariant_gnn`, `monolithic_example`. |
 | 🎯 | Task heads | `energy`, `energy_forces`, `direct_forces`, `dual_forces`, `stress`, `dipole`, `scalar`, `multi` |
 | 🧠 | Foundation-model fine-tuning | `mace_finetune` and `uma_finetune` trained in-process (`head_only` / `full` / `lora`); UPET/PET through metatrain (`goal-finetune-upet`); frozen MACE/UMA adapters for feature extraction |
@@ -72,9 +72,9 @@ Build a component by registry name, exactly as `goal-train` does:
 import goal.ml.cli  # noqa: F401 (registers everything)
 from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY
 
-print(BACKBONE_REGISTRY.list_available())   # ['hyperspec', 'invariant_gnn', ..., 'simurgh_arace', ...]
+print(BACKBONE_REGISTRY.list_available())   # ['hyperspec', 'invariant_gnn', ..., 'simurgh_legacy_arace', ...]
 
-backbone = BACKBONE_REGISTRY.get("simurgh_arace")(
+backbone = BACKBONE_REGISTRY.get("simurgh_legacy_arace")(
     elements=[1, 6, 8],
     cutoff=5.0,
     avg_num_neighbors=12.0,
@@ -87,7 +87,7 @@ head = HEAD_REGISTRY.get("energy_forces")(irreps_in="16x0e + 16x1o + 16x2e", hid
 Install GOAL first ([Installation](../getting-started/installation.md)). Then, from the repository root:
 
 ```bash
-# 1. Train the default model (SIMURGH ARACE on GMD-26, src/goal/configs/ml/simurgh_gmd26.yaml)
+# 1. Train the default model (SIMURGH ARACE on GMD-26, src/goal/configs/ml/simurgh_legacy_gmd26.yaml)
 pixi run -e cuda goal-train
 
 # Equivalent invocations
@@ -107,8 +107,8 @@ pixi run -e cuda goal-train data.dataset_type=xyz \
     data.train_dir=/data/mysys/train data.val_dir=/data/mysys/val data.test_dir=/data/mysys/test
 
 # Another ready-made experiment
-pixi run -e cuda goal-train --config-name nf_simurgh_md17          # NF_SIMURGH on rMD17 aspirin
-pixi run -e cuda goal-train --config-name monolithic_arace_gmd26   # monolithic ARACE
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md17          # NF_SIMURGH on rMD17 aspirin
+pixi run -e cuda goal-train --config-name simurgh_legacy_monolithic_arace_gmd26   # monolithic ARACE
 
 # Tweak the model and optimiser
 pixi run -e cuda goal-train model.backbone.num_rounds=3 training.optimizer.lr=5e-3 training.ema.decay=0.999
@@ -130,7 +130,7 @@ from ase.build import molecule
 from goal.ml.utils.calculator import GOALCalculator
 
 calc = GOALCalculator(
-    checkpoint_path="logs/simurgh_gmd26/runs/<run>/checkpoints/best_val_forces_mae.simurgh",
+    checkpoint_path="logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/best_val_forces_mae.simurgh",
     device="cuda",
 )
 atoms = molecule("CH3COOH")
@@ -139,10 +139,10 @@ print(atoms.get_potential_energy(), atoms.get_forces().shape)
 ```
 
 > [!WARNING]
-> The shipped `simurgh_gmd26.yaml` enables the `fragment_interaction` add-on, so the trained model needs a `fragment_index` on every graph. `GOALCalculator` builds graphs with `AtomicGraph.from_ase(...)` **without** fragment labels, and the snippet above then raises `ValueError: model.backbone.fragment_interaction is enabled but the graphs carry no 'fragment_index'`. You have two options. Train with the add-on removed (`goal-train '~model.backbone.fragment_interaction'`) if you want plain `GOALCalculator` inference. Otherwise use a fragment-aware calculator subclass that passes the training-time fragment settings to `from_ase`, as `NFSimurghCalculator` does in [`notebooks/nf_simurgh_gmd_inference.ipynb`](https://github.com/Nourollah/GOAL/blob/main/notebooks/nf_simurgh_gmd_inference.ipynb). The same applies to `nf_simurgh` models. See [ASE calculator](deployment/ase-calculator.md).
+> The shipped `simurgh_legacy_gmd26.yaml` enables the `fragment_interaction` add-on, so the trained model needs a `fragment_index` on every graph. `GOALCalculator` builds graphs with `AtomicGraph.from_ase(...)` **without** fragment labels, and the snippet above then raises `ValueError: model.backbone.fragment_interaction is enabled but the graphs carry no 'fragment_index'`. You have two options. Train with the add-on removed (`goal-train '~model.backbone.fragment_interaction'`) if you want plain `GOALCalculator` inference. Otherwise use a fragment-aware calculator subclass that passes the training-time fragment settings to `from_ase`, as `NFSimurghCalculator` does in [`notebooks/nf_simurgh_gmd_inference.ipynb`](https://github.com/Nourollah/GOAL/blob/main/notebooks/nf_simurgh_gmd_inference.ipynb). The same applies to `simurgh_legacy_nf` models. See [ASE calculator](deployment/ase-calculator.md).
 
 ```bash
-pixi run -e cuda goal-inspect logs/simurgh_gmd26/runs/<run>/checkpoints/     # provenance and metrics, no model build
+pixi run -e cuda goal-inspect logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/     # provenance and metrics, no model build
 ```
 
 If you prefer to learn in Python rather than YAML, start with the [notebooks](../getting-started/notebooks.md).

@@ -28,8 +28,8 @@ from goal.ml.nn.primitives.linear import EquivariantLinear
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 
 
-@MODEL_REGISTRY.register("simurgh_monolithic")
-@BACKBONE_REGISTRY.register("simurgh_monolithic")
+@MODEL_REGISTRY.register("simurgh_legacy_monolithic")
+@BACKBONE_REGISTRY.register("simurgh_legacy_monolithic")
 class SimurghMonolithic(nn.Module):
     """Self-contained SIMURGH model.
 

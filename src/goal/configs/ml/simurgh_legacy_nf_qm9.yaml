@@ -1,76 +1,86 @@
 ########################################################
 # GOAL ML Experiment Configuration
-# Model  : SIMURGH Simplified — Monolithic (fully simplified)
-#          Three parallel lines (atom / pair / fragment) over one
-#          shared input, combined only at the readout. Every line's
-#          processor is ONE monolithic stack of simple equivariant layers:
-#          no artisans, no routing, no experts.
-#          (see goal.ml.nn.models.simurgh.simurgh_simplified_monolithic)
-# Dataset: rMD17 aspirin (revised MD17, PBE/def2-SVP DFT MD at 500 K)
+# Model  : NF_SIMURGH (Native Fragment SIMURGH) — monolithic ARACE
+#          rounds whose per-atom energies are pooled onto FRAGMENT
+#          VIRTUAL NODES, which then interact pairwise
+#          (see goal.ml.nn.models.simurgh.legacy.nf_simurgh)
+# Dataset: QM9 (134k drug-like molecules, B3LYP/6-31G(2df,p)),
+#          target U0 — internal energy at 0 K
 #
-# Self-contained config. It does NOT inherit from, interpolate into, or
-# share keys with any other config file.
+# Self-contained config. Every parameter the project supports is
+# listed here — either set to its value for this experiment, or
+# documented in comments showing what else is available.
+# No other file needs to be opened to understand what is possible.
 #
-# ABLATION BASELINE for src/goal/configs/ml/simurgh_simplified_routed_md17.yaml.
-# The two files are IDENTICAL except for model.backbone.name and the two
-# routed-only sections (artisan:, fragment_experts:) — a test
-# (tests/ml/simurgh/test_simurgh_simplified.py) fails if any other
-# backbone key drifts between them.
+# EXPERIMENTAL. This is a research/ablation model.
 #
-# Data split, fragmentation and the training recipe are the ones tuned on
-# src/goal/configs/ml/nf_simurgh_md17.yaml (precision 64, batch 6, two-stage
-# curriculum, no early stopping), so all three models see the same
-# benchmark protocol.
+# Derived from src/goal/configs/ml/simurgh_legacy_nf_gmd26_typecond.yaml — same model,
+# same artisan geometry, same virtual-node settings including
+# `vnode_type_conditioned: true`.
 #
-# ── WHAT rMD17 ASKS OF THIS MODEL ────────────────────────────────────
-# One molecule (C9H8O4, 21 atoms), 950 training frames, scored on force
-# MAE (MACE published: 6.6 meV/Å).
+# ── QM9 IS A DIFFERENT KIND OF DATASET, AND THIS FILE SHOWS IT ───────
 #
-#  1. FRAGMENTS MUST BE CUT. An MD17 frame is one covalently bonded
-#     molecule, so `connected` gives K=1: the fragment line would see a
-#     single virtual node with no partners. The `custom` cuts below give
-#     K=3 (ring+ester-O · acetyl · carboxyl), one topology for every
-#     frame, so rdkit perception runs once and is cached.
-#  2. THE FRAGMENT LINE IS AN INDUCTIVE BIAS HERE, NOT MISSING REACH.
-#     Aspirin spans 8.48 Å; two 5 Å message-passing layers already see
-#     every atom pair. Do not expect the fragment line to close the MACE
-#     gap on its own — watch energy_fragment_line to see whether it is
-#     used at all.
-#  3. ROUTING HAS LITTLE TO ROUTE. Three elements, six pairs, all common
-#     (numbers in the routed artisan block). The routed model's extra
-#     capacity is the variable under test, not its rare-type handling.
+#  1. THERE ARE NO FORCES. QM9 is equilibrium geometries with computed
+#     properties, not trajectories. Everything force-shaped is therefore
+#     gone from this file and not merely zero-weighted:
+#       * `losses` declares energy + gate_reg only;
+#       * the stage curriculum collapses to one stage (its whole point
+#         was phasing forces in);
+#       * checkpoint_manager.top_k.metric and early_stopping.monitor
+#         select on val_energy/energy_mae_per_atom. Leaving them on
+#         val_forces/forces_mae would crash at the first validation —
+#         EarlyStopping runs with strict: true and that metric is never
+#         emitted, because goal.ml.training.metrics omits force metrics
+#         when the batch carries no force labels.
+#     The model still PREDICTS forces (-dE/dr by autograd), so
+#     val_forces/newton_violation is still logged. It costs nothing and
+#     is a free conservation check: it must stay at ~0.
 #
-# EXPERIMENTAL research model.
+#  2. 134k DISTINCT MOLECULES, NOT ONE. Every structure has its own
+#     composition, so the atomic-energy regression is a real per-element
+#     decomposition here (unlike a single-molecule set, where it can only
+#     produce a constant shift) — and the residual it leaves is the
+#     atomisation energy, which is what QM9 models actually learn.
+#
+#  3. FRAGMENTS MUST BE CUT. A QM9 molecule is one connected species, so
+#     `fragment_scheme: connected` returns K=1 for 100% of the corpus
+#     (measured), i.e. one virtual node, no pairs, and an interaction
+#     term identically zero on every batch. See the fragment_scheme
+#     block for the measured alternatives.
+#
+# This file deliberately does NOT inherit from, interpolate into, or
+# share keys with any other config. NF_SIMURGH's model namespace is its
+# own (`virtual_node:`, never `fragment_interaction:`), so neither file
+# can be pasted into the other and quietly half-work.
 ########################################################
 
 # ─────────────────────────────────────────────────────
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "simurgh_simplified_monolithic_md17"
-  description: "SIMURGH Simplified Monolithic on rMD17 aspirin (ablation baseline)"
+  name: "simurgh_legacy_nf_qm9"
+  description: "NF_SIMURGH (type-conditioned virtual nodes) on QM9 U0"
   tags:
     [
-      "simurgh",
-      "simurgh_simplified",
-      "monolithic",
-      "md17",
-      "rmd17",
-      "aspirin",
+      "simurgh_legacy",
+      "simurgh_legacy_nf",
+      "arace",
+      "qm9",
+      "property_prediction",
       "experimental",
-      "ablation",
+      "type_conditioned",
     ]
 
 seed: 42
 
 # task_name: used by Hydra to namespace the output directory.
 # Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
-task_name: "simurgh_simplified_monolithic_md17"
+task_name: "simurgh_legacy_nf_qm9"
 
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
-# Example: "aspirin" → 2026-06-02_18-30_rmd17_simurgh_simplified_monolithic_aspirin
-run_name_suffix: "_aspirin" # prepend "_"; set to "" for no suffix
+# Example: "u0" → 2026-06-02_18-30_qm9_nf_simurgh_u0
+run_name_suffix: "_u0" # prepend "_"; set to "" for no suffix
 
 # run_name: leaf of the log directory AND the W&B run name — always in sync.
 # Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
@@ -140,100 +150,116 @@ paths:
 #     test_dir:  /path/test/          # optional
 # ─────────────────────────────────────────────────────
 data:
-  # "rmd17" and "md17" are the same class (goal.ml.data.benchmarks.md17) — the
-  # `revised:` flag below is what picks the corpus, and the registry name
-  # is only a label. Kept as "rmd17" so the run name says which one.
-  #
-  # NOTE this is a benchmark adapter from src/goal/ml/data/benchmarks/, not one of
-  # the core goal.ml.data.datasets loaders. It downloads and caches
-  # itself, does its own train/val/test split, and holds every frame in
-  # memory as a pre-built graph — so `root` below is a cache directory,
-  # not a file to read.
-  dataset_type: rmd17
+  # A benchmark adapter from src/goal/ml/data/benchmarks/, not one of the core
+  # goal.ml.data.datasets loaders: it downloads QM9 through PyTorch
+  # Geometric, converts all 133,885 molecules to AtomicGraphs once, and
+  # caches them under `root` as a single .pt (~2 GB at this cutoff).
+  # That first conversion takes ~9 minutes; every run after it is a
+  # 14-second load.
+  dataset_type: qm9
 
-  root: ${paths.data_dir}/md17
-  molecule: aspirin # avg_num_neighbors / fragment cuts below are aspirin's
-  revised: true # rMD17 (PBE/def2-SVP, consistent reference frame)
+  root: ${paths.data_dir}/qm9
+
+  # ── Target ───────────────────────────────────────────────────────
+  # One of the 19 QM9 properties, by name or index. `u0` (index 7) is
+  # the internal energy at 0 K in eV — the right target for an
+  # interatomic potential, and the one that makes the atomic-energy
+  # baseline below do real work: subtracting Σ_Z n_Z e_Z from U0 leaves
+  # the atomisation energy.
+  #
+  # Alternatives, and why not:
+  #   u0_atom  (12) the atomisation energy directly. Equivalent target,
+  #                 but the reference subtraction then happens in the
+  #                 dataset instead of in the model, and the baseline
+  #                 machinery this model ships with goes unused.
+  #   homo/lumo/gap these are orbital energies, not extensive sums over
+  #                 atoms. A model whose output is Σ_i e_i + fragment
+  #                 corrections is the wrong shape for them; use a
+  #                 scalar head on a modular backbone instead.
+  #
+  # NOTE the adapter stores whichever target you pick in `graph.energy`,
+  # so nothing downstream needs to change — but the logged
+  # "energy_mae_per_atom" is then that property per atom, not an energy.
+  target: u0
+
+  # Measured range of u0 over the split: -16,440 … -6,232 eV.
+  # Median molecule is 18 atoms, largest is 29.
 
   # ── Split ────────────────────────────────────────────────────────
-  # The dataset splits ITSELF from these sizes; the DataModule just asks
-  # it for "train" / "val" / "test" in turn. data.split_ratio and
-  # data.split_seed are therefore ignored here and are not set.
+  # The dataset splits ITSELF, using the DimeNet++ protocol hard-coded
+  # in src/goal/ml/data/benchmarks/qm9.py: 110,000 train / 10,000 val / the
+  # remaining 13,885 test. Those sizes are module constants, NOT config
+  # keys — unlike MD17, `train_size` / `val_size` here would be
+  # forwarded to the dataset and raise TypeError. `seed` controls which
+  # molecules land where.
   #
-  # 950/50 is the revised MD17 benchmark protocol (Schütt et al. 2017) — every
-  # published MD17 number you might compare against uses it. The
-  # remaining ~99,000 frames become the test split.
-  train_size: 950
-  val_size: 50
-  test_size: 50
+  # data.split_ratio and data.split_seed do not apply and are not set.
   seed: 42
 
-  # float64 labels: rMD17 energies are ~-17,617 eV with a spread of
-  # 0.27 eV, so the signal is the 5th significant figure of the label.
-  # trainer.precision below still runs the network in float32.
-  dtype: float64
+  dtype: float64 # u0 is ~-10^4 eV; chemical accuracy is 0.043 eV
 
   # ── MONITOR THE TEST SET DURING TRAINING ─────────────────────────
-  # false, and not negotiable here: the test split is everything the
-  # 950+50 did not take — about 99,000 frames. Running it through the
-  # validation loop every epoch would cost ~100x the validation pass
-  # for a set that is drawn from the same trajectory as val, so it is
-  # not even out-of-distribution. Evaluate it once at the end with
-  # goal-eval instead.
-  monitor_test_during_training: True
+  # false: the 13,885 test molecules are a random draw from the same
+  # corpus as val, so logging them every epoch would draw a second copy
+  # of the same curve and pay an extra forward pass for it. Evaluate
+  # once at the end with goal-eval.
+  monitor_test_during_training: false
 
   # Neighbour cutoff radius (Å). Must match model.backbone.cutoff.
-  # 5.0 is the MD17 convention. Aspirin is 7.94 Å across, so this is a
-  # genuine cutoff rather than a formality — and it is what leaves 3 of
-  # the 15 fragment-centroid pairs out of reach of atom-level message
-  # passing (see the header).
+  # 5.0 is the QM9 convention and generous for molecules of ≤9 heavy
+  # atoms — mean degree comes out at 15.2 (see avg_num_neighbors).
   cutoff: 5.0
 
   # ── DataLoader ───────────────────────────────────────────────────
-  # 6 structures x 21 atoms = 126 atoms and ~1,790 edges per batch,
-  # which is 159 optimiser steps per epoch over the 950 training frames.
-  #
-  # SMALL DATA WANTS STEPS, NOT THROUGHPUT. At batch 24 this set gives
-  # only 40 steps per epoch, and memory is nowhere near the constraint
-  # (1.9 GiB at batch 6, 7.5 GiB at 24). MACE trains rMD17 at batch 5.
+  # 32 x ~18 atoms = ~580 atoms and ~8,950 edges per batch, which is
+  # 3,438 optimiser steps per epoch over the 110k training molecules.
   #
   # MEASURED peak CUDA memory for a full train step (forward + autograd
-  # forces + backward + AdamW), at precision "32" — double it for the
-  # "64" this file now uses:
+  # forces + backward + AdamW), at precision "32":
   #
   #   batch_size   atoms   edges   peak
-  #        6         126    1,790   1.9 GiB   <- this file
-  #       12         252    3,596   3.8 GiB
-  #       24         504    7,208   7.5 GiB
-  batch_size: 6
+  #        8         143    2,078   5.3 GiB
+  #       16         286    4,304  11.1 GiB
+  #       24         435    6,700  17.2 GiB
+  #       32         580    8,954  22.9 GiB   <- this file
+  #       48         867   13,406  34.2 GiB
+  #       64       ~1,150  ~17,900  OOM on a 48 GB card
+  #
+  # It is linear in EDGE count at ~2.6 MiB per edge — the equivariant
+  # tensor products keep a 144-channel feature per edge per round, and
+  # the force pass differentiates through all of it. Scale by your card:
+  # 32 needs ~24 GB. Halving it again is the first thing to try on a
+  # smaller GPU; `trainer.precision: bf16-mixed` roughly halves it too,
+  # at some risk to the autograd forces (which QM9 does not train on
+  # anyway, so it is a safer trade here than on MD17).
+  batch_size: 32
 
-  # num_workers: 0 IS THE RIGHT VALUE FOR THIS DATASET, unlike the
-  # lazily-decoded ones. Every frame is already a built graph in the
-  # parent process's memory, so __getitem__ is a list index — there is
-  # no work to hand to a worker, and forking would copy the whole
-  # trajectory per worker (Python refcounting defeats copy-on-write)
-  # while adding IPC to move graphs back. It also keeps the lazily
-  # attached fragment labels in ONE process, so each frame is
-  # decomposed once for the whole run rather than once per worker.
+  # num_workers: 0 IS THE RIGHT VALUE FOR THIS DATASET. All 133,885
+  # graphs are already built and resident in the parent process, so
+  # __getitem__ is a list index — there is no work to hand to a worker,
+  # and forking would copy ~2 GB of Python objects per worker (refcount
+  # touching defeats copy-on-write). It also keeps the lazily attached
+  # fragment labels in ONE process, so each molecule is decomposed once
+  # for the whole run instead of once per worker.
   num_workers: 0
-  pin_memory: false # true if you move to CUDA and profile a win
-  persistent_workers: false # only meaningful with num_workers > 0
+  pin_memory: false
+  persistent_workers: false
   prefetch_factor: null
 
-  # Label keys do NOT apply: this adapter reads the .npz fields itself
-  # and builds AtomicGraphs directly. Setting energy_key/forces_key here
-  # would be forwarded to the dataset and raise TypeError.
-  # energy_key: energy
-  # forces_key: forces
+  # Label keys do NOT apply: the adapter reads the PyG tensors itself.
+  # Setting energy_key/forces_key here would raise TypeError.
 
   # ══ FRAGMENT LABELS — MANDATORY FOR THIS MODEL ═══════════════════
-  # The fragment line builds its virtual nodes from these labels and
-  # ALWAYS runs: with compute_fragment_index: false the model raises at
-  # the first batch instead of silently dropping a line.
+  # NF_SIMURGH computes on fragment virtual nodes. Unlike the optional
+  # fragment channel of the other SIMURGH configs, this is not a feature
+  # that can be left off: with compute_fragment_index: false the model
+  # raises at the first batch rather than silently degrading to
+  # atom-level-only (which would be `simurgh_legacy_monolithic_arace` wearing a
+  # different name, producing plausible numbers from the wrong model).
   #
-  # The benchmark adapters in src/goal/ml/data/benchmarks/ accept these options
-  # too, and attach the labels lazily on first access — so each frame is
-  # decomposed exactly once per process, not once per epoch.
+  # Attached lazily on first access and kept on the in-memory graph, so
+  # the decomposition is paid once per molecule for the whole run — the
+  # ~26 s below lands in epoch 1 and never again.
   compute_fragment_index: true
 
   # Bond threshold for the distance-graph part of the decomposition (Å).
@@ -247,170 +273,402 @@ data:
   #   recap            RECAP cleavage rules
   #   custom           cut exactly the bonds named in fragment_smarts
   #
-  # Measured on rMD17 aspirin (C9H8O4, 21 atoms). "far" counts centroid
-  # pairs separated by more than the 5 Å atom cutoff:
+  # Measured on 2,000 random training molecules, cold cache:
   #
-  #   scheme                          K  far    fragments
-  #   connected                       1  0/0    the whole molecule
-  #   rdkit_components                1  0/0    the whole molecule
-  #   rotatable                       6  3/15   ring · CH3 · CO · CO · HO · O
-  #   brics                           5  2/10   ring · CH3CO · CO · HO · O
-  #   custom (this file)              3  1/3    ring+O · acetyl · COOH
+  #   scheme      rdkit fails   median K   mean K   K>=2    molecules/s
+  #   connected        0/2000          1      1.0     0%         19,600
+  #   rotatable      116/2000          3      3.3    88%          4,200
+  #   brics          116/2000          2      2.5    82%          3,600
+  #   recap          116/2000          1      2.0    44%          2,800
   #
-  # `rotatable` IS THE WRONG CUT FOR THIS MOLECULE, which is why this
-  # file does not use it. Look at what it produces: a bare 'O', a lone
-  # 'HO', and the carboxyl split across two fragments. Those are not
-  # chemical groups, they are whatever fell out of cutting every
-  # non-ring single bond — and the model is being asked to learn a
-  # pooled representation of each one.
+  # `connected` GIVES K=1 FOR EVERY MOLECULE IN QM9 — each entry is one
+  # covalently bonded species. It would run the model with its
+  # interaction term pinned at exactly zero.
   #
-  # The custom patterns below cut the two bonds that actually separate
-  # aspirin's three chemical units, and `fragment_keep_groups` then
-  # forbids the carboxyl from being split:
-  #
-  #   [C:1](=O)-[O:2]   the ester bond, detaching the acetyl group
-  #   c-[CX3]           the aromatic-to-carboxyl bond
-  #
-  # giving ring+ester-O (11 atoms), acetyl (6), carboxyl (4).
-  #
-  # NOTE a 3-atom pattern needs ':1'/':2' atom maps to say WHICH bond to
-  # cut — '[CX3](=O)-[OX2]' is rejected as ambiguous. Two-atom patterns
-  # need no maps.
-  #
-  # THE HONEST CAVEAT: on aspirin this is a second-order knob. Two
-  # rounds of 5 Å message passing give a 10 Å receptive field against
-  # the molecule's 8.48 Å extent, so the atom-level backbone already
-  # sees every atom pair and the virtual-node channel is supplying an
-  # inductive bias, not missing reach. Expect chemistry, not a large
-  # accuracy jump.
-  fragment_scheme: custom
+  # `rotatable` is the choice: it decomposes 88% of the corpus, the most
+  # of any scheme here, at 0.24 ms per molecule paid once. `recap`
+  # leaves more than half the corpus undivided and is the wrong tool on
+  # molecules this small.
+  fragment_scheme: rotatable
 
-  # Total charge handed to rdkit's bond perception. rMD17 molecules are
-  # all neutral closed-shell.
+  # Total charge handed to rdkit's bond perception. QM9 is neutral
+  # closed-shell throughout.
   fragment_charge: 0
 
   # "fallback" — warn ONCE and use `connected` for that structure
   # "raise"    — stop the run
   #
-  # `raise` here, as in the GMD config and for the same reason: there is
-  # ONE topology in this dataset. If perception fails it fails for every
-  # frame, and the run would quietly train K=1 — the fragment line with
-  # no partners — rather than stopping. A fallback that fires
-  # 100% of the time is not a fallback.
-  fragment_on_failure: raise
+  # `fallback`, where the GMD config used `raise`. That config had one
+  # homologous series and could guarantee perception worked. Here 5.8%
+  # of molecules (116/2000 measured) defeat rdkit's valence assignment —
+  # strained rings, unusual nitrogen environments — and `raise` would
+  # abort a 110k-molecule run on the first of them. Those molecules fall
+  # back to `connected`, i.e. K=1: they contribute through the atom-level
+  # ARACE rounds exactly as before and add nothing to the fragment
+  # channel. A coarser label, not a wrong one.
+  #
+  # Expect a burst of UserWarnings early in the first epoch — 45
+  # distinct ones on this split, since goal.ml.data.fragments warns once
+  # per distinct rdkit message and those differ by atom index. They stop
+  # once every molecule has been decomposed; they are not repeated per
+  # epoch.
+  fragment_on_failure: fallback
 
   # SMARTS whose matched atoms must stay in one fragment. Works with
-  # every scheme. Without this the carboxyl comes apart into 'CO' and
-  # 'HO' even under the custom cuts below.
-  fragment_keep_groups: ["C(=O)[OX2H1]"]
+  # every scheme. null = no constraint.
+  fragment_keep_groups: null
 
-  # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`.
-  # See the scheme block above for what each one separates.
-  fragment_smarts: ["[C:1](=O)-[O:2]", "c-[CX3]"]
+  # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`, so
+  # inert here.
+  fragment_smarts: null
 
 # ─────────────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────────────
-# backbone.name options for this family:
-#   "simurgh_simplified_monolithic" — one monolithic stack per line
-#   "simurgh_simplified_routed"     — routed artisans + fragment MoE
-# Both are monolithic models: head MUST be null (they return energy,
-# autograd forces and the per-line energies directly).
+# backbone.name options:
+#   "simurgh_legacy_nf"         — NF_SIMURGH: ARACE rounds + fragment virtual
+#                          nodes, monolithic (this file). EXPERIMENTAL.
+#   "simurgh_legacy_monolithic_arace"   — SIMURGH ARACE monolithic, no virtual nodes.
+#                          The direct baseline for this file. No QM9
+#                          config for it exists yet; copy this one,
+#                          change backbone.name, and delete the whole
+#                          virtual_node: block (it is not a key that
+#                          backbone understands).
+#   "simurgh_legacy_arace"      — DEFAULT: same ARACE rounds, modular
+#                          (backbone + head; see src/goal/configs/ml/simurgh_legacy_gmd26.yaml)
+#   "simurgh_legacy"            — legacy ACE-dressing-first artisan-bank model
+#                          (alias: "simurgh_legacy_ace_first")
+#   "simurgh_legacy_monolithic" — legacy SIMURGH without backbone/head split
+#   "hyperspec"          — E(3)-equivariant GNN (HyperSpec)
+#   "invariant_gnn"      — invariant SchNet-like GNN
+#   "monolithic_example" — minimal reference monolithic model
 #
-# WHAT THE MODEL DOES, in one pass:
-#   shared input   element embedding (0e) + Bessel RBF + SH + envelope
-#   atom line      L1 node-wise (each atom alone), L2+ message passing
-#                  → per-atom energy e_i
-#   pair line      symmetric edge features (even-l harmonics) with a
-#                  private node state → per-edge energy ε_ij = ε_ji
-#   fragment line  equivariant virtual nodes from each fragment's atoms
-#                  (relative to its centroid) + fragment-fragment message
-#                  passing → per-fragment energy E_k (readout zero-init)
-#   readout        E = Σ E0 + scale·(E_atom + E_pair + E_frag)
-#                  F = -∂E/∂r (autograd; there is no force head)
+# head.name options (set null for monolithic backbones):
+#   "energy_forces"  — energy + autograd forces F=-∂E/∂r (conservative)
+#   "dual_forces"    — energy + forces with selectable mode
+#   "direct_forces"  — energy + direct equivariant force projection
+#   "energy"         — energy only (no forces)
+#   "stress"         — energy + virial stress (periodic systems)
+#   "dipole"         — dipole moment from learned partial charges
+#   "scalar"         — generic per-structure scalar (HOMO, LUMO, ...)
+#   "multi"          — run multiple heads simultaneously
+#   null             — monolithic backbone handles output directly
 #
-# The lines never read each other's features. Every line carries l > 0
-# channels to its final readout; the collapse to invariants happens only
-# there. All nonlinearities are e3nn gates.
+# WHAT THIS MODEL DOES, in one pass:
+#   1. ARACE rounds, unchanged   → e_atom (N,), h (N, irreps)
+#   2. E_base[k] = Σ_{i∈k} e_atom[i]        exact, a plain index_add
+#   3. s_k = pool_{i∈k} h_i[l=0] ‖ log1p(n_k)      fragment scalars
+#   4. attention over fragment pairs, MODULATED BY CENTROID DISTANCE
+#   5. E_int[k] = MLP(context_k)             zero-init: starts at zero
+#   6. E = Σ_k (E_base[k] + E_int[k]) = Σ_i e_atom[i] + Σ_k E_int[k]
+#   7. F = -∂E/∂r via autograd
+#
+# Step 2 is why this is safe: summation is associative, so the fragment
+# pooling reproduces the atom-level energy exactly, by construction, not
+# because a residual happens to stay small. The ONLY new physics is the
+# step-5 correction — and it starts at exactly zero, so at
+# initialisation this model IS simurgh_legacy_monolithic_arace, numerically.
 # ─────────────────────────────────────────────────────
 model:
   backbone:
-    name: simurgh_simplified_monolithic
+    name: simurgh_legacy_nf
 
     # Neighbour cutoff radius (Å) — must match data.cutoff.
     cutoff: ${data.cutoff}
 
-    # ── Shared input ────────────────────────────────────────────────
-    embedding_dim: 32 # width of the 0e element embedding
-    num_elements: 120 # embedding table size; must exceed max(Z)
-    num_rbf: 8 # Bessel basis functions (every radial branch)
-    radial_hidden: 32 # radial-MLP hidden width (every unit)
-    sh_lmax: 2 # spherical-harmonic order; >= 2
-
-    # Mean neighbours per atom at cutoff 5.0 — normalises the atom-line
-    # and pair-line aggregations. train.py does NOT auto-inject it for
-    # this model. Aspirin's value (same as nf_simurgh_md17.yaml); a
-    # different data.molecule needs its own number.
-    avg_num_neighbors: 14.3806
-
-    # ── Combination rule ────────────────────────────────────────────
-    #   "additive" — E = Σ E0 + scale·(E_atom + E_pair + E_frag)
-    #   "learned"  — per-atom line weights g = 1 + tanh(MLP(0e of the atom
-    #                line)) on per-atom line energies; bounded and local
-    #                (size-extensive), zero-initialised (starts = additive).
-    combination: additive
-
-    # ── Atom line ───────────────────────────────────────────────────
-    # Layer 1 node-wise, layers 2..num_layers pass messages (>= 2).
-    atom_line:
-      hidden_irreps: "16x0e + 16x1o + 16x2e"
-      num_layers: 3
-
-    # ── Pair line ───────────────────────────────────────────────────
-    # Even-l harmonics only (exact ε_ij == ε_ji) → even-parity irreps.
-    pair_line:
-      hidden_irreps: "16x0e + 16x1e + 16x2e"
-      num_layers: 2
-
-    # ── Fragment line ───────────────────────────────────────────────
-    fragment_line:
-      hidden_irreps: "16x0e + 16x1o + 16x2e"
-      num_layers: 2
-
-      # Envelope zero point for fragment-fragment interactions (Å).
-      # Aspirin's three centroids sit at most ~6 Å apart, so 10 Å keeps
-      # every pair inside the smooth part of the envelope (same value as
-      # nf_simurgh_md17.yaml).
-      vnode_cutoff: 10.0
-
-      # Length scale (Å) of the atom → virtual-node basis. The largest
-      # fragment (ring + ester O, 11 atoms) is ~2.5 Å in radius.
-      fragment_radius: 3.0
-
-      avg_num_fragment_neighbors: null # fixed normaliser; null = 1
-      max_fragments: 512
-
-    # ── Line readouts (the only irreps → 0e collapses) ──────────────
-    # Bias-free; fragment readout zero-initialised (design invariant).
-    readout:
-      n_scalar: 16
-      hidden: 16
+    # ── Elements ────────────────────────────────────────────────────
+    # UNLIKE EVERY OTHER SIMURGH CONFIG, THIS ONE MUST BE SET BY HAND.
+    # train.py auto-extracts elements from the training set only for a
+    # hard-coded list of backbone names (simurgh, simurgh_legacy_ace_first,
+    # simurgh_legacy_arace, simurgh_legacy_monolithic, simurgh_legacy_monolithic_arace) — see
+    # src/goal/ml/cli/train.py. "simurgh_legacy_nf" is not in that list, and
+    # adding it is a change to shared code this model does not make.
+    #
+    # GETTING THIS WRONG IS SILENT: an edge whose element pair has no
+    # artisan is zero-masked, so it contributes exactly zero energy and
+    # nothing warns. Set it to the elements actually present.
+    #
+    # QM9 is H, C, N, O, F and nothing else — verified over the corpus,
+    # not taken from the paper. 5 elements = 15 unordered pairs per
+    # round, 30 artisans over two rounds, 13.0 M parameters.
+    elements: [1, 6, 7, 8, 9]
 
     # ── Atomic-energy baseline ──────────────────────────────────────
-    #   "learned" / "dataset" / "provided" — see the GMD configs.
-    # "dataset" as in nf_simurgh_md17.yaml: train.py regresses the
-    # per-element references on the training split and injects them,
-    # then derives `scale` from the residual spread.
+    #   "learned"  — nn.Parameter, zero-init, jointly optimised.
+    #   "dataset"  — least-squares regression on the training set
+    #                (leave values: null; train.py injects them).
+    #   "provided" — hand-set isolated-atom DFT values (eV).
+    #
+    # "dataset" here, where the GMD config hard-codes values, and this is
+    # the setting that makes QM9 learnable at all:
+    #
+    #   * U0 runs from -16,440 to -6,232 eV, and essentially all of that
+    #     variation is "how many C, N, O, F atoms are there". Without the
+    #     baseline the network spends its capacity counting atoms.
+    #   * Subtracting the regressed Σ_Z n_Z e_Z leaves the ATOMISATION
+    #     energy — the quantity QM9 models are actually judged on.
+    #   * 110,000 molecules over 5 elements is a heavily over-determined,
+    #     well-conditioned system, so unlike a single-molecule set the
+    #     coefficients here are a genuine per-element decomposition.
+    #
+    # Cost: two passes over the training split, which is already built
+    # and resident in memory — seconds, not the hours the same thing
+    # would take on a lazily-decoded corpus.
     atomic_energies:
       mode: dataset
       values: null # train.py injects the regression result
       compute_from_dataset: true
 
-    # Multiplicative gain on all three line energies (null = auto).
+    # Multiplicative gain on the interaction energy.
+    # null = 1.0 for "learned" mode, auto-computed for "dataset"/"provided".
+    # The fragment correction sits INSIDE this scale, alongside the
+    # artisan energy: `scale` maps the network's dimensionless
+    # interaction output onto the physical spread of (E - baseline), and
+    # the correction is an interaction energy in exactly that sense.
+    #
+    # Left null so train.py computes std(E - baseline)/mean(n_atoms)
+    # over the 110k training molecules — a seconds-long pass here. It
+    # prints [stats] scale=0.060848 on this split: the per-atom spread
+    # of the atomisation energy. A number orders of magnitude larger
+    # means the baseline did not do its job.
     scale: null
 
+    # ── ARACE stacking (identical to simurgh_legacy_monolithic_arace) ──────────────
+    # Each round = one artisan layer (per-element-pair equivariant
+    # artisans on edges) + one ACE block (edge → node aggregation with
+    # equivariant linear + residual + RMS norm):
+    #   nodes → edges (artisan) → nodes (ACE) → edges (artisan) → ...
+    num_rounds: 2 # number of artisan + ACE rounds
+
+    # true  → one artisan bank shared by every round (fewer params)
+    # false → independent bank per round (default, more expressive)
+    share_artisan_weights: false
+
+    # Initial node features: atomic-number embedding lookup projected
+    # into the artisans' equivariant space. No separate
+    # environment-dressing phase.
+    embedding_dim: 32
+    num_elements: 120 # embedding table size; must exceed max(Z) in the data
+
+    # Mean neighbours per atom for the ACE aggregation normalisation
+    # (message_sum / sqrt(avg_num_neighbors), as in MACE).
+    # null = no normalisation. train.py auto-injects this only for
+    # "simurgh_legacy_arace", so set a number here to enable it.
+    #
+    # 15.2445 = mean degree at cutoff 5.0 Å, measured over 5,000 QM9
+    # molecules. Depends on data.cutoff — re-measure if you change it.
+    avg_num_neighbors: 15.2445
+
+    # ── Equivariant pair artisans (primary learning component) ──────
+    # One artisan per unordered element pair per layer. Architecture must
+    # be "equivariant" — ARACE is equivariant throughout; invariants
+    # appear only in each layer's scalar readout.
+    artisan:
+      architecture: "equivariant"
+      hidden_irreps: "16x0e + 16x1o + 16x2e" # node/pair equivariant width
+      num_layers: 1 # 1 = TP only; >1 adds residual EquivLinear+Norm layers
+      num_rbf: 8 # Bessel radial basis functions
+      radial_hidden: 32 # radial MLP hidden width
+      n_scalar_out: 16 # invariant scalars before the energy MLP
+      final_hidden: 16 # energy MLP hidden width
+      element_conditioned: true # modulate TP weights by destination element
+      n_elements: auto # conditioning-table rows = max(Z)+1 of the elements (absent → legacy 120)
+
+      # ── RARE-PAIR ROUTING ─────────────────────────────────────────
+      # The artisan bank is QUADRATIC in the element count, and because
+      # of the zero-masking schedule every artisan costs both parameters
+      # AND a full-edge forward pass on every step. Measured at 0.867 M
+      # parameters per pair with the artisan settings above.
+      #
+      # Routing keeps a dedicated artisan for the pairs that carry the
+      # training set and folds everything else into ONE shared artisan
+      # conditioned on a learned element embedding — rare pairs, and the
+      # pairs that never occur at all, whose frequency is zero.
+      #
+      # THE SHARED ARTISAN IS BUILT ONLY IF SOMETHING IS ROUTED TO IT.
+      # When every pair clears the threshold the bank is bit-for-bit the
+      # bank it was before routing existed: same modules, same parameter
+      # count, same state-dict keys. No idle expert sitting on
+      # parameters that never see an edge.
+      #
+      # That is deliberate, and it is why `elements` above is a CONTRACT.
+      # The model declares the chemistry it covers; a structure built
+      # from anything else is out of distribution, and its foreign edges
+      # match no artisan. Better to have that boundary stated than to
+      # have a catch-all quietly return a plausible number for a
+      # molecule the model was never trained on.
+      #
+      # min_pair_frequency is a FRACTION OF TOTAL DIRECTED EDGES, not a
+      # count — frequencies sum to 1, so at most 1/f pairs can be
+      # dedicated. Measured on OMol25 at a 6 Å cutoff (3,081 possible
+      # pairs over 78 elements, of which only 970 ever occur):
+      #
+      #   min_pair_frequency   dedicated   params   edges covered
+      #              1e-2            9      ~8 M       91.3%
+      #              1e-3           27     ~24 M       97.2%
+      #              1e-4          114    ~100 M       99.1%
+      #              5e-5          163    ~142 M       99.5%
+      #              1e-5          313    ~272 M       99.9%
+      #              unrouted     3,081   2,671 M      100%
+      #
+      # 5e-5 covers 99.5% of the edges with a dedicated expert and turns
+      # an untrainable bank into a 142 M one. On a small element set
+      # every pair clears it, nothing is routed, and no rare artisan is
+      # built — the setting costs nothing there.
+      # OFF by default. At these element counts nothing would fall below
+      # the threshold anyway — the bank is 15 pairs, all of them common —
+      # so switching it on would build no rare artisan and only add a
+      # pass over the training split to count pairs. Turn it on when the
+      # element set grows; see src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml, where
+      # 2,628 pairs make it the difference between 2.3 B parameters and
+      # 84 M.
+      rare_artisan:
+        enabled: false
+        min_pair_frequency: 5.0e-5
+        pair_embed_dim: 16 # element-embedding width in the shared artisan
+
+      # Counted over the training split by train.py and written back into
+      # the run's saved config.yaml — routing decides WHICH artisan
+      # modules exist, so a checkpoint trained with it cannot load into a
+      # model rebuilt from a config that lost the counts.
+      #
+      # Set it by hand to skip that pass ({"Zlo_Zhi": directed_edges},
+      # or a list of [Z_lo, Z_hi, count] triples).
+      pair_counts: null
+
+    # ══ VIRTUAL NODES ═══════════════════════════════════════════════
+    # NF_SIMURGH's own namespace. Deliberately NOT called `fragment_ca`,
+    # `fragment_interaction`, or anything the other SIMURGH configs use,
+    # so the two cannot be pasted into each other and quietly half-work.
+    #
+    # EVERY KEY HERE IS A HYPERPARAMETER OF A MECHANISM THAT ALWAYS
+    # RUNS. None of them switches the virtual-node machinery off; there
+    # is no such switch, and the model raises if you invent one
+    # (`use_fragments`, `enable_virtual_nodes`, `init_zero`, ...).
+    # NF_SIMURGH without virtual nodes is `simurgh_legacy_monolithic_arace`, which
+    # already exists — run that instead.
+    virtual_node:
+      # ── node construction (REPRESENTATION only) ───────────────────
+      # NEVER applies to E_base: the fragment ENERGY pooling is always
+      # an exact sum, by construction, and is not configurable.
+      #
+      # "mean"      — default. Stays scale-consistent across fragments of
+      #               very different atom counts, which is what lets the
+      #               model generalise to fragment sizes it never saw.
+      # "sum"       — size-extensive but unbounded out of distribution.
+      # "attention" — learned per-atom weights within each fragment.
+      pooling: "mean"
+
+      # Concatenate log1p(n_atoms_k). This resolves the mean-vs-sum
+      # tension by providing BOTH: the mean answers "what does this stuff
+      # look like", the size scalar answers "how much of it is there",
+      # without sum's unbounded OOD scaling. false only for ablations.
+      use_size_scalar: true
+
+      # Width of the fragment scalar s_k.
+      n_scalar: 16
+
+      # ── virtual-node radial basis ─────────────────────────────────
+      # A SEPARATE primitive instance from the atom-level one: same
+      # BesselBasis / PolynomialEnvelope classes, fragment-appropriate
+      # cutoff and basis count.
+      vnode_num_rbf: 8
+      vnode_radial_hidden: 32
+
+      # Separation (Å) at which the interaction envelope reaches zero.
+      # Larger than the atom cutoff (data.cutoff: 5.0) — that gap is the
+      # entire point: fragment pairs beyond 5 Å are exactly the ones
+      # atom-level message passing cannot see.
+      #
+      # 10.0, not the GMD file's 15.0. QM9 molecules have at most 9 heavy
+      # atoms and span roughly 5-8 Å, so at 15 Å the envelope would be
+      # flat across every separation that actually occurs and its radial
+      # basis would be resolving empty space.
+      #
+      # Note the pair SET is not truncated at this radius — all ordered
+      # k != l inside a structure are enumerated, and only the smooth
+      # envelope decays. Truncating the set would make the attention
+      # denominator jump as a fragment crossed the boundary, putting a
+      # discontinuity in E and therefore a wrong F.
+      vnode_cutoff: 10.0
+
+      # ── virtual-node interaction ──────────────────────────────────
+      n_heads: 4 # attention heads; context_k is their concatenation
+      final_hidden: 16 # interaction-energy MLP hidden width
+      dropout: 0.0 # inside the attention-logit MLP; 0.0 disables
+
+      # Safety cap on K. Pair enumeration is O(K²), so a structure
+      # decomposed into many tiny fragments (a gas of single atoms) gets
+      # expensive. `rotatable` on QM9 reaches K=9 at most (measured), so
+      # this is slack, not a live constraint.
+      vnode_max_fragments: 512
+
+      # NOTE: there is no `init_zero` key. Zero-init of the correction
+      # readout is a design invariant — it is what makes a fresh
+      # NF_SIMURGH numerically identical to simurgh_legacy_monolithic_arace, and the
+      # reduction test depends on it — not a configurable option.
+
+      # ── l>0 pooled invariants ─────────────────────────────────────
+      # STAGING: remove once Stage 2 is validated.
+      # Feeds the attention-logit MLP contractions of the pooled l=1 /
+      # l=2 channels against the inter-fragment direction:
+      #   norm    ‖mu_k‖
+      #   axial   mu_k · r_hat,  mu_l · r_hat
+      #   mutual  mu_k · mu_l
+      #   quad    r_hat^T Q_k r_hat
+      # With axial and mutual both on, the combination
+      # (3·axial_k·axial_l − mutual) — the angular part of the
+      # dipole-dipole tensor — is supplied explicitly, so the MLP is
+      # handed the correct functional form and only has to learn the
+      # radial dependence from rbf_kl.
+      pool_l1l2: false
+      l1l2_invariants: ["norm", "axial", "mutual", "quad"]
+
+      # ── equivariant virtual nodes (Stage 2) ───────────────────────
+      # STAGING: remove once Stage 2 is validated.
+      # Pools the FULL irreps per fragment into equivariant virtual
+      # nodes, runs exactly one round of CG-coupled fragment-fragment
+      # message passing against the fragment-fragment direction, and
+      # collapses to an invariant scalar only at the final readout.
+      # Additive to the Stage 1 correction rather than replacing it, so
+      # both paths keep receiving gradient (DDP static-graph contract)
+      # and the flag isolates Stage 2's own contribution.
+      vnode_equivariant: false
+      vnode_irreps: "16x0e + 16x1o + 16x2e"
+      vnode_sh_lmax: 2
+
+      # ── virtual-node type conditioning ────────────────────────────
+      # Conditions s_k on a pooled learned element embedding so ONE
+      # fragment module specialises by fragment chemistry — the same
+      # idea as element_conditioned on the artisans. This is the
+      # continuous, DDP-safe alternative to routing fragments to
+      # separate experts: a top-k router would be discontinuous in the
+      # positions, making E jump and F wrong near switching boundaries.
+      # Turn on only if the diagnostics suggest specialisation is
+      # missing.
+      #
+      # ══ ON by inheritance from simurgh_legacy_nf_gmd26_typecond.yaml ══
+      # and it matters more here than anywhere.
+      #
+      # QM9's whole design is chemical diversity at fixed size: molecules
+      # with the SAME heavy-atom count and the same fragment-size
+      # multiset differ only in which elements sit where. So
+      # `use_size_scalar` — log1p(n_atoms) per fragment — is close to
+      # uninformative across this corpus, and without type conditioning
+      # the only composition signal reaching a virtual node is whatever
+      # survives in the pooled l=0 features. A pooled learned element
+      # embedding supplies it directly.
+      #
+      # Cost: +1,088 parameters (a 120x8 embedding table, plus 8 extra
+      # input columns on the fragment scalar MLP).
+      #
+      # Set false for the A/B against plain NF_SIMURGH on this dataset.
+      vnode_type_conditioned: true
+
   # ── Task head ──────────────────────────────────────────────────────
-  # Monolithic model — a task head is incompatible.
+  # Monolithic backbone — returns the property dict (energy + autograd
+  # forces + virtual-node diagnostics) directly; a task head is
+  # incompatible.
   head: null
 
 # ─────────────────────────────────────────────────────
@@ -446,26 +704,17 @@ trainer:
 
   # Epoch budget — max_epochs is THE authoritative epoch count.
   #
-  # An epoch here is 159 optimiser steps (950 frames / batch 6), so
-  # 1000 epochs is ~159k steps — the order the MD17 literature trains
-  # at. Early stopping on val_forces/forces_mae usually ends it first.
-  min_epochs: 50 # prevents premature early stopping
-  max_epochs: 3000 # total epochs; scheduler T_max follows this value
+  # An epoch here is 3,438 optimiser steps (110k molecules / batch 32),
+  # so 150 epochs is ~516k steps. The GMD file's 1500 would be 5.2M
+  # steps and the cosine schedule would barely have started decaying by
+  # the time the model converged.
+  min_epochs: 5 # prevents premature early stopping
+  max_epochs: 150 # total epochs; scheduler T_max follows this value
 
-  accelerator: gpu # "cpu" also finishes this one in reasonable time
+  accelerator: gpu # 110k molecules per epoch — CPU is not practical
   devices: 1
   num_nodes: 1
-  # ── precision: "64", NOT "32" ────────────────────────────────────
-  # rMD17 labels are total energies around -17,617 eV and the energy
-  # loss is the difference of two numbers that size. float32 resolves
-  # ~2e-3 eV there — roughly 10% of the energy error being chased — so
-  # the label is quantised at the scale of the signal. MACE trains
-  # rMD17 in float64 for the same reason.
-  #
-  # Costs ~2x memory and time. On a 21-atom molecule that is nothing;
-  # revisit it for MD22's larger molecules or OMol25, where "32" (or
-  # "bf16-mixed" on A100/H100) is the right call.
-  precision: "64"
+  precision: "32" # use "bf16-mixed" on A100/H100 for ~2x speedup
 
   # Strategy — "auto" works for single-GPU and CPU.
   # For DDP: strategy: ddp (and set devices: N, accelerator: gpu)
@@ -482,7 +731,10 @@ trainer:
     # int >= 1 = every N training batches
 
   # Logging
-  log_every_n_steps: 1
+  # 50, not 1: at 3,438 steps per epoch, per-step logging writes
+  # hundreds of thousands of points per metric and dominates the
+  # logger upload.
+  log_every_n_steps: 50
 
   # Gradient clipping — set null here; handled by training.gradient_clip
   # (GOALModule.on_before_optimizer_step). Lightning refuses both at once.
@@ -563,12 +815,17 @@ training:
   #
   # Scheduler T_max = trainer.max_epochs (authoritative, not training.max_epochs).
   optimizer:
-    lr: 0.01
+    # 0.005, half the GMD value: an epoch here is 3,438 steps rather
+    # than a few hundred, so the same LR covers far more ground before
+    # the cosine decay takes hold.
+    lr: 0.005
     weight_decay: 1.0e-5
     amsgrad: true
     min_lr: 1.0e-7
     scheduler_type: cosine_warmup
-    warmup_epochs: 10 # linear warmup duration (cosine_warmup only)
+    # 2 epochs = ~6,900 steps of warmup, far more in absolute terms than
+    # the GMD file's ten epochs were.
+    warmup_epochs: 2 # linear warmup duration (cosine_warmup only)
     scheduler: # reduce_on_plateau settings
       patience: 50
       factor: 0.5
@@ -578,9 +835,11 @@ training:
   # decay=0.99 → half-life ≈ 69 steps; 0.999 → ≈ 693 steps.
   # Disable to use Lightning's native EMAWeightAveraging callback instead
   # (configure it in the callbacks section below).
+  # 0.999 rather than 0.99: with 3,438 steps per epoch a 69-step
+  # half-life averages over 2% of an epoch, which is barely an average.
   ema:
     enabled: true
-    decay: 0.99
+    decay: 0.999
 
   # ── Position noise augmentation ─────────────────────────────────
   # Adds Gaussian noise σ to atom positions at each training step.
@@ -597,39 +856,21 @@ training:
   # for the duration of that stage. Labels not declared in `losses`
   # are silently skipped (forward-declaration is allowed).
   #
-  # Rationale for the three-stage curriculum:
-  #   Stage 1 — energy only: warm up the backbone on energies alone.
-  #             Forces are noisy early when the energy surface is wrong.
-  #   Stage 2 — force-heavy, open-ended: the phase that actually trains
-  #             this model, weighted the way the benchmark is scored.
+  # ONE STAGE, because QM9 has no forces.
   #
-  # ── FORCE WEIGHT: 10.0 ──────────────────────────────────────────
-  # Matches src/goal/configs/ml/nf_simurgh_md17.yaml as of 2026-10-04 (its first
-  # run above parity), so the simplified models and NF_SIMURGH are
-  # trained to the same objective. No SIMURGH Simplified result exists at
-  # any weight yet. MACE trains rMD17 at forces:energy = 1000:1 with a
-  # squared-error loss, which does not map directly onto these per-atom
-  # MAE terms.
-  #
-  # NO `newton` KEY. There is no `newton` loss in LOSS_REGISTRY
-  # (available: charge, dipole, energy, forces, gate_reg,
-  # scalar_property, stress), so listing it here does nothing except
-  # make train.py warn that the label is undeclared on every run.
-  # Newton violation is a logged METRIC — watch
-  # {split}_forces/newton_violation, which should sit at ~0 because
-  # these forces are -dE/dr by autograd.
+  # The GMD file's three-stage curriculum exists to phase force
+  # supervision in after the energy surface settles — energy only, then
+  # energy + forces, then a heavier force weight. With no force labels
+  # there is nothing to phase in, and a curriculum whose stages differ
+  # only in a weight that is never used would be theatre. The stage
+  # machinery still runs (the progress bar prints the stage name and the
+  # active weights), it simply has one entry.
   stages:
-    - name: "energy_only"
-      epochs: 5
-      loss_weights:
-        energy: 1.0
-        forces: 0.0
-
-    - name: "forces"
+    - name: "energy"
       epochs: null # open-ended — runs to max_epochs
       loss_weights:
         energy: 1.0
-        forces: 10.0
+        gate_reg: 1.0e-4
 
   # ── Loss functions ────────────────────────────────────────────────
   # Declares which loss components exist and their base weights.
@@ -661,31 +902,33 @@ training:
   #   "gate_reg"        — L2 on artisan gate params (prevents expert collapse)
   #   "dipole"          — dipole moment
   #   "scalar_property" — generic scalar, set property_name
+  # NOTE `EnergyLoss` divides by the atom count unconditionally — the
+  # `normalize_by_n_atoms` flag below only reaches the FORCES loss. So
+  # the energy objective, and the logged energy_mae_per_atom, are both
+  # per-atom. Published QM9 numbers are per MOLECULE: multiply by the
+  # mean atom count (~18) before comparing.
   losses:
     - name: energy
       fn: mae
       weight: 1.0
       normalize_by_n_atoms: true
 
-    - name: forces
-      fn: mae
-      weight: 1.0
-      normalize_by_n_atoms: true
+    - name: gate_reg
+      fn: mse
+      weight: 1.0e-4
 
-    # NO gate_reg ENTRY: this model has no artisan gate parameters (the
-    # GOAL loss would see no gate_values and contribute exactly 0).
-
-    # NO "newton" ENTRY, and none in the stages above either. The GMD
-    # configs carry a commented-out one and list `newton` in every
-    # stage's loss_weights, which makes train.py warn that the label is
-    # undeclared and will be ignored — there is no `newton` loss in
-    # LOSS_REGISTRY to declare (available: charge, dipole, energy,
-    # forces, gate_reg, scalar_property, stress). Newton violation is a
-    # logged METRIC, not an objective: goal.ml.training.metrics emits
-    # {split}_forces/newton_violation and its _x/_y/_z components every
-    # epoch regardless. For this model it should sit at ~0 by
-    # construction, since forces are -dE/dr by autograd — watch the
-    # curve as a conservation check.
+    # NO "forces" ENTRY — QM9 has no force labels, and declaring the loss
+    # would make it read a `forces` attribute the batch does not carry.
+    #
+    # NO "newton" ENTRY either. The GMD configs carry a commented-out one
+    # and list `newton` in every stage's loss_weights, which makes
+    # train.py warn that the label is undeclared and will be ignored —
+    # there is no `newton` loss in LOSS_REGISTRY to declare (available:
+    # charge, dipole, energy, forces, gate_reg, scalar_property, stress).
+    # Newton violation is a logged METRIC: the model still predicts
+    # forces by autograd, so {split}_forces/newton_violation appears
+    # every epoch and should sit at ~0. It is the one force-shaped
+    # number worth watching on this dataset.
 
   # Strict stage label validation.
   # false = silently skip unknown stage labels (default, allows forward-decl)
@@ -717,13 +960,15 @@ training:
 #   "val_energy/energy_mae_per_atom"      — per-atom energy MAE (min)
 #   "val/total"                           — total weighted loss (min)
 #
-# "val_forces/forces_mae" is kept as the selection metric because it is
-# the number MD17 is published on — every comparison you might draw is
-# a force MAE in meV/Å on the held-out frames.
+# ON QM9 THE METRIC MUST BE AN ENERGY ONE. The GMD configs select on
+# "val_forces/forces_mae"; that metric is never emitted here, because
+# goal.ml.training.metrics omits every force metric when the batch
+# carries no force labels. GOALCheckpointManager would then never see
+# its monitor, and EarlyStopping (strict: true) raises outright.
 #
-# data.monitor_test_during_training is off here (the test split is
-# ~99,000 frames from the same trajectory), so nothing is logged under
-# test/ during training; run goal-eval on the test split at the end.
+# "val_energy/energy_mae_per_atom" is the selection metric below —
+# per ATOM, so multiply by ~18 to compare with published per-molecule
+# QM9 MAEs.
 #
 # Atomic writes (write .tmp then os.replace) prevent corrupted files.
 # Pool state is persisted to checkpoint_state.json for correct resume.
@@ -735,7 +980,7 @@ checkpoint_manager:
   top_k:
     enabled: true
     k: 5
-    metric: "val_forces/forces_mae"
+    metric: "val_energy/energy_mae_per_atom"
     mode: "min" # "min" for error metrics, "max" for similarity metrics
 
   interval:
@@ -750,8 +995,8 @@ checkpoint_manager:
   # ── Self-contained .simurgh archives ─────────────────────────────
   # A .simurgh archive bundles weights, config and the FROZEN MODEL
   # SOURCE so a run can be reloaded without the repo at that commit.
-  # The model file, the shared simurgh_simplified_layers module and the
-  # primitives it imports are frozen together (import-graph walk).
+  # NF_SIMURGH is a single self-contained file that imports only
+  # stable primitives and blocks, so it packs cleanly.
   #   save_archive     — write one alongside the best checkpoint
   #   archive_interval — also write one at every interval checkpoint
   #                      (costs disk; useful for long research runs)
@@ -788,37 +1033,41 @@ callbacks:
     max_depth: 1 # nesting depth to display (-1 = all)
 
   # Early stopping — uncomment to enable:
-  # ── EARLY STOPPING IS OFF FOR THIS BENCHMARK RUN ─────────────────
-  # The LR schedule is cosine with T_max = trainer.max_epochs (3000).
-  # Stopping at epoch 1,200 does not just cut the run short — it ends
-  # it with the learning rate still at a large fraction of its initial
-  # value, and the last stretch of accuracy on rMD17 comes precisely
-  # from the decay to min_lr. A "plateau" observed at a high LR is
-  # usually the LR, not the model.
-  #
-  # So: run the full schedule. checkpoint_manager.top_k still keeps the
-  # best five weights by val_forces/forces_mae, so nothing is lost by
-  # letting it run past its best.
-  #
-  # Uncomment to restore the guard. Note min_delta must stay 0.0 — it
-  # is in the metric's units, and 1.0e-4 there means 0.1 meV/A, which
-  # scores every late epoch as stalled (that is what ended a 3,000
-  # epoch budget at ~970 with the curve still descending).
-  #
-  # early_stopping:
-  #   _target_: lightning.pytorch.callbacks.EarlyStopping
-  # Check right after validation, not at the end of the training epoch:
-  # a run resumed from a checkpoint saved after validation first closes
-  # that finished epoch with no metrics logged, which strict mode rejects.
-  check_on_train_epoch_end: false
-  #   monitor: "val_forces/forces_mae"
-  #   min_delta: 0.0
-  #   patience: 200
-  #   mode: "min"
-  #   strict: true
-  #   check_finite: true
-  #   stopping_threshold: null
-  #   divergence_threshold: null
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    # Check right after validation, not at the end of the training epoch:
+    # a run resumed from a checkpoint saved after validation first closes
+    # that finished epoch with no metrics logged, which strict mode rejects.
+    check_on_train_epoch_end: false
+    monitor: "val_energy/energy_mae_per_atom"
+
+    # ── min_delta IS IN THE METRIC'S OWN UNITS ───────────────────────
+    # val_energy/energy_mae_per_atom is reported in eV/atom, so the
+    # inherited 1.0e-4 meant "an epoch only counts as an improvement if
+    # it beats the best by 1e-4 eV/atom". Late in training the
+    # per-epoch gain is far below that, so EVERY epoch scores as
+    # stalled and the run stops while the curve is still descending —
+    # on rMD17 aspirin that ended a 3,000-epoch budget at ~970 with
+    # val_forces/forces_mae still falling.
+    #
+    # 0.0 = any improvement counts, which is what you want when the
+    # metric is a slowly converging error. Set a positive value only if
+    # you know the noise floor of your validation set and want to stop
+    # inside it.
+    min_delta: 0.0
+
+    # Counted in epochs.
+    # 200 (200 epochs) is deliberately generous: this is a
+    # divergence guard, not a convergence detector. To remove the guard
+    # entirely, comment out this whole block — checkpoint_manager.top_k
+    # still keeps the best weights.
+    patience: 200
+
+    mode: "min"
+    strict: true # crash if monitor not found in metrics
+    check_finite: true # stop if monitor becomes NaN or Inf
+    stopping_threshold: null # stop immediately if metric < threshold
+    divergence_threshold: null # stop if metric > threshold (diverging)
 
   # Backbone finetuning (for transfer learning from pretrained models):
   # backbone_finetuning:
@@ -873,7 +1122,7 @@ callbacks:
 # data.monitor_test_during_training is on, otherwise only by an explicit
 # trainer.test() run).  Select on val_*, read test_*.
 #
-# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+# Full section reference: src/goal/configs/ml/simurgh_legacy_gmd26.yaml
 #
 # Multiple loggers can be active simultaneously.
 # Metrics are logged to all enabled loggers.
@@ -899,7 +1148,7 @@ logger:
   # Weights & Biases (recommended for research tracking):
   wandb:
     _target_: lightning.pytorch.loggers.wandb.WandbLogger
-    name: ${run_name} # format: YYYY-MM-DD_HH-MM-SS_rmd17_simurgh_simplified_monolithic
+    name: ${run_name} # format: YYYY-MM-DD_HH-MM-SS_qm9_nf_simurgh
     project: "goal"
     entity: null # null = your default W&B entity
     save_dir: "${paths.output_dir}"
@@ -907,16 +1156,7 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags:
-      [
-        "simurgh",
-        "simurgh_simplified",
-        "monolithic",
-        "md17",
-        "rmd17",
-        "experimental",
-        "ablation",
-      ]
+    tags: ["simurgh_legacy", "simurgh_legacy_nf", "qm9", "experimental"]
 
   # TensorBoard:
   # tensorboard:
@@ -929,7 +1169,7 @@ logger:
   # MLflow:
   # mlflow:
   #   _target_: lightning.pytorch.loggers.mlflow.MLFlowLogger
-  #   experiment_name: "simurgh-md17"
+  #   experiment_name: "simurgh-qm9"
   #   tracking_uri: "http://localhost:5000"
   #   tags: null
 
@@ -944,7 +1184,7 @@ logger:
   # aim:
   #   _target_: aim.pytorch_lightning.AimLogger
   #   repo: ${paths.log_dir}/aim
-  #   experiment: "simurgh-md17"
+  #   experiment: "simurgh-qm9"
   #   system_tracking_interval: 10   # seconds; null = disable system metrics
   #   log_system_params: true
   #   capture_terminal_logs: false   # avoid console log loop
@@ -1114,7 +1354,7 @@ ckpt_path: null
 #   method: ray
 #   num_samples: 20
 #   max_epochs: 100
-#   metric: "val_forces/forces_mae"
+#   metric: "val_energy/energy_mae_per_atom"
 #   mode: min
 #   scheduler: asha                # "asha" or "pbt"
 #   grace_period: 10               # min epochs before pruning
@@ -1139,7 +1379,7 @@ ckpt_path: null
 #   project: goal
 #   entity: null
 #   sweep_method: bayes            # "bayes", "grid", "random"
-#   metric: "val_forces/forces_mae"
+#   metric: "val_energy/energy_mae_per_atom"
 #   mode: min
 #   count: 20
 #   early_terminate:

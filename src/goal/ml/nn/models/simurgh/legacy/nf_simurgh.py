@@ -8,7 +8,7 @@ representation and its centroid geometry.
 It is **not** ARACE with a fragment feature switched on.  There is no key
 that disables the virtual-node mechanism and no fallback path that runs
 plain ARACE when fragment labels are missing — NF_SIMURGH without virtual
-nodes is exactly ``monolithic_arace``, which already exists.  A graph
+nodes is exactly ``simurgh_legacy_monolithic_arace``, which already exists.  A graph
 without ``fragment_index`` raises.
 
 Pipeline::
@@ -48,11 +48,11 @@ passing, so nothing upstream is starved of directional information.
 Isolation
 ---------
 This module is purely additive.  It imports stable primitives, blocks and
-:class:`~goal.ml.nn.models.simurgh.arace.AraceBackbone` unchanged and
+:class:`~goal.ml.nn.models.simurgh.legacy.arace.AraceBackbone` unchanged and
 modifies nothing.  Deleting this file restores the repository exactly.
 
-Registered as ``"nf_simurgh"`` in both ``MODEL_REGISTRY`` and
-``BACKBONE_REGISTRY``, mirroring ``monolithic_arace``.  Discovery is
+Registered as ``"simurgh_legacy_nf"`` in both ``MODEL_REGISTRY`` and
+``BACKBONE_REGISTRY``, mirroring ``simurgh_legacy_monolithic_arace``.  Discovery is
 automatic (``goal.ml.nn.models.__init__`` calls ``auto_discover``), so no
 registry file needs editing.
 """
@@ -71,8 +71,8 @@ from goal.ml.data.graph import AtomicGraph
 from goal.ml.nn.blocks.ace_block import normalise_addon_config
 from goal.ml.nn.blocks.artisans import build_artisan_edge_irreps
 from goal.ml.nn.blocks.fragment_interaction import build_fragment_geometry
-from goal.ml.nn.models.simurgh.arace import AraceBackbone
 from goal.ml.nn.models.simurgh.geometry import differentiable_edges
+from goal.ml.nn.models.simurgh.legacy.arace import AraceBackbone
 from goal.ml.nn.primitives.linear import EquivariantLinear
 from goal.ml.nn.primitives.radial import BesselBasis, PolynomialEnvelope, RadialMLP
 from goal.ml.nn.primitives.tp import WeightedTensorProduct
@@ -978,9 +978,9 @@ class NFSimurghBackbone(nn.Module):
     """Runs standard ARACE rounds unchanged, then adds the
     fragment-base + fragment-interaction energy correction.
 
-    The ARACE stack is :class:`~goal.ml.nn.models.simurgh.arace.AraceBackbone`
+    The ARACE stack is :class:`~goal.ml.nn.models.simurgh.legacy.arace.AraceBackbone`
     imported as-is with both of its optional add-ons off, so the rounds
-    are bit-identical to ``monolithic_arace``'s and per-round energies
+    are bit-identical to ``simurgh_legacy_monolithic_arace``'s and per-round energies
     stay available as ``energy_round_{L}``.
 
     Construction order matters: the ARACE stack is built **before** the
@@ -1044,7 +1044,7 @@ class NFSimurghBackbone(nn.Module):
                     f"virtual_node.{forbidden} is not a NF_SIMURGH key.  The "
                     f"virtual-node mechanism is mandatory and its zero-init is a "
                     f"design invariant — NF_SIMURGH without virtual nodes is "
-                    f"'monolithic_arace', which already exists."
+                    f"'simurgh_legacy_monolithic_arace', which already exists."
                 )
 
         self._vnode_equivariant: bool = bool(vn.get("vnode_equivariant", False))
@@ -1201,12 +1201,12 @@ class NFSimurghBackbone(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Run the ARACE rounds, returning energies **and** node features.
 
-        # vendored from models/simurgh/arace.py::AraceBackbone.forward
+        # vendored from models/simurgh/legacy/arace.py::AraceBackbone.forward
         # @ 152d8e8, modified: also returns the final node features ``h``.
         #
         # Only the loop is vendored — the embedding, the input linear and
         # every round are ``self.arace``'s own modules, used unchanged.  The
-        # arithmetic is therefore identical to ``monolithic_arace``'s, which
+        # arithmetic is therefore identical to ``simurgh_legacy_monolithic_arace``'s, which
         # is what keeps the reduction-to-ARACE comparison exact.
         #
         # Why vendor at all: ``AraceBackbone.forward`` returns energies but
@@ -1252,8 +1252,8 @@ class NFSimurghBackbone(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-@MODEL_REGISTRY.register("nf_simurgh")
-@BACKBONE_REGISTRY.register("nf_simurgh")
+@MODEL_REGISTRY.register("simurgh_legacy_nf")
+@BACKBONE_REGISTRY.register("simurgh_legacy_nf")
 class MonolithicNFSimurgh(nn.Module):
     """Self-contained NF_SIMURGH model.
 
@@ -1274,13 +1274,13 @@ class MonolithicNFSimurgh(nn.Module):
     Parameters
     ----------
     elements : sequence of int
-        Atomic numbers covered by the model.  **Unlike ``monolithic_arace``
+        Atomic numbers covered by the model.  **Unlike ``simurgh_legacy_monolithic_arace``
         this must be set in the config**: ``train.py``'s auto-extraction
         from the training set is keyed on a hard-coded list of backbone
-        names that does not include ``nf_simurgh``.
+        names that does not include ``simurgh_legacy_nf``.
     num_rounds, share_artisan_weights, artisan, cutoff, embedding_dim,
     num_elements, avg_num_neighbors :
-        As :class:`~goal.ml.nn.models.simurgh.arace.MonolithicArace`.
+        As :class:`~goal.ml.nn.models.simurgh.legacy.arace.MonolithicArace`.
     virtual_node : dict, optional
         Virtual-node hyperparameters — see :class:`NFSimurghBackbone`.
         Cannot disable the mechanism.
@@ -1422,7 +1422,7 @@ class MonolithicNFSimurgh(nn.Module):
                 "must carry a 'fragment_index'.  Set data.compute_fragment_index: "
                 "true in the config (and rebuild any cached dataset) so the "
                 "fragment labels are attached at load time.  There is no "
-                "atom-level-only fallback: that would be 'monolithic_arace' "
+                "atom-level-only fallback: that would be 'simurgh_legacy_monolithic_arace' "
                 "wearing this model's name."
             )
 

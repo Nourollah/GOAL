@@ -1,5 +1,5 @@
-"""Tests for SIMURGH Simplified — ``simurgh_simplified_monolithic`` and
-``simurgh_simplified_routed``.
+"""Tests for SIMURGH Simplified — ``simurgh_legacy_simplified_monolithic`` and
+``simurgh_legacy_simplified_routed``.
 
 Everything is parametrised over both versions unless the class name says
 ``Routed``.  Float64 throughout: e3nn's SH / Wigner-D floor is ~1e-6
@@ -24,18 +24,21 @@ from torch_geometric.data import Batch
 import goal.ml.nn.models  # noqa: F401  (auto-discovery registers the models)
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.data.statistics import compute_pair_counts
-from goal.ml.nn.models.simurgh.simurgh_simplified_layers import (
+from goal.ml.nn.models.simurgh.legacy.simurgh_simplified_layers import (
     LearnedCombination,
     LineReadout,
     SimurghSimplifiedModel,
 )
-from goal.ml.nn.models.simurgh.simurgh_simplified_routed import (
+from goal.ml.nn.models.simurgh.legacy.simurgh_simplified_routed import (
     RoutedSimurghSimplified,
     element_receiver_counts,
 )
 from goal.ml.registry import MODEL_REGISTRY
 
-VERSIONS: tuple[str, str] = ("simurgh_simplified_monolithic", "simurgh_simplified_routed")
+VERSIONS: tuple[str, str] = (
+    "simurgh_legacy_simplified_monolithic",
+    "simurgh_legacy_simplified_routed",
+)
 CUTOFF: float = 5.0
 CONFIG_DIR: Path = Path(__file__).parents[3] / "src" / "goal" / "configs" / "ml"
 
@@ -98,7 +101,7 @@ def _float64() -> typing.Iterator[None]:
 def make_model(version: str, seed: int = 0, **overrides: typing.Any) -> SimurghSimplifiedModel:
     torch.manual_seed(seed)
     kwargs: dict[str, typing.Any] = copy.deepcopy(SMALL)
-    if version == "simurgh_simplified_routed":
+    if version == "simurgh_legacy_simplified_routed":
         kwargs.update(copy.deepcopy(ROUTED_EXTRA))
     kwargs.update(overrides)
     return typing.cast(SimurghSimplifiedModel, MODEL_REGISTRY.get(version)(**kwargs))
@@ -483,13 +486,13 @@ class TestTraining:
 
 def test_monolithic_rejects_routing_sections() -> None:
     with pytest.raises(TypeError):
-        make_model("simurgh_simplified_monolithic", artisan=ROUTED_EXTRA["artisan"])
+        make_model("simurgh_legacy_simplified_monolithic", artisan=ROUTED_EXTRA["artisan"])
 
 
 def test_pair_line_refuses_odd_parity() -> None:
     with pytest.raises(ValueError, match="odd-parity"):
         make_model(
-            "simurgh_simplified_monolithic",
+            "simurgh_legacy_simplified_monolithic",
             pair_line={"hidden_irreps": "8x0e + 8x1o + 8x2e", "num_layers": 2},
         )
 
@@ -501,7 +504,7 @@ def test_pair_line_refuses_odd_parity() -> None:
 
 def routed(**overrides: typing.Any) -> RoutedSimurghSimplified:
     return typing.cast(
-        RoutedSimurghSimplified, make_model("simurgh_simplified_routed", **overrides)
+        RoutedSimurghSimplified, make_model("simurgh_legacy_simplified_routed", **overrides)
     )
 
 
@@ -701,7 +704,7 @@ def test_config_builds_its_model(version: str, dataset: str) -> None:
     kwargs: dict[str, typing.Any] = _backbone(version, dataset)
     assert kwargs.pop("name") == version
     # What train.py injects from the training split:
-    if version == "simurgh_simplified_routed":
+    if version == "simurgh_legacy_simplified_routed":
         kwargs["artisan"]["pair_counts"] = PAIR_COUNTS
     if kwargs["atomic_energies"].get("mode") == "dataset":
         kwargs["atomic_energies"]["values"] = {1: -13.6, 6: -1028.5, 8: -2041.1}
@@ -712,8 +715,8 @@ def test_config_builds_its_model(version: str, dataset: str) -> None:
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_configs_differ_only_in_the_processors(dataset: str) -> None:
     """The ablation contract: every shared backbone key is identical."""
-    mono: dict[str, typing.Any] = _backbone("simurgh_simplified_monolithic", dataset)
-    routed_cfg: dict[str, typing.Any] = _backbone("simurgh_simplified_routed", dataset)
+    mono: dict[str, typing.Any] = _backbone("simurgh_legacy_simplified_monolithic", dataset)
+    routed_cfg: dict[str, typing.Any] = _backbone("simurgh_legacy_simplified_routed", dataset)
     shared: set[str] = (set(mono) | set(routed_cfg)) - PROCESSOR_KEYS
     for key in shared:
         assert mono.get(key) == routed_cfg.get(key), key

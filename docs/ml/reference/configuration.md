@@ -16,7 +16,7 @@ The benefit is reproducibility and readability. The file you launched is the exp
 `goal-train` (and its alias `goal-train-ml`) is declared as
 
 ```python
-@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_gmd26")
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_legacy_gmd26")
 ```
 
 in [`src/goal/ml/cli/train.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/cli/train.py). `CONFIGS_ML_DIR` is the **absolute** path of `src/goal/configs/ml/`, so the configs are found no matter which directory you launch from or whether you run the console script or `python -m goal.ml.cli.train`.
@@ -48,28 +48,28 @@ Every config below can be run as `goal-train --config-name <name>`. The *Backbon
 
 | Config | Backbone | Dataset | Description |
 |---|---|---|---|
-| [`simurgh_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_gmd26.yaml) | `simurgh_arace` | `trajectory` | **Default.** Modular SIMURGH ARACE (artisan layer + ACE block per round) with an `energy_forces` head on GMD-26 FragmentDuplication (H, C, O). Fragment interaction add-on enabled. |
-| [`simurgh_gmd26_hpo`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_gmd26_hpo.yaml) | `simurgh_arace` | `trajectory` | Composes `simurgh_gmd26` and adds a Ray Tune search space over ARACE width, depth and rounds plus LR and weight decay. Run with `goal-tune`, not `goal-train`. |
-| [`simurgh_ace_first_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_ace_first_gmd26.yaml) | `simurgh` | `trajectory` | Legacy ACE-first SIMURGH: environment dressing first, artisan bank as the final readout. Uses `dressing_kwargs` / `artisan_config` keys. |
-| [`monolithic_arace_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/monolithic_arace_gmd26.yaml) | `monolithic_arace` | `trajectory` | Self-contained ARACE that computes its own forces (`head: null`). Research and ablation baseline. |
-| [`nf_simurgh_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_gmd26.yaml) | `nf_simurgh` | `trajectory` | NF_SIMURGH: ARACE rounds whose per-atom energies are pooled onto fragment virtual nodes that interact pairwise. A/B partner of `monolithic_arace_gmd26`. |
-| [`nf_simurgh_gmd26_typecond`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_gmd26_typecond.yaml) | `nf_simurgh` | `trajectory` | NF_SIMURGH with type-conditioned virtual nodes, compared against the `nf_simurgh_gmd26` baseline (FragmentDuplication). |
-| [`nf_simurgh_gmd26_FF`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_gmd26_FF.yaml) | `nf_simurgh` | `trajectory` | The type-conditioned model on the GMD **FragmentFusion** split (`task_name: nf_simurgh_gmd26_fusion`). |
-| [`simurgh_simplified_routed_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_simplified_routed_gmd26.yaml) | `simurgh_simplified_routed` | `trajectory` | SIMURGH Simplified, Routed: three parallel lines (atom / pair / fragment) with frequency-routed artisans and a fragment mixture of experts, additive readout. |
-| [`simurgh_simplified_monolithic_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_simplified_monolithic_gmd26.yaml) | `simurgh_simplified_monolithic` | `trajectory` | SIMURGH Simplified, Monolithic: the same three lines, each a single stack of simple equivariant layers. Ablation baseline for the routed version. |
+| [`simurgh_legacy_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26.yaml) | `simurgh_legacy_arace` | `trajectory` | **Default.** Modular SIMURGH ARACE (artisan layer + ACE block per round) with an `energy_forces` head on GMD-26 FragmentDuplication (H, C, O). Fragment interaction add-on enabled. |
+| [`simurgh_legacy_gmd26_hpo`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml) | `simurgh_legacy_arace` | `trajectory` | Composes `simurgh_legacy_gmd26` and adds a Ray Tune search space over ARACE width, depth and rounds plus LR and weight decay. Run with `goal-tune`, not `goal-train`. |
+| [`simurgh_legacy_ace_first_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_ace_first_gmd26.yaml) | `simurgh_legacy` | `trajectory` | Legacy ACE-first SIMURGH: environment dressing first, artisan bank as the final readout. Uses `dressing_kwargs` / `artisan_config` keys. |
+| [`simurgh_legacy_monolithic_arace_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_monolithic_arace_gmd26.yaml) | `simurgh_legacy_monolithic_arace` | `trajectory` | Self-contained ARACE that computes its own forces (`head: null`). Research and ablation baseline. |
+| [`simurgh_legacy_nf_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_gmd26.yaml) | `simurgh_legacy_nf` | `trajectory` | NF_SIMURGH: ARACE rounds whose per-atom energies are pooled onto fragment virtual nodes that interact pairwise. A/B partner of `simurgh_legacy_monolithic_arace_gmd26`. |
+| [`simurgh_legacy_nf_gmd26_typecond`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_gmd26_typecond.yaml) | `simurgh_legacy_nf` | `trajectory` | NF_SIMURGH with type-conditioned virtual nodes, compared against the `simurgh_legacy_nf_gmd26` baseline (FragmentDuplication). |
+| [`simurgh_legacy_nf_gmd26_FF`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_gmd26_FF.yaml) | `simurgh_legacy_nf` | `trajectory` | The type-conditioned model on the GMD **FragmentFusion** split (`task_name: simurgh_legacy_nf_gmd26_fusion`). |
+| [`simurgh_legacy_simplified_routed_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_simplified_routed_gmd26.yaml) | `simurgh_legacy_simplified_routed` | `trajectory` | SIMURGH Simplified, Routed: three parallel lines (atom / pair / fragment) with frequency-routed artisans and a fragment mixture of experts, additive readout. |
+| [`simurgh_legacy_simplified_monolithic_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_simplified_monolithic_gmd26.yaml) | `simurgh_legacy_simplified_monolithic` | `trajectory` | SIMURGH Simplified, Monolithic: the same three lines, each a single stack of simple equivariant layers. Ablation baseline for the routed version. |
 
 ### Benchmarks (MD17 / MD22 / QM9 / OMol25)
 
 | Config | Backbone | Dataset | Description |
 |---|---|---|---|
-| [`nf_simurgh_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_md17.yaml) | `nf_simurgh` | `rmd17` | NF_SIMURGH (type-conditioned virtual nodes) on rMD17 aspirin. |
-| [`nf_simurgh_md17_benzene`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_md17_benzene.yaml) | `nf_simurgh` | `rmd17` | rMD17 benzene, an atom-level baseline. Benzene is one fragment (K=1), so the fragment channel is inert. |
-| [`nf_simurgh_md22`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_md22.yaml) | `nf_simurgh` | `md22` | NF_SIMURGH on MD22 Ac-Ala3-NHMe. Switching molecule also means changing elements and `avg_num_neighbors` (see the table in the file). |
-| [`nf_simurgh_qm9`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_qm9.yaml) | `nf_simurgh` | `qm9` | NF_SIMURGH on QM9 U0 (energy only; QM9 has no forces). |
-| [`nf_simurgh_omol25`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_omol25.yaml) | `nf_simurgh` | `aselmdb` | NF_SIMURGH on a filtered organic subset of OMol25 `train_4M`. |
-| [`simurgh_simplified_routed_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_simplified_routed_md17.yaml) | `simurgh_simplified_routed` | `rmd17` | SIMURGH Simplified Routed on rMD17 aspirin. |
-| [`simurgh_simplified_monolithic_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_simplified_monolithic_md17.yaml) | `simurgh_simplified_monolithic` | `rmd17` | SIMURGH Simplified Monolithic on rMD17 aspirin (ablation baseline). |
-| [`simurgh_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_md17.yaml) | `simurgh` | `md17` | Legacy ACE-first SIMURGH on MD17 aspirin (rMD17, 950 train / 50 val). |
+| [`simurgh_legacy_nf_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_md17.yaml) | `simurgh_legacy_nf` | `rmd17` | NF_SIMURGH (type-conditioned virtual nodes) on rMD17 aspirin. |
+| [`simurgh_legacy_nf_md17_benzene`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_md17_benzene.yaml) | `simurgh_legacy_nf` | `rmd17` | rMD17 benzene, an atom-level baseline. Benzene is one fragment (K=1), so the fragment channel is inert. |
+| [`simurgh_legacy_nf_md22`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_md22.yaml) | `simurgh_legacy_nf` | `md22` | NF_SIMURGH on MD22 Ac-Ala3-NHMe. Switching molecule also means changing elements and `avg_num_neighbors` (see the table in the file). |
+| [`simurgh_legacy_nf_qm9`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_qm9.yaml) | `simurgh_legacy_nf` | `qm9` | NF_SIMURGH on QM9 U0 (energy only; QM9 has no forces). |
+| [`simurgh_legacy_nf_omol25`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml) | `simurgh_legacy_nf` | `aselmdb` | NF_SIMURGH on a filtered organic subset of OMol25 `train_4M`. |
+| [`simurgh_legacy_simplified_routed_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_simplified_routed_md17.yaml) | `simurgh_legacy_simplified_routed` | `rmd17` | SIMURGH Simplified Routed on rMD17 aspirin. |
+| [`simurgh_legacy_simplified_monolithic_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_simplified_monolithic_md17.yaml) | `simurgh_legacy_simplified_monolithic` | `rmd17` | SIMURGH Simplified Monolithic on rMD17 aspirin (ablation baseline). |
+| [`simurgh_legacy_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_md17.yaml) | `simurgh_legacy` | `md17` | Legacy ACE-first SIMURGH on MD17 aspirin (rMD17, 950 train / 50 val). |
 | [`hyperspec_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/hyperspec_md17.yaml) | `hyperspec` | `md17` | HyperSpec equivariant GNN baseline on MD17 aspirin (950 / 50). |
 
 The `md17`, `rmd17`, `md22` and `qm9` dataset types come from [`src/goal/ml/data/benchmarks/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/ml/data/benchmarks) (module `goal.ml.data.benchmarks`), which every CLI registers automatically. See [Benchmark datasets](../data/benchmarks.md).
@@ -80,7 +80,7 @@ The `md17`, `rmd17`, `md22` and `qm9` dataset types come from [`src/goal/ml/data
 |---|---|---|
 | [`finetune/mace`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/mace.yaml) | `mace_finetune` | MACE-MP fine-tuning in-process through `GOALModule` (`head: null`). `model.backbone.strategy` is `head_only`, `full` or `lora`. Run it from the `.venv-mace` interpreter. |
 | [`finetune/uma`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/uma.yaml) | `uma_finetune` | UMA / FairChem fine-tuning (pixi `cuda` environment plus FairChem, see [Installation](../../getting-started/installation.md#fairchem-uma)). |
-| [`finetune/simurgh_lora`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_lora.yaml) | `simurgh_lora` | LoRA on a trained SIMURGH checkpoint (`model.backbone.checkpoint_path`), any pixi environment. Default config of `goal-finetune`. See [LoRA fine-tuning](../../integrations/lora_finetune.md). |
+| [`finetune/simurgh_legacy_lora`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml) | `simurgh_lora` | LoRA on a trained SIMURGH checkpoint (`model.backbone.checkpoint_path`), any pixi environment. Default config of `goal-finetune`. See [LoRA fine-tuning](../../integrations/lora_finetune.md). |
 
 `eval.yaml` in the same directory is `goal-eval`'s default config (`ckpt_path`, `checkpoint`, `use_ema`, `data` overrides, test-loop `trainer`); see [Evaluation](../deployment/evaluation.md).
 
@@ -104,7 +104,7 @@ The study design, parameter counts and run order are in [`src/goal/configs/ml/ab
 
 ## Anatomy of an experiment file
 
-Top-level sections of `src/goal/configs/ml/simurgh_gmd26.yaml`, in file order:
+Top-level sections of `src/goal/configs/ml/simurgh_legacy_gmd26.yaml`, in file order:
 
 | Section | Consumed by | Purpose |
 |---|---|---|
@@ -133,22 +133,22 @@ Some backbone keys are deliberately left `null` or omitted, because `train.py` c
 
 | Key | When it is filled in |
 |---|---|
-| `model.backbone.elements` | Always, for `simurgh`, `simurgh_ace_first`, `simurgh_arace`, `simurgh_monolithic` and `monolithic_arace`. The dataset is authoritative and any value in the config is overwritten. |
+| `model.backbone.elements` | Always, for `simurgh_legacy`, `simurgh_legacy_ace_first`, `simurgh_legacy_arace`, `simurgh_legacy_monolithic` and `simurgh_legacy_monolithic_arace`. The dataset is authoritative and any value in the config is overwritten. |
 | `atomic_energies.values` | When `mode: dataset` (or `compute_from_dataset: true`) and `values` is null: least-squares fit of per-element references. |
 | `scale` | When `mode` is `dataset` or `provided` and `scale: null`. |
-| `avg_num_neighbors` | `simurgh_arace` with `avg_num_neighbors: null`, and legacy backbones with `dressing_kwargs.avg_num_neighbors: null`. |
+| `avg_num_neighbors` | `simurgh_legacy_arace` with `avg_num_neighbors: null`, and legacy backbones with `dressing_kwargs.avg_num_neighbors: null`. |
 | `artisan.pair_counts` / `artisan_config.pair_counts` | When `rare_artisan.enabled: true`. The counts are also written back into the saved config, so the checkpoint can be rebuilt. |
 
-These injections happen **only in `goal-train`**. `goal-eval` and `goal-tune` build the backbone straight from the config, which is why `simurgh_gmd26_hpo.yaml` pins `model.backbone.elements: [1, 6, 8]`.
+These injections happen **only in `goal-train`**. `goal-eval` and `goal-tune` build the backbone straight from the config, which is why `simurgh_legacy_gmd26_hpo.yaml` pins `model.backbone.elements: [1, 6, 8]`.
 
 ## The default model config (ARACE)
 
-The `model:` block of `simurgh_gmd26.yaml`, as composed (`goal-train --cfg job -p model`):
+The `model:` block of `simurgh_legacy_gmd26.yaml`, as composed (`goal-train --cfg job -p model`):
 
 ```yaml
 model:
   backbone:
-    name: simurgh_arace
+    name: simurgh_legacy_arace
     num_rounds: 2                 # artisan layer + ACE block, repeated
     share_artisan_weights: false  # true = one artisan bank shared by all rounds
     cutoff: ${data.cutoff}        # always interpolated from the data cutoff (8.0 Å)
@@ -192,8 +192,8 @@ Two optional ARACE add-ons, `fragment_interaction` and `adaptive_gate`, are swit
 To switch architecture, prefer the ready-made files over editing `name`. The legacy ACE-first backbone uses different keys (`dressing_kwargs`, `artisan_config`):
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_ace_first_gmd26   # legacy ACE-first
-pixi run -e cuda goal-train --config-name monolithic_arace_gmd26    # monolithic ARACE, head: null
+pixi run -e cuda goal-train --config-name simurgh_legacy_ace_first_gmd26   # legacy ACE-first
+pixi run -e cuda goal-train --config-name simurgh_legacy_monolithic_arace_gmd26    # monolithic ARACE, head: null
 ```
 
 `train.py` enforces the head pairing. A monolithic backbone with a `head:` block, or a modular backbone without one, raises a `ValueError` before training starts.
@@ -204,7 +204,7 @@ Any key can be overridden with Hydra's dotted syntax. Lists use brackets, and st
 
 ```bash
 # Choose an experiment file
-pixi run -e cuda goal-train --config-name nf_simurgh_gmd26
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_gmd26
 
 # Training budget and optimiser
 pixi run -e cuda goal-train trainer.max_epochs=300 training.optimizer.lr=5e-3 training.ema.decay=0.999
@@ -286,8 +286,8 @@ run_name = ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}$
 `paths.log_dir` is `<root>/logs`, and `<root>` is `$PROJECT_ROOT` if set, otherwise the directory you launched from. A finished default run looks like this:
 
 ```text
-logs/simurgh_gmd26/runs/2026-08-07_09-54-59_trajectory_simurgh_arace_fragment_duplication/
-├── simurgh_gmd26.log                 # Hydra job log (${task_name}.log)
+logs/simurgh_legacy_gmd26/runs/2026-08-07_09-54-59_trajectory_simurgh_arace_fragment_duplication/
+├── simurgh_legacy_gmd26.log                 # Hydra job log (${task_name}.log)
 ├── .hydra/
 │   ├── config.yaml                   # composed config (unresolved)
 │   ├── hydra.yaml
@@ -333,7 +333,7 @@ For the ablation rungs, a missing header fails silently: the rung's own override
    pixi run -e cuda goal-train --config-name ablations/my_new_rung --cfg job -p model.backbone
    ```
 
-Top-level files in `src/goal/configs/ml/` (for example `simurgh_gmd26.yaml`) are in the root package and do not need the header.
+Top-level files in `src/goal/configs/ml/` (for example `simurgh_legacy_gmd26.yaml`) are in the root package and do not need the header.
 
 The opposite problem affects the `src/goal/configs/hparams_search/*.yaml` presets. They have no header *and* already wrap their content in an `hparams_search:` key, so `+hparams_search=ray_tune` produces `cfg.hparams_search.hparams_search.method`, and `goal-tune` falls back to the default `method: tuner`. Append them with `+hparams_search@_global_=ray_tune` instead. See [CLI → goal-tune](cli.md#goal-tune).
 
@@ -342,7 +342,7 @@ The opposite problem affects the `src/goal/configs/hparams_search/*.yaml` preset
 Copy the closest existing file rather than starting from scratch. Every file is complete and documents its alternatives inline.
 
 ```bash
-cp src/goal/configs/ml/simurgh_gmd26.yaml src/goal/configs/ml/my_system.yaml
+cp src/goal/configs/ml/simurgh_legacy_gmd26.yaml src/goal/configs/ml/my_system.yaml
 # edit: experiment.*, task_name, data.*, atomic_energies, …
 pixi run -e cuda goal-train --config-name my_system --cfg job -p data   # check
 pixi run -e cuda goal-train --config-name my_system

@@ -23,7 +23,7 @@ from omegaconf import OmegaConf
 from torch_geometric.data import Batch
 
 from goal.ml.nn.blocks.adaptive_gate import AdaptiveDepthGate
-from goal.ml.nn.models.simurgh.arace import MonolithicArace
+from goal.ml.nn.models.simurgh.legacy.arace import MonolithicArace
 from tests.ml.simurgh.conftest import random_so3
 from tests.ml.simurgh.test_fragment_interaction import (
     ACTIVE_FRAGMENT_CONFIG,

@@ -10,7 +10,7 @@ benchmark datasets lazily in the ``DATASET_REGISTRY``::
 
 Or use via Hydra config::
 
-    goal-train --config-name nf_simurgh_md17
+    goal-train --config-name simurgh_legacy_nf_md17
 """
 
 from __future__ import annotations

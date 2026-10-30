@@ -17,8 +17,8 @@ from torch import nn
 
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-from goal.ml.nn.models.simurgh.arace import MonolithicArace
-from goal.ml.nn.models.simurgh.backbone_arace import SimurghAraceBackbone
+from goal.ml.nn.models.simurgh.legacy.arace import MonolithicArace
+from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
 from goal.ml.training.loss import CompositeLoss, GateRegLoss, WeightedLoss
 from goal.ml.training.module import GOALModule
 
@@ -81,7 +81,7 @@ def _graph() -> AtomicGraph:
 @pytest.mark.parametrize(
     ("factory", "n_gates"),
     [(_modular, 2 * N_PAIRS), (_monolithic, 2 * N_PAIRS), (_legacy, 3)],
-    ids=["simurgh_arace", "monolithic_arace", "legacy_simurgh"],
+    ids=["simurgh_legacy_arace", "simurgh_legacy_monolithic_arace", "legacy_simurgh"],
 )
 class TestGateValues:
     def test_gate_values_injected(self, factory, n_gates: int) -> None:

@@ -6,7 +6,7 @@ Typical use: a model trained on one chemical family (say monocarboxylic acids) t
 
 Source:
 [`goal.ml.adapters.simurgh_lora`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/adapters/simurgh_lora.py),
-config [`src/goal/configs/ml/finetune/simurgh_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_lora.yaml).
+config [`src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml).
 
 ## What it is
 
@@ -49,17 +49,17 @@ pip install "goal-atomistic[lora]"
 You need a trained SIMURGH/ARACE run and the new data as ExtXYZ (energy in `atoms.info["energy"]`, forces in `atoms.arrays["forces"]`; other formats work through `data.dataset_type`, see [Loading data](../ml/data/loading.md)).
 
 ```bash
-pixi run -e cuda goal-train --config-name finetune/simurgh_lora \
-    model.backbone.checkpoint_path=/abs/path/logs/simurgh_gmd26/runs/<run>/checkpoints \
+pixi run -e cuda goal-train --config-name finetune/simurgh_legacy_lora \
+    model.backbone.checkpoint_path=/abs/path/logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
     'data.train_paths=[data/dicarboxylic/train.xyz]' \
     'data.val_paths=[data/dicarboxylic/val.xyz]'
 ```
 
-`goal-finetune` takes the same overrides; its default config is `finetune/simurgh_lora`, so `--config-name` can be left out:
+`goal-finetune` takes the same overrides; its default config is `finetune/simurgh_legacy_lora`, so `--config-name` can be left out:
 
 ```bash
 pixi run -e cuda goal-finetune \
-    model.backbone.checkpoint_path=/abs/path/logs/simurgh_gmd26/runs/<run>/checkpoints \
+    model.backbone.checkpoint_path=/abs/path/logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
     'data.train_paths=[data/dicarboxylic/train.xyz]' \
     'data.val_paths=[data/dicarboxylic/val.xyz]'
 ```
@@ -86,7 +86,7 @@ print(atoms.get_potential_energy(), atoms.get_forces())
 from goal.ml.adapters.simurgh_lora import SIMURGHLoRAAdapter, SIMURGHLoRAConfig
 
 adapter = SIMURGHLoRAAdapter(
-    SIMURGHLoRAConfig(checkpoint_path="/abs/path/logs/simurgh_gmd26/runs/<run>/checkpoints", rank=8)
+    SIMURGHLoRAConfig(checkpoint_path="/abs/path/logs/simurgh_legacy_gmd26/runs/<run>/checkpoints", rank=8)
 )
 print(adapter.trainable_parameters(), "/", adapter.total_parameters())
 print(adapter.adapted_layers()[:3])
@@ -165,7 +165,7 @@ The config-driven form, registered lazily as backbone and model `simurgh_lora` i
 
 ## Configuration reference
 
-The backbone section of `finetune/simurgh_lora.yaml`:
+The backbone section of `finetune/simurgh_legacy_lora.yaml`:
 
 ```yaml
 model:
@@ -191,7 +191,7 @@ The other settings in the file that matter for fine-tuning:
 |---|---|---|
 | `data.dataset_type` | `xyz` | Any GOAL dataset type works |
 | `data.train_paths`, `data.val_paths` | `???` | Required |
-| `data.cutoff` | `8.0` | Must equal the base checkpoint's cutoff (`simurgh_gmd26` uses 8 Å) |
+| `data.cutoff` | `8.0` | Must equal the base checkpoint's cutoff (`simurgh_legacy_gmd26` uses 8 Å) |
 | `data.batch_size` | `4` | Small datasets |
 | `trainer.precision` | `"32"` | Match the base run; use `"64"` for a float64 checkpoint |
 | `trainer.inference_mode` | `false` | Required: forces need autograd during validation |

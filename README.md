@@ -69,10 +69,10 @@ git clone https://github.com/Nourollah/GOAL.git && cd GOAL
 **Train a potential** (SIMURGH on GMD-26, the default experiment). The commands below use a pixi environment from a clone; after a pip or conda install, drop the `pixi run -e cuda` prefix:
 
 ```bash
-pixi run -e cuda goal-train                                     # src/goal/configs/ml/simurgh_gmd26.yaml
-pixi run -e cuda goal-train --config-name nf_simurgh_md17       # pick another experiment
+pixi run -e cuda goal-train                                     # src/goal/configs/ml/simurgh_legacy_gmd26.yaml
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md17       # pick another experiment
 pixi run -e cuda goal-train trainer.max_epochs=100 data.batch_size=8   # override anything
-pixi run -e cuda goal-eval ckpt_path=logs/simurgh_gmd26/runs/<run>/checkpoints   # test-set metrics
+pixi run -e cuda goal-eval ckpt_path=logs/simurgh_legacy_gmd26/runs/<run>/checkpoints   # test-set metrics
 ```
 
 **Run MD with it** (inside `pixi shell -e cuda-full`, or any environment with the MD module):
@@ -92,7 +92,7 @@ dyn.run(1000)
 MD can also be driven config-first from the command line:
 
 ```bash
-pixi run -e cuda-full goal-simulate calculator.checkpoint=logs/simurgh_gmd26/runs/<run>/checkpoints steps=5000
+pixi run -e cuda-full goal-simulate calculator.checkpoint=logs/simurgh_legacy_gmd26/runs/<run>/checkpoints steps=5000
 pixi run -e cuda-full goal-simulate-batch --checkpoint <checkpoint> --structures frames.xyz   # many structures; one GPU batch on NVIDIA
 ```
 

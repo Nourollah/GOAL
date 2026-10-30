@@ -10,12 +10,12 @@ simply sum the populated channel; otherwise heads fall back to the
 standard scalar-readout pathway.
 
 This is the **legacy ACE-dressing-first** variant of SIMURGH
-(registered ``"simurgh"`` and, for clarity, also
-``"simurgh_ace_first"``).  The project **default** is now the ARACE
-architecture in ``goal.ml.nn.models.simurgh.backbone_arace``
-(``"simurgh_arace"``), where artisans are the primary computation at
+(registered ``"simurgh_legacy"`` and, for clarity, also
+``"simurgh_legacy_ace_first"``).  The project **default** is now the ARACE
+architecture in ``goal.ml.nn.models.simurgh.legacy.backbone_arace``
+(``"simurgh_legacy_arace"``), where artisans are the primary computation at
 every layer.  A fully self-contained monolithic counterpart of this
-class lives in ``goal.ml.nn.models.simurgh.monolithic``.
+class lives in ``goal.ml.nn.models.simurgh.legacy.monolithic``.
 """
 
 from __future__ import annotations
@@ -39,10 +39,10 @@ from goal.ml.nn.models.simurgh.geometry import differentiable_edges
 from goal.ml.registry import BACKBONE_REGISTRY, MODEL_REGISTRY
 
 
-@MODEL_REGISTRY.register("simurgh")
-@BACKBONE_REGISTRY.register("simurgh")
-@MODEL_REGISTRY.register("simurgh_ace_first")
-@BACKBONE_REGISTRY.register("simurgh_ace_first")
+@MODEL_REGISTRY.register("simurgh_legacy")
+@BACKBONE_REGISTRY.register("simurgh_legacy")
+@MODEL_REGISTRY.register("simurgh_legacy_ace_first")
+@BACKBONE_REGISTRY.register("simurgh_legacy_ace_first")
 class SimurghBackbone(nn.Module):
     """SIMURGH backbone — environment dressing + element-pair artisan bank.
 

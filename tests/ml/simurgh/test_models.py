@@ -18,7 +18,7 @@ from torch_geometric.data import Batch
 
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.nn.heads.dual_forces import DualForcesHead
-from goal.ml.nn.models.simurgh import SimurghBackbone, SimurghMonolithic
+from goal.ml.nn.models.simurgh.legacy import SimurghBackbone, SimurghMonolithic
 from tests.ml.simurgh.conftest import random_so3
 
 

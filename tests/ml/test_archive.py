@@ -67,7 +67,7 @@ def _tiny_config() -> DictConfig:
         {
             "model": {
                 "backbone": {
-                    "name": "simurgh",
+                    "name": "simurgh_legacy",
                     "elements": [1, 6],
                     "dressing_kwargs": dict(_DRESSING),
                     "artisan_config": dict(_ARTISAN),
@@ -97,7 +97,7 @@ def _tiny_config() -> DictConfig:
 def _build_module(cfg: DictConfig):
     """Construct a GOALModule exactly as the calculator rebuild would."""
     from goal.ml.nn.heads.dual_forces import DualForcesHead
-    from goal.ml.nn.models.simurgh.backbone import SimurghBackbone
+    from goal.ml.nn.models.simurgh.legacy.backbone import SimurghBackbone
     from goal.ml.training.loss import (
         CompositeLoss,
         EnergyLoss,
@@ -226,7 +226,7 @@ class TestFreezeAtTrainingStart:
 
         # The model's own source must be in the frozen closure
         frozen = tmp_path / FROZEN_SOURCE_DIRNAME
-        assert (frozen / "goal/ml/nn/models/simurgh/backbone.py").is_file()
+        assert (frozen / "goal/ml/nn/models/simurgh/legacy/backbone.py").is_file()
         assert (frozen / "goal/ml/nn/blocks/env_dressing.py").is_file()
         assert (frozen / "goal/ml/training/module.py").is_file()
         assert (frozen / "goal/__init__.py").is_file()
@@ -241,7 +241,7 @@ class TestFreezeAtTrainingStart:
 
     def test_config_is_resolved_yaml(self, trained_dir: Path) -> None:
         cfg = OmegaConf.load(trained_dir / "config.yaml")
-        assert cfg.model.backbone.name == "simurgh"
+        assert cfg.model.backbone.name == "simurgh_legacy"
         assert float(cfg.data.cutoff) == 5.0
 
     def test_resume_keeps_original_snapshot(self, tmp_path: Path) -> None:
@@ -270,7 +270,7 @@ class TestCodeChangeResilience:
         calc_before = GOALCalculator(checkpoint_path=str(trained_dir), checkpoint="best")
         energy_before, forces_before = _energy_and_forces(calc_before)
 
-        import goal.ml.nn.models.simurgh.backbone as live_backbone
+        import goal.ml.nn.models.simurgh.legacy.backbone as live_backbone
 
         live_path = Path(live_backbone.__file__)
         original = live_path.read_text()

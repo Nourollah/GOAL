@@ -122,7 +122,7 @@ Every `.ckpt` gets a `.json` sidecar with the same stem, deleted together with i
 ### A finished run directory
 
 ```text
-logs/simurgh_gmd26/runs/<run>/checkpoints/
+logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/
 ├── frozen_source/goal/...                         model source at t = 0
 ├── config.yaml                                    resolved config
 ├── metadata.json                                  provenance
@@ -156,10 +156,10 @@ Archives are written atomically. With `save_archive: true` the best top-k checkp
 
 ```bash
 pixi run -e cuda goal-pack-archive \
-    --checkpoint-dir logs/simurgh_gmd26/runs/<run>/checkpoints \
+    --checkpoint-dir logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
     --checkpoint best \
-    --output models/simurgh_gmd26.simurgh
-# Packed best_val_forces_forces_mae=0.0052_epoch=1440.ckpt -> models/simurgh_gmd26.simurgh
+    --output models/simurgh_legacy_gmd26.simurgh
+# Packed best_val_forces_forces_mae=0.0052_epoch=1440.ckpt -> models/simurgh_legacy_gmd26.simurgh
 ```
 
 | Flag | Default | Meaning |
@@ -175,8 +175,8 @@ The command exits with status 1 and a one-line `error:` message if the selector 
 `goal-inspect` describes a model **without building it**. It accepts all three formats:
 
 ```bash
-pixi run -e cuda goal-inspect models/simurgh_gmd26.simurgh          # archive
-pixi run -e cuda goal-inspect logs/simurgh_gmd26/runs/<run>/checkpoints/   # directory (also lists every .ckpt)
+pixi run -e cuda goal-inspect models/simurgh_legacy_gmd26.simurgh          # archive
+pixi run -e cuda goal-inspect logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/   # directory (also lists every .ckpt)
 pixi run -e cuda goal-inspect logs/.../checkpoints/last.ckpt        # bare checkpoint (+ its sidecar / directory metadata)
 ```
 
@@ -219,7 +219,7 @@ To reach the `GOALModule` itself (for evaluation, fine-tuning or feature extract
 ```python
 from goal.ml.utils.calculator import GOALCalculator
 
-calc = GOALCalculator(checkpoint_path="models/simurgh_gmd26.simurgh", device="cuda")
+calc = GOALCalculator(checkpoint_path="models/simurgh_legacy_gmd26.simurgh", device="cuda")
 module = calc.module          # GOALModule (backbone + head), eval mode, on `device`
 print(module.config.model.backbone.name)
 ```
@@ -241,12 +241,12 @@ from goal.ml.training.archive import (
     unpack_simurgh_archive,    # (archive_path, dest_dir) -> Path; rejects path-traversal members
 )
 
-info = inspect_checkpoint("models/simurgh_gmd26.simurgh")
+info = inspect_checkpoint("models/simurgh_legacy_gmd26.simurgh")
 print(info["format"], info["metadata"]["elements"], info["sidecar"]["epoch"])
 
 # Raw access to the weights / EMA shadow of an archive
 with tempfile.TemporaryDirectory() as tmp:
-    root = unpack_simurgh_archive("models/simurgh_gmd26.simurgh", tmp)
+    root = unpack_simurgh_archive("models/simurgh_legacy_gmd26.simurgh", tmp)
     raw = torch.load(root / "weights.pt", map_location="cpu", weights_only=False)
     print(raw.keys())          # state_dict, hyper_parameters, goal_ema (EMA runs, current code), ...
 ```

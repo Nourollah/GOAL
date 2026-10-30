@@ -58,7 +58,7 @@ class TestNormaliseRecompute:
 
 def _backbone() -> dict:
     return {
-        "name": "simurgh_arace",
+        "name": "simurgh_legacy_arace",
         "elements": [1, 6, 8],
         "scale": 0.25,
         "avg_num_neighbors": 17.5,

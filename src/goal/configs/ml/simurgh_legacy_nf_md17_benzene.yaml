@@ -3,7 +3,7 @@
 # Model  : NF_SIMURGH (Native Fragment SIMURGH) — monolithic ARACE
 #          rounds whose per-atom energies are pooled onto FRAGMENT
 #          VIRTUAL NODES, which then interact pairwise
-#          (see goal.ml.nn.models.simurgh.nf_simurgh)
+#          (see goal.ml.nn.models.simurgh.legacy.nf_simurgh)
 # Dataset: rMD17 benzene (revised MD17, PBE/def2-SVP DFT MD at 500 K)
 #
 # Self-contained config. Every parameter the project supports is
@@ -13,7 +13,7 @@
 #
 # EXPERIMENTAL. This is a research/ablation model.
 #
-# Derived from src/goal/configs/ml/nf_simurgh_gmd26_typecond.yaml — same model,
+# Derived from src/goal/configs/ml/simurgh_legacy_nf_gmd26_typecond.yaml — same model,
 # same artisan geometry, same virtual-node settings including
 # `vnode_type_conditioned: true`. What changes is the dataset and the
 # handful of numbers that are properties of it.
@@ -28,7 +28,7 @@
 #
 # K=1 means one virtual node, no pairs, and a fragment interaction term
 # that is identically zero on every batch. NF_SIMURGH with its
-# mechanism switched off IS `monolithic_arace`, which already exists as
+# mechanism switched off IS `simurgh_legacy_monolithic_arace`, which already exists as
 # its own backbone. This file will train, converge and report perfectly
 # reasonable numbers — they just will not be a test of this model.
 #
@@ -71,12 +71,12 @@
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "nf_simurgh_md17_benzene"
+  name: "simurgh_legacy_nf_md17_benzene"
   description: "NF_SIMURGH on rMD17 benzene — atom-level baseline; fragment channel is inert (K=1)"
   tags:
     [
-      "simurgh",
-      "nf_simurgh",
+      "simurgh_legacy",
+      "simurgh_legacy_nf",
       "arace",
       "md17",
       "rmd17",
@@ -89,7 +89,7 @@ seed: 42
 
 # task_name: used by Hydra to namespace the output directory.
 # Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
-task_name: "nf_simurgh_md17_benzene"
+task_name: "simurgh_legacy_nf_md17_benzene"
 
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
@@ -254,7 +254,7 @@ data:
   # fragment channel of the other SIMURGH configs, this is not a feature
   # that can be left off: with compute_fragment_index: false the model
   # raises at the first batch rather than silently degrading to
-  # atom-level-only (which would be `monolithic_arace` wearing a
+  # atom-level-only (which would be `simurgh_legacy_monolithic_arace` wearing a
   # different name, producing plausible numbers from the wrong model).
   #
   # The benchmark adapters in src/goal/ml/data/benchmarks/ accept these options
@@ -325,26 +325,26 @@ data:
   # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`, so
   # inert here. The aspirin patterns this file used to carry
   # (["[C:1](=O)-[O:2]", "c-[CX3]"]) match nothing in benzene and would
-  # silently leave K=1 anyway; see src/goal/configs/ml/nf_simurgh_md17_aspirin.yaml.
+  # silently leave K=1 anyway; see src/goal/configs/ml/simurgh_legacy_nf_md17_aspirin.yaml.
   fragment_smarts: null
 
 # ─────────────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────────────
 # backbone.name options:
-#   "nf_simurgh"         — NF_SIMURGH: ARACE rounds + fragment virtual
+#   "simurgh_legacy_nf"         — NF_SIMURGH: ARACE rounds + fragment virtual
 #                          nodes, monolithic (this file). EXPERIMENTAL.
-#   "monolithic_arace"   — SIMURGH ARACE monolithic, no virtual nodes.
+#   "simurgh_legacy_monolithic_arace"   — SIMURGH ARACE monolithic, no virtual nodes.
 #                          The direct baseline for this file. No MD17
 #                          config for it exists yet; copy this one,
 #                          change backbone.name, and delete the whole
 #                          virtual_node: block (it is not a key that
 #                          backbone understands).
-#   "simurgh_arace"      — DEFAULT: same ARACE rounds, modular
-#                          (backbone + head; see src/goal/configs/ml/simurgh_gmd26.yaml)
-#   "simurgh"            — legacy ACE-dressing-first artisan-bank model
-#                          (alias: "simurgh_ace_first")
-#   "simurgh_monolithic" — legacy SIMURGH without backbone/head split
+#   "simurgh_legacy_arace"      — DEFAULT: same ARACE rounds, modular
+#                          (backbone + head; see src/goal/configs/ml/simurgh_legacy_gmd26.yaml)
+#   "simurgh_legacy"            — legacy ACE-dressing-first artisan-bank model
+#                          (alias: "simurgh_legacy_ace_first")
+#   "simurgh_legacy_monolithic" — legacy SIMURGH without backbone/head split
 #   "hyperspec"          — E(3)-equivariant GNN (HyperSpec)
 #   "invariant_gnn"      — invariant SchNet-like GNN
 #   "monolithic_example" — minimal reference monolithic model
@@ -373,11 +373,11 @@ data:
 # pooling reproduces the atom-level energy exactly, by construction, not
 # because a residual happens to stay small. The ONLY new physics is the
 # step-5 correction — and it starts at exactly zero, so at
-# initialisation this model IS monolithic_arace, numerically.
+# initialisation this model IS simurgh_legacy_monolithic_arace, numerically.
 # ─────────────────────────────────────────────────────
 model:
   backbone:
-    name: nf_simurgh
+    name: simurgh_legacy_nf
 
     # Neighbour cutoff radius (Å) — must match data.cutoff.
     cutoff: ${data.cutoff}
@@ -385,9 +385,9 @@ model:
     # ── Elements ────────────────────────────────────────────────────
     # UNLIKE EVERY OTHER SIMURGH CONFIG, THIS ONE MUST BE SET BY HAND.
     # train.py auto-extracts elements from the training set only for a
-    # hard-coded list of backbone names (simurgh, simurgh_ace_first,
-    # simurgh_arace, simurgh_monolithic, monolithic_arace) — see
-    # src/goal/ml/cli/train.py. "nf_simurgh" is not in that list, and
+    # hard-coded list of backbone names (simurgh, simurgh_legacy_ace_first,
+    # simurgh_legacy_arace, simurgh_legacy_monolithic, simurgh_legacy_monolithic_arace) — see
+    # src/goal/ml/cli/train.py. "simurgh_legacy_nf" is not in that list, and
     # adding it is a change to shared code this model does not make.
     #
     # GETTING THIS WRONG IS SILENT: an edge whose element pair has no
@@ -491,7 +491,7 @@ model:
     # times more rows than can ever be gathered.
     correlation: 3
 
-    # ── ARACE stacking (identical to monolithic_arace) ──────────────
+    # ── ARACE stacking (identical to simurgh_legacy_monolithic_arace) ──────────────
     # Each round = one artisan layer (per-element-pair equivariant
     # artisans on edges) + one ACE block (edge → node aggregation with
     # equivariant linear + residual + RMS norm):
@@ -511,7 +511,7 @@ model:
     # Mean neighbours per atom for the ACE aggregation normalisation
     # (message_sum / sqrt(avg_num_neighbors), as in MACE).
     # null = no normalisation. train.py auto-injects this only for
-    # "simurgh_arace", so set a number here to enable it.
+    # "simurgh_legacy_arace", so set a number here to enable it.
     #
     # 10.8300 = mean degree at cutoff 5.0 Å over all 950 training
     # frames of rMD17 benzene (measured, not estimated; 130 edges per
@@ -579,7 +579,7 @@ model:
       # the threshold anyway — the bank is 6 pairs, all of them common —
       # so switching it on would build no rare artisan and only add a
       # pass over the training split to count pairs. Turn it on when the
-      # element set grows; see src/goal/configs/ml/nf_simurgh_omol25.yaml, where
+      # element set grows; see src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml, where
       # 2,628 pairs make it the difference between 2.3 B parameters and
       # 84 M.
       rare_artisan:
@@ -605,7 +605,7 @@ model:
     # RUNS. None of them switches the virtual-node machinery off; there
     # is no such switch, and the model raises if you invent one
     # (`use_fragments`, `enable_virtual_nodes`, `init_zero`, ...).
-    # NF_SIMURGH without virtual nodes is `monolithic_arace`, which
+    # NF_SIMURGH without virtual nodes is `simurgh_legacy_monolithic_arace`, which
     # already exists — run that instead.
     virtual_node:
       # ── node construction (REPRESENTATION only) ───────────────────
@@ -666,7 +666,7 @@ model:
 
       # NOTE: there is no `init_zero` key. Zero-init of the correction
       # readout is a design invariant — it is what makes a fresh
-      # NF_SIMURGH numerically identical to monolithic_arace, and the
+      # NF_SIMURGH numerically identical to simurgh_legacy_monolithic_arace, and the
       # reduction test depends on it — not a configurable option.
 
       # ── l>0 pooled invariants ─────────────────────────────────────
@@ -708,7 +708,7 @@ model:
       # Turn on only if the diagnostics suggest specialisation is
       # missing.
       #
-      # ══ ON by inheritance from nf_simurgh_gmd26_typecond.yaml ══
+      # ══ ON by inheritance from simurgh_legacy_nf_gmd26_typecond.yaml ══
       # and it earns its place here for the same structural reason.
       #
       # `rotatable` cuts aspirin into fragments of sizes
@@ -1186,7 +1186,7 @@ callbacks:
 # data.monitor_test_during_training is on, otherwise only by an explicit
 # trainer.test() run).  Select on val_*, read test_*.
 #
-# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+# Full section reference: src/goal/configs/ml/simurgh_legacy_gmd26.yaml
 #
 # Multiple loggers can be active simultaneously.
 # Metrics are logged to all enabled loggers.
@@ -1220,7 +1220,8 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags: ["simurgh", "nf_simurgh", "md17", "rmd17", "experimental"]
+    tags:
+      ["simurgh_legacy", "simurgh_legacy_nf", "md17", "rmd17", "experimental"]
 
   # TensorBoard:
   # tensorboard:

@@ -92,20 +92,20 @@ run with `goal-train --config-name <name>`.
 
 | Config | Backbone | Dataset | Notes |
 |---|---|---|---|
-| `simurgh_md17` | `simurgh` | rMD17 aspirin | `elements` and `avg_num_neighbors` derived from data automatically |
+| `simurgh_legacy_md17` | `simurgh_legacy` | rMD17 aspirin | `elements` and `avg_num_neighbors` derived from data automatically |
 | `hyperspec_md17` | `hyperspec` | rMD17 aspirin | fixed 120-entry embedding, nothing to sync |
-| `nf_simurgh_md17` | `nf_simurgh` | rMD17 aspirin | `custom` fragment cuts → K = 3 (ring + ester O, acetyl, carboxyl) |
-| `nf_simurgh_md17_benzene` | `nf_simurgh` | rMD17 benzene | K = 1 under every scheme, so the virtual-node channel is inert: an atom-level baseline |
-| `nf_simurgh_md22` | `nf_simurgh` | MD22 Ac-Ala3-NHMe | `custom` cuts → K = 5 (two caps + three alanine residues) |
-| `nf_simurgh_qm9` | `nf_simurgh` | QM9 `u0` | energy only, one training stage, selects on an energy metric |
-| `simurgh_simplified_routed_md17` | `simurgh_simplified_routed` | rMD17 aspirin | see [SIMURGH Simplified](../models/simurgh-simplified.md) |
-| `simurgh_simplified_monolithic_md17` | `simurgh_simplified_monolithic` | rMD17 aspirin | see [SIMURGH Simplified](../models/simurgh-simplified.md) |
+| `simurgh_legacy_nf_md17` | `simurgh_legacy_nf` | rMD17 aspirin | `custom` fragment cuts → K = 3 (ring + ester O, acetyl, carboxyl) |
+| `simurgh_legacy_nf_md17_benzene` | `simurgh_legacy_nf` | rMD17 benzene | K = 1 under every scheme, so the virtual-node channel is inert: an atom-level baseline |
+| `simurgh_legacy_nf_md22` | `simurgh_legacy_nf` | MD22 Ac-Ala3-NHMe | `custom` cuts → K = 5 (two caps + three alanine residues) |
+| `simurgh_legacy_nf_qm9` | `simurgh_legacy_nf` | QM9 `u0` | energy only, one training stage, selects on an energy metric |
+| `simurgh_legacy_simplified_routed_md17` | `simurgh_legacy_simplified_routed` | rMD17 aspirin | see [SIMURGH Simplified](../models/simurgh-simplified.md) |
+| `simurgh_legacy_simplified_monolithic_md17` | `simurgh_legacy_simplified_monolithic` | rMD17 aspirin | see [SIMURGH Simplified](../models/simurgh-simplified.md) |
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_md17
-pixi run -e cuda goal-train --config-name nf_simurgh_md17       # rMD17 aspirin, energy + forces
-pixi run -e cuda goal-train --config-name nf_simurgh_md22       # MD22 Ac-Ala3-NHMe (42 atoms)
-pixi run -e cuda goal-train --config-name nf_simurgh_qm9        # QM9 U0, energy only
+pixi run -e cuda goal-train --config-name simurgh_legacy_md17
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md17       # rMD17 aspirin, energy + forces
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md22       # MD22 Ac-Ala3-NHMe (42 atoms)
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_qm9        # QM9 U0, energy only
 ```
 
 The MD17-family configs that monitor the test split set `test_size: 50`.
@@ -116,12 +116,12 @@ dominate the run.
 ## Switching molecules
 
 For backbones that derive their element-dependent settings from the training
-set (`simurgh_md17`, `hyperspec_md17`), changing the molecule is one
+set (`simurgh_legacy_md17`, `hyperspec_md17`), changing the molecule is one
 override:
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_md17 data.molecule=ethanol
-pixi run -e cuda goal-train --config-name simurgh_md17 data.molecule=aspirin data.revised=false   # original MD17
+pixi run -e cuda goal-train --config-name simurgh_legacy_md17 data.molecule=ethanol
+pixi run -e cuda goal-train --config-name simurgh_legacy_md17 data.molecule=aspirin data.revised=false   # original MD17
 ```
 
 rMD17 molecules: `aspirin`, `azobenzene`, `benzene`, `ethanol`,
@@ -135,7 +135,7 @@ hard-code values that depend on the molecule:
 
 | What | Why it must change | How to get it |
 |---|---|---|
-| `model.backbone.elements` (`nf_simurgh`) | one artisan per element pair; an edge whose pair has no artisan is zero-masked, so it **contributes zero energy silently** | table below, or `compute_unique_elements` |
+| `model.backbone.elements` (`simurgh_legacy_nf`) | one artisan per element pair; an edge whose pair has no artisan is zero-masked, so it **contributes zero energy silently** | table below, or `compute_unique_elements` |
 | `model.backbone.avg_num_neighbors` | message normaliser; depends on molecule **and** cutoff | `compute_avg_num_neighbors` |
 | `data.fragment_smarts` / `fragment_keep_groups` (`custom` scheme) | the cuts are written for one molecule's chemistry | inspect, e.g. with the fragment views in the notebooks |
 | `data.batch_size` | memory scales with edges per batch | count edges, not structures |
@@ -171,7 +171,7 @@ print("avg_num_neighbors:", round(compute_avg_num_neighbors(ds), 4))
 Then:
 
 ```bash
-pixi run -e cuda goal-train --config-name nf_simurgh_md22 data.molecule=AT-AT \
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md22 data.molecule=AT-AT \
     'model.backbone.elements=[1,6,7,8]' model.backbone.avg_num_neighbors=<measured> \
     data.train_size=3000
 ```
@@ -188,7 +188,7 @@ MD22 molecules and their default (sGDML paper) training sizes:
 | `buckyball-catcher` | 148 | 6,102 | 600 |
 | `double-walled_nanotube` | 370 | 5,032 | 800 |
 
-`nf_simurgh_md22.yaml` sets `train_size: 6000` explicitly. When you switch
+`simurgh_legacy_nf_md22.yaml` sets `train_size: 6000` explicitly. When you switch
 molecules, override it, or the loader raises because `train_size + val_size`
 exceeds the frame count. The MD22 reader checks the `e_unit`/`r_unit`
 declared in each `.npz` and the expected atom count rather than assuming
@@ -204,18 +204,18 @@ them together differs:
 | Config | Model cutoff | Safe override |
 |---|---|---|
 | `nf_simurgh_*`, `simurgh_simplified_*` | `cutoff: ${data.cutoff}` | `data.cutoff=6.0`, then re-measure `avg_num_neighbors` |
-| `simurgh_md17` | `model.backbone.dressing_kwargs.cutoff: 5.0` (not interpolated) | `data.cutoff=6.0 model.backbone.dressing_kwargs.cutoff=6.0` |
+| `simurgh_legacy_md17` | `model.backbone.dressing_kwargs.cutoff: 5.0` (not interpolated) | `data.cutoff=6.0 model.backbone.dressing_kwargs.cutoff=6.0` |
 | `hyperspec_md17` | `model.backbone.cutoff: 5.0` (not interpolated) | `data.cutoff=6.0 model.backbone.cutoff=6.0` |
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_md17 data.cutoff=6.0 model.backbone.dressing_kwargs.cutoff=6.0
+pixi run -e cuda goal-train --config-name simurgh_legacy_md17 data.cutoff=6.0 model.backbone.dressing_kwargs.cutoff=6.0
 ```
 
 A new cutoff also means a new processed cache (it is part of the key), and
 more edges per structure, so revisit `batch_size`.
 
 > [!NOTE]
-> `simurgh_md17` sets `dressing_kwargs.num_elements: 9`, an embedding table
+> `simurgh_legacy_md17` sets `dressing_kwargs.num_elements: 9`, an embedding table
 > covering Z ≤ 8. That is enough for every MD17 molecule, but not for QM9
 > (F, Z = 9). Raise it if you point this config at data with heavier
 > elements.
@@ -232,7 +232,7 @@ it is stored as the graph's `energy` (in eV for the energy-like targets):
 all 19 as separate graph attributes (with `u0` as `energy`) for multi-property
 heads.
 
-A force-trained config cannot simply be pointed at QM9. `nf_simurgh_qm9`
+A force-trained config cannot simply be pointed at QM9. `simurgh_legacy_nf_qm9`
 shows the changes needed:
 
 - the `forces` loss is removed and the stage curriculum collapses to one
@@ -247,11 +247,11 @@ shows the changes needed:
 > `QM9Dataset` (like `ANI1Dataset` and `SPICEDataset`) does not convert a
 > string `data.dtype` into a `torch.dtype`, unlike the MD17 and MD22
 > loaders. Building the QM9 cache from scratch with `dtype: float64` in the
-> config (as `nf_simurgh_qm9.yaml` has) fails with
+> config (as `simurgh_legacy_nf_qm9.yaml` has) fails with
 > `Invalid device string: 'float64'`. An existing cache loads fine. Until the
 > loader is fixed, build the cache once without the key (float64 is the
 > default anyway):
-> `goal-train --config-name nf_simurgh_qm9 '~data.dtype'`.
+> `goal-train --config-name simurgh_legacy_nf_qm9 '~data.dtype'`.
 
 ## ANI-1 / ANI-1x and SPICE
 

@@ -35,7 +35,7 @@ Two layers live in this module:
 
 Because a whole OMol25 split is far larger than any single run needs, the
 filter arguments are the primary interface; see
-``src/goal/configs/ml/nf_simurgh_omol25.yaml`` for a worked example.
+``src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml`` for a worked example.
 """
 
 from __future__ import annotations

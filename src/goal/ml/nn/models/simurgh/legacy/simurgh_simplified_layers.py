@@ -18,10 +18,10 @@ This module holds everything the two registered models share — the
 shared input, the three line skeletons, the processing units, the
 readouts and the base model — so that
 
-* ``simurgh_simplified_monolithic``
-  (:mod:`~goal.ml.nn.models.simurgh.simurgh_simplified_monolithic`) and
-* ``simurgh_simplified_routed``
-  (:mod:`~goal.ml.nn.models.simurgh.simurgh_simplified_routed`)
+* ``simurgh_legacy_simplified_monolithic``
+  (:mod:`~goal.ml.nn.models.simurgh.legacy.simurgh_simplified_monolithic`) and
+* ``simurgh_legacy_simplified_routed``
+  (:mod:`~goal.ml.nn.models.simurgh.legacy.simurgh_simplified_routed`)
 
 differ in **exactly one thing**: the processor plugged into each line's
 slot.  The monolithic model fills every slot with a single stack; the

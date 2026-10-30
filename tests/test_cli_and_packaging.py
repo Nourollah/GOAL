@@ -72,9 +72,9 @@ def test_new_commands_are_registered() -> None:
     ("module", "config_name"),
     [
         ("goal.ml.cli.evaluate", "eval"),
-        ("goal.ml.cli.tune", "simurgh_gmd26_hpo"),
-        ("goal.ml.cli.finetune", "finetune/simurgh_lora"),
-        ("goal.ml.cli.train", "simurgh_gmd26"),
+        ("goal.ml.cli.tune", "simurgh_legacy_gmd26_hpo"),
+        ("goal.ml.cli.finetune", "finetune/simurgh_legacy_lora"),
+        ("goal.ml.cli.train", "simurgh_legacy_gmd26"),
     ],
 )
 def test_default_configs_exist(module: str, config_name: str) -> None:

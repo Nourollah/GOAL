@@ -157,7 +157,7 @@ The README lists these in full (§7). The ones that most limit interpretation:
 4. **The pair gate requires the per-round readout,** so the model refuses `pair_gate` without `readout: pair_per_round`, and rung 08's baseline is 07.
 5. **One dataset.** GMD-26 has H/C/O carboxylic acids and only 6 element pairs.
 6. **The fragment channel is intramolecular here.** Every GMD frame is one connected molecule, so all rungs use the `custom` SMARTS cut into CH3/CH2/COOH.
-7. **Dead parameters in `pair_per_round` mode.** The last round's update block gets no gradient. This reproduces production `simurgh_arace`. Do not run rungs 07/08 under DDP with `find_unused_parameters: false`.
+7. **Dead parameters in `pair_per_round` mode.** The last round's update block gets no gradient. This reproduces production `simurgh_legacy_arace`. Do not run rungs 07/08 under DDP with `find_unused_parameters: false`.
 
 ## Adding a rung
 

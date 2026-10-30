@@ -69,7 +69,7 @@ from goal.ml.utils.extraction import (
 )
 
 # Load from the run's frozen source (archive or checkpoint directory).
-calc = GOALCalculator(checkpoint_path="models/simurgh_gmd26.simurgh")
+calc = GOALCalculator(checkpoint_path="models/simurgh_legacy_gmd26.simurgh")
 module = calc.module
 backbone = module.backbone
 describe_irreps(str(backbone.irreps_out))          # e.g. 16x0e+16x1o+16x2e

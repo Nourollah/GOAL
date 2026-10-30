@@ -82,7 +82,7 @@ outputs:
             - python ${{ python_min }}.*
         script:
           - goal-train --cfg job -p model.backbone.name
-          - goal-train --config-name nf_simurgh_md17 --cfg job -p data.dataset_type
+          - goal-train --config-name simurgh_legacy_nf_md17 --cfg job -p data.dataset_type
 
   - package:
       name: goal-atomistic-md

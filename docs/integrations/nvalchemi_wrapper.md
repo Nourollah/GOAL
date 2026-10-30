@@ -50,7 +50,7 @@ from nvalchemi.dynamics.hooks import NaNDetectorHook
 
 from goal.ml.adapters.nvalchemi_wrapper import SIMURGHNvalchemiWrapper
 
-model = SIMURGHNvalchemiWrapper("logs/simurgh_gmd26/runs/<run>/checkpoints", device="cuda")
+model = SIMURGHNvalchemiWrapper("logs/simurgh_legacy_gmd26/runs/<run>/checkpoints", device="cuda")
 dtype = next(model.parameters()).dtype         # build the batch in the model's precision
 
 datas = []

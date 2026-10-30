@@ -1,15 +1,15 @@
 ########################################################
 # GOAL ML Hyperparameter-Optimisation Configuration
-# Model  : SIMURGH ARACE (simurgh_arace) — default architecture
+# Model  : SIMURGH ARACE (simurgh_legacy_arace) — default architecture
 # Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
 #
-# Composes the base experiment config (simurgh_gmd26.yaml) and adds a
+# Composes the base experiment config (simurgh_legacy_gmd26.yaml) and adds a
 # Ray Tune search space over the ARACE hyperparameters.  Uses the
 # project's standard hparams_search format (see
 # src/goal/configs/hparams_search/ray_tune.yaml for the schema reference).
 #
 # Run with:
-#   goal-tune --config-dir src/goal/configs/ml --config-name simurgh_gmd26_hpo
+#   goal-tune --config-dir src/goal/configs/ml --config-name simurgh_legacy_gmd26_hpo
 # Requires: pip install -e '.[tune]'   (ray[tune] + optuna)
 #
 # NOTE — the goal-tune entry point builds the model directly from the
@@ -20,10 +20,10 @@
 ########################################################
 
 defaults:
-  - simurgh_gmd26
+  - simurgh_legacy_gmd26
   - _self_
 
-task_name: "simurgh_gmd26_hpo"
+task_name: "simurgh_legacy_gmd26_hpo"
 
 model:
   backbone:

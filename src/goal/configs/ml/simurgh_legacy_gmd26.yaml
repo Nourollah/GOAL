@@ -1,53 +1,56 @@
 ########################################################
 # GOAL ML Experiment Configuration
-# Model  : SIMURGH Simplified — Monolithic (fully simplified)
-#          Three parallel lines (atom / pair / fragment) over one
-#          shared input, combined only at the readout. Every line's
-#          processor is ONE monolithic stack of simple equivariant layers:
-#          no artisans, no routing, no experts.
-#          (see goal.ml.nn.models.simurgh.simurgh_simplified_monolithic)
-# Dataset: GMD-26 FragmentDuplication (O2CnH2n, PBE/def2-SVP DFT)
+# Model  : SIMURGH — DEFAULT: ARACE architecture
+#          (ARtisan + Atomic Cluster Expansion, modular)
+#          nodes → [artisan layer → ACE block] × N rounds → E, F
+# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
 #
-# Self-contained config. It does NOT inherit from, interpolate into, or
-# share keys with any other config file.
+# ── SWITCHING BETWEEN THE TWO SIMURGH ARCHITECTURES ──
+# The architecture is selected purely by model.backbone.name:
 #
-# ABLATION BASELINE for src/goal/configs/ml/simurgh_simplified_routed_gmd26.yaml.
-# The two files are IDENTICAL except for model.backbone.name and the two
-# routed-only sections (artisan:, fragment_experts:) — a test
-# (tests/ml/simurgh/test_simurgh_simplified.py) fails if any other
-# backbone key drifts between them. Data, optimiser, loss, schedule and
-# checkpointing are the same text.
+#   ARACE (default, this file)
+#     model.backbone.name: simurgh_legacy_arace
+#     Potential artisans are the PRIMARY computation at every layer;
+#     an ACE block aggregates the artisan edge features back onto
+#     nodes between artisan layers.  Per-round energy decomposition.
 #
-# EXPERIMENTAL research model.
+#   ACE-first (legacy)
+#     model.backbone.name: simurgh_legacy        # alias: simurgh_legacy_ace_first
+#     ACE-style environment dressing runs FIRST; the artisan bank is
+#     an auxiliary readout at the end.  The legacy backbone uses
+#     different config keys (dressing_kwargs / artisan_config) — use
+#     the ready-made legacy experiment file instead of editing this
+#     one:  goal-train --config-name simurgh_legacy_ace_first_gmd26
+#
+#   Monolithic ARACE (research / ablation)
+#     model.backbone.name: simurgh_legacy_monolithic_arace  with  head: null
+#     Same physics as simurgh_legacy_arace but self-contained (computes its
+#     own forces):  goal-train --config-name simurgh_legacy_monolithic_arace_gmd26
+#
+# Self-contained config. Every parameter the project supports is
+# listed here — either set to its value for this experiment, or
+# documented in comments showing what else is available.
+# No other file needs to be opened to understand what is possible.
 ########################################################
 
 # ─────────────────────────────────────────────────────
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "simurgh_simplified_monolithic_gmd26"
-  description: "SIMURGH Simplified Monolithic — three monolithic equivariant lines, additive readout (ablation baseline)"
-  tags:
-    [
-      "simurgh",
-      "simurgh_simplified",
-      "monolithic",
-      "gmd",
-      "fragment_duplication",
-      "experimental",
-      "ablation",
-    ]
+  name: "simurgh_legacy_gmd26"
+  description: "SIMURGH ARACE on GMD-26 FragmentDuplication (HCO elements)"
+  tags: ["simurgh_legacy", "arace", "gmd", "fragment_duplication"]
 
 seed: 42
 
 # task_name: used by Hydra to namespace the output directory.
 # Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
-task_name: "simurgh_simplified_monolithic_gmd26"
+task_name: "simurgh_legacy_gmd26"
 
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
 # Example: "fragment_duplication" → 2026-06-02_18-30_trajectory_simurgh_fragment_duplication
-run_name_suffix: "" # prepend "_"; set to "" for no suffix
+run_name_suffix: "_fragment_duplication" # prepend "_"; set to "" for no suffix
 
 # run_name: leaf of the log directory AND the W&B run name — always in sync.
 # Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
@@ -159,12 +162,14 @@ data:
   energy_key: energy # key in ASE atoms.info / ExtXYZ properties
   forces_key: forces # key in ASE atoms.arrays / ExtXYZ arrays
 
-  # Custom label keys (MACE/FairChem-style) — overrides the *_key lines above.
-  # Missing configured key → clear error listing the keys present in the file.
+  # Custom label keys (MACE/FairChem-style). If your file stores the labels
+  # under different names, map them here — this overrides the *_key entries
+  # above. A configured key missing from a frame raises a clear error listing
+  # the keys that ARE present (instead of silently dropping the label).
   # key_mapping:
-  #   energy: REF_energy
-  #   forces: REF_forces
-  #   stress: virial
+  #   energy: REF_energy   # -> atoms.info["REF_energy"]
+  #   forces: REF_forces   # -> atoms.arrays["REF_forces"]
+  #   stress: virial       # -> atoms.info["virial"]
 
   # Merge strategy for multi-file splits (Mode 2/3/4)
   # "sequential" — concatenate in sorted order (reproducible)
@@ -175,174 +180,260 @@ data:
   split_ratio: [0.8, 0.1, 0.1]
   split_seed: 97
 
-  # ══ FRAGMENT LABELS — MANDATORY FOR THIS MODEL ═══════════════════
-  # The fragment line builds its virtual nodes from these labels and
-  # ALWAYS runs: with compute_fragment_index: false the model raises at
-  # the first batch instead of silently dropping a line.
+  # ── Fragment labels (for model.backbone.fragment_interaction) ─────
+  # compute_fragment_index: attach a (N,) int64 `fragment_index` to every
+  # graph — connected-component labels under a SHORT covalent cutoff, so
+  # separate molecules get separate labels even though they sit inside the
+  # (much longer) interaction cutoff above.  Requires no supervision: the
+  # labels are a pure function of the geometry.
   #
-  # Attaches (N,) int64 labels to every graph, computed once at
-  # dataset-load time and renumbered per graph during batching.
+  #   one connected molecule   → K = 1 label   → module is a no-op
+  #   two separated fragments  → K = 2 labels  → they exchange messages
+  #   N isolated atoms         → K = N labels  → all-pairs (see max_fragments)
+  #
+  # Computed ONCE at dataset-load time (never in the training loop) and
+  # renumbered per graph during batching, so labels never collide across
+  # structures in a mini-batch.  Left `true` even though this file ships
+  # with the fragment channel disabled, so enabling it is a one-line
+  # uncomment and nothing else: the cost is a one-off O(N²) distance scan
+  # per frame at load, negligible next to the neighbour list.  Set `false`
+  # to skip it entirely when no run will need labels.
   compute_fragment_index: true
 
-  # Bond threshold for the distance-graph part of the decomposition (Å).
+  # fragment_covalent_cutoff: bond threshold in Å.  1.8 Å covers the
+  # covalent bonds of light elements (C-C 1.54, C-H 1.09, O-H 0.96,
+  # C=O 1.21) while staying below any non-bonded contact.  Raise towards
+  # ~2.4 Å for metal-ligand bonds (e.g. MOF nodes); lower it to split
+  # weakly-bound fragments apart.  Periodic structures are handled with
+  # the minimum image convention, so a molecule straddling a cell
+  # boundary stays one fragment.
   fragment_covalent_cutoff: 1.8
 
   # ── fragment_scheme: HOW a structure is split ─────────────────────
-  #   connected        distance graph (no rdkit, PBC-correct, never fails)
-  #   rdkit_components components of the perceived molecule
-  #   rotatable        non-ring single bonds → CH3/CH2/COOH groups
-  #   brics            BRICS retrosynthetic rules
-  #   recap            RECAP cleavage rules
-  #   custom           cut exactly the bonds named in fragment_smarts
+  # Measured on this dataset's own molecules (butanoic acid, 14 atoms /
+  # decanoic acid, 32 atoms — GMD structures are single covalently
+  # connected acids, NOT separated fragments despite the subset names):
   #
-  # `connected` IS THE WRONG CHOICE HERE: every GMD structure is one
-  # covalently connected acid, so it gives K=1 — one virtual node, no
-  # fragment pairs, and a fragment line that only ever sees itself.
+  #   scheme             rdkit?  K on C4 acid  K on C10 acid  splits on
+  #   ------------------ ------  ------------  -------------  ----------------
+  #   connected            no          1              1       distance < cutoff
+  #   rdkit_components     yes         1              1       perceived bonds
+  #   rotatable            yes         5             11       non-ring single
+  #                                                           bonds (CH2 groups)
+  #   brics                yes         2              2       retrosynthetic
+  #                                                           rules — snips -OH
+  #   recap                yes         3              3       RECAP rules
   #
-  # `custom` with the two patterns below cuts each acid into chemical
-  # groups (measured on this dataset):
-  #   butanoic acid (C4, 14 atoms)  → K= 4  sizes [4,3,3,4]
-  #   decanoic acid (C10, 32 atoms) → K=10  = [COOH] + 8x[CH2] + [CH3]
-  # Centroid separations reach ~9.8 Å, beyond the 8 Å atom cutoff — the
-  # range only the fragment line covers (vnode_cutoff 15 Å below).
+  # WHICH TO PICK
+  #   connected — fragments are physically separate MOLECULES, so the
+  #     model's fragment channel represents genuine non-bonded
+  #     interaction.  The only scheme that needs no chemistry perception,
+  #     handles PBC correctly, and never fails (radicals, ions, metals).
+  #     On a single connected molecule it gives K=1 and the fragment
+  #     module is an exact no-op — which is the case for ALL GMD subsets.
+  #   rotatable — cuts one molecule into chemically meaningful groups
+  #     (CH3/CH2/COOH), turning the fragment channel into a COARSE-GRAINED
+  #     INTRAMOLECULAR pathway: pooled groups talk directly instead of
+  #     atom-by-atom along the chain.  Most useful when the fragment
+  #     cutoff exceeds the atom cutoff so the two ends of a long chain
+  #     couple in one step (for decanoic acid, 8 of 55 centroid pairs sit
+  #     beyond 8 Å — exactly the ones local message passing cannot see).
+  #   brics / recap — retrosynthetic disconnections (amide, ester, ether,
+  #     C-N).  Saturated chains have almost none, so both are nearly
+  #     no-ops here; they earn their keep on functionalised chemistry.
+  #   rdkit_components — connected components of the *perceived* molecule.
+  #     Normally identical to `connected`; kept so you can verify that,
+  #     and so bond perception rather than a distance threshold decides
+  #     what counts as bonded.
+  #
+  # COST: the four rdkit schemes run bond perception (xyz2mol) once per
+  # distinct topology, cached on the bond graph — an MD trajectory whose
+  # connectivity never changes pays for it once, not once per frame.
+  # CAVEAT: perception is not periodic-aware; a molecule wrapped across a
+  # cell boundary may be split (a warning is emitted).  `connected` is
+  # the only PBC-correct scheme.
+  #
+  # THIS RUN: `custom`, so the fragments are exactly the groups named in
+  # fragment_smarts below — one per CH2, one per CH3, one for the COOH.
   fragment_scheme: custom
 
   # Total charge handed to rdkit's bond perception (rdkit schemes only).
+  # Wrong here means perception fails or invents bond orders — set it for
+  # ionic systems.
   fragment_charge: 0
 
-  # "fallback" — warn ONCE and use `connected` for that structure
-  # "raise"    — stop the run (a silent fallback would give K=1 and bias
-  #              the comparison)
+  # What to do when perception fails (radical, odd valence, distorted MD
+  # frame mid-bond-breaking):
+  #   "fallback" — warn ONCE and use `connected` for that structure
+  #   "raise"    — stop the run; use this when a silently degraded
+  #                decomposition would invalidate the experiment
   fragment_on_failure: raise
 
-  # SMARTS whose matched atoms must stay in one fragment. null = none.
-  fragment_keep_groups: null
+  # ── HINTING: telling the fragmenter about your chemistry ──────────
+  # BRICS/RECAP rules are hard-coded inside rdkit — no settings file, and
+  # patching its module globals is process-wide and version-fragile — so
+  # the hints live here instead, versioned with the experiment.
+  #
+  # fragment_keep_groups: SMARTS whose matched atoms MUST end up in the
+  # same fragment.  Works with EVERY scheme, in two ways: a bond is never
+  # cut when both ends lie inside one match, and the final labels are
+  # merged so the guarantee holds even if the base scheme had already
+  # separated them.  Overlapping groups merge transitively.
+  #
+  #   measured on decanoic acid (this dataset's C10 molecule):
+  #     rotatable                     K=11  [4,3,3,3,3,3,3,3,3,2,2]
+  #     rotatable + keep "C(=O)O"     K=10  [4,4,3,3,3,3,3,3,3,3]
+  #                                   ^ carboxyl held as one 4-atom unit
+  #                                     instead of shedding its OH
+  #     brics                         K= 2  [30,2]
+  #     brics     + keep "C(=O)O"     K= 1  [32]
+  #                                   ^ CAREFUL: BRICS' only cut on a
+  #                                     saturated acid IS the carboxyl
+  #                                     C-OH bond, so protecting that
+  #                                     group turns BRICS into a no-op
+  #                                     on this dataset
+  #
+  # Needs rdkit for the SMARTS matching, so setting it alongside
+  # `connected` adds a perception step `connected` otherwise avoids.
+  fragment_keep_groups: null # e.g. ["C(=O)O", "c1ccccc1", "[NX3][CX3]=O"]
 
-  # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`.
-  #   [CX4]-[CX4]   sp3 C to sp3 C → CH2 inside the chain, CH3 at the end
-  #   [CX4]-[CX3]   sp3 C to the sp2 carboxyl carbon → detaches COOH
+  # fragment_smarts: bond patterns to CUT.  Used ONLY by
+  # `fragment_scheme: custom` — setting it next to brics/rotatable/recap
+  # does nothing (those carry their own rules), and a warning says so at
+  # startup.  Each pattern must identify one bond unambiguously: either
+  # exactly two atoms, or the two ends marked with atom maps :1 and :2.
+  # An ambiguous pattern is rejected at startup, never guessed at.
+  #
+  # NOTE the direction of the specification: you name the bonds BETWEEN
+  # the groups you want, not the groups themselves.  Fragments are then
+  # whatever the molecule falls apart into.  To say "the carboxyl is one
+  # fragment and the alkyl chain is another", cut the one bond joining
+  # them — a single pattern, not one per group.
+  #
+  #   measured on decanoic acid (this dataset's C10 molecule):
+  #     ["[CX4]-[CX3]"]                  K= 2  carboxyl [OOCH] | chain
+  #                                            [C9H19]  ← head/tail split
+  #     ["[CX4]-[CX4]"]                  K= 9  every sp3 C-C cut
+  #     ["[CX4]-[CX4]","[CX4]-[CX3]"]    K=10  carboxyl + one group per C
+  #     ["[C:1](=O)-[O:2]"]              K= 2  just the acid C-O (= brics)
+  #
+  # A bare string is accepted as a single pattern, so both
+  # `fragment_smarts: "[CX4]-[CX3]"` and `["[CX4]-[CX3]"]` work.
+  #
+  # THIS RUN — "every CH2 a fragment, every CH3 a fragment, COOH a
+  # fragment".  Read the two patterns as the two kinds of bond that
+  # SEPARATE those groups:
+  #
+  #   [CX4]-[CX4]   sp3 carbon to sp3 carbon → every chain carbon is cut
+  #                 away from its neighbours, so each keeps only its own
+  #                 hydrogens: CH2 groups inside the chain, CH3 at the end
+  #                 (the H count follows the carbon, nothing extra needed)
+  #   [CX4]-[CX3]   sp3 carbon to the sp2 carboxyl carbon → detaches the
+  #                 chain from COOH.  CX3 is what distinguishes the
+  #                 carboxyl carbon (3 connections: =O, -O, -C) from a
+  #                 chain carbon (CX4, four connections)
+  #
+  # Nothing cuts inside COOH, so its C, both O and the acid H stay one
+  # fragment.  Verified on this dataset: decanoic acid (C10, 32 atoms) →
+  # K=10 = [COOH] + 8x[CH2] + [CH3]; butanoic acid (C4, 14 atoms) →
+  # K=4 = [COOH] + 2x[CH2] + [CH3].
   fragment_smarts: ["[CX4]-[CX4]", "[CX4]-[CX3]"]
 
 # ─────────────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────────────
-# backbone.name options for this family:
-#   "simurgh_simplified_monolithic" — one monolithic stack per line
-#   "simurgh_simplified_routed"     — routed artisans + fragment MoE
-# Both are monolithic models: head MUST be null (they return energy,
-# autograd forces and the per-line energies directly).
+# backbone.name options:
+#   "simurgh_legacy_arace"       — DEFAULT: ARACE (this file). Potential artisans
+#                          primary at every layer + ACE aggregation. Modular.
+#   "simurgh_legacy"             — legacy ACE-dressing-first artisan-bank model
+#                          (alias: "simurgh_legacy_ace_first"). Uses different keys
+#                          (dressing_kwargs / artisan_config) — see
+#                          src/goal/configs/ml/simurgh_legacy_ace_first_gmd26.yaml.
+#   "simurgh_legacy_monolithic"  — legacy SIMURGH without backbone/head split
+#   "simurgh_legacy_monolithic_arace"   — ARACE monolithic (research/ablation), head: null
+#   "hyperspec"          — E(3)-equivariant GNN (HyperSpec)
+#   "invariant_gnn"      — invariant SchNet-like GNN
+#   "monolithic_example" — minimal reference monolithic model
 #
-# WHAT THE MODEL DOES, in one pass:
-#   shared input   element embedding (0e) + Bessel RBF + SH + envelope
-#   atom line      L1 node-wise (each atom alone), L2+ message passing
-#                  → per-atom energy e_i
-#   pair line      symmetric edge features (even-l harmonics) with a
-#                  private node state → per-edge energy ε_ij = ε_ji
-#   fragment line  equivariant virtual nodes from each fragment's atoms
-#                  (relative to its centroid) + fragment-fragment message
-#                  passing → per-fragment energy E_k (readout zero-init)
-#   readout        E = Σ E0 + scale·(E_atom + E_pair + E_frag)
-#                  F = -∂E/∂r (autograd; there is no force head)
-#
-# The lines never read each other's features. Every line carries l > 0
-# channels to its final readout; the collapse to invariants happens only
-# there. All nonlinearities are e3nn gates (SiLU on 0e, sigmoid gates on
-# l > 0 channels).
+# head.name options (set null for monolithic backbones):
+#   "energy_forces"  — energy + autograd forces F=-∂E/∂r (conservative)
+#   "dual_forces"    — energy + forces with selectable mode
+#   "direct_forces"  — energy + direct equivariant force projection
+#   "energy"         — energy only (no forces; for datasets without forces)
+#   "stress"         — energy + virial stress (periodic systems)
+#   "dipole"         — dipole moment from learned partial charges
+#   "scalar"         — generic per-structure scalar (HOMO, LUMO, ...)
+#   "multi"          — run multiple heads simultaneously
+#   null             — monolithic backbone handles output directly
 # ─────────────────────────────────────────────────────
 model:
   backbone:
-    name: simurgh_simplified_monolithic
+    name: simurgh_legacy_arace
 
-    # Neighbour cutoff radius (Å) — must match data.cutoff.
+    # ── ARACE stacking ──────────────────────────────────────────────
+    # Each round = one artisan layer (per-element-pair equivariant
+    # artisans on edges, contributing a per-layer pair energy) + one
+    # ACE block (edge → node aggregation of the artisan features with
+    # equivariant linear + residual + RMS norm):
+    #   nodes → edges (artisan) → nodes (ACE) → edges (artisan) → ...
+    # E_total = E_atomic + scale × Σ_L E_artisan_L,  F = -∂E/∂r
+    num_rounds: 2 # number of artisan + ACE rounds
+
+    # true  → one artisan bank shared by every round (fewer params)
+    # false → independent bank per round (default, more expressive)
+    share_artisan_weights: false
+
+    # Neighbour cutoff radius (Å) — MUST match data.cutoff, so it is
+    # interpolated from there.  Override both together.
     cutoff: ${data.cutoff}
 
-    # ── Shared input ────────────────────────────────────────────────
-    # The ONLY thing the three lines share. Learnable part: the element
-    # embedding table. RBF / SH / envelope are fixed functions of the
-    # geometry. No message passing happens here.
-    embedding_dim: 32 # width of the 0e element embedding
-    num_elements: 120 # embedding table size; must exceed max(Z)
-    num_rbf: 8 # Bessel basis functions (every radial branch)
-    radial_hidden: 32 # radial-MLP hidden width (every unit)
-    sh_lmax:
-      2 # spherical-harmonic order; >= 2 (the pair line
-      # needs an even l > 0 harmonic)
+    # Initial node features: atomic-number embedding lookup projected
+    # into the artisans' equivariant space.  There is NO separate
+    # environment-dressing phase — the first artisan layer operates
+    # directly on these embeddings.
+    embedding_dim: 64
+    num_elements: 9 # embedding table size; must be > max(Z) in the data (H..F)
 
-    # Mean neighbours per atom — normalises the atom-line and pair-line
-    # aggregations. train.py does NOT auto-inject it for this model, so
-    # it is set by hand: the exact mean degree over all 7,000 GMD-26
-    # FragmentDuplication training frames at cutoff 8.0 (same value the
-    # ablation study pins). null = no normalisation.
-    avg_num_neighbors: 20.861964
+    # Mean neighbours per atom for the ACE aggregation normalisation.
+    # null = auto-computed from the training set by train.py.
+    avg_num_neighbors: null
 
-    # ── Combination rule ────────────────────────────────────────────
-    #   "additive" — E = Σ E0 + scale·(E_atom + E_pair + E_frag)
-    #   "learned"  — per-atom line weights g = 1 + tanh(MLP(0e of the atom
-    #                line)), applied to per-atom line energies (pair
-    #                energy split ½/½ between its atoms, fragment energy
-    #                shared equally by its atoms). Bounded and local, so
-    #                size-extensive; zero-initialised, so it starts EQUAL
-    #                to additive.
-    # Either way the forward returns energy_atom_line / energy_pair_line /
-    # energy_fragment_line, which sum (with energy_baseline) to energy.
-    combination: additive
-
-    # ── Atom line ───────────────────────────────────────────────────
-    # Layer 1 is node-wise; layers 2..num_layers pass messages. The shared
-    # input is scalar, so layer 1's l > 0 blocks are structurally empty
-    # and fill from layer 2 — hence num_layers >= 2.
-    atom_line:
-      hidden_irreps: "16x0e + 16x1o + 16x2e"
-      num_layers: 3
-
-    # ── Pair line ───────────────────────────────────────────────────
-    # Edge features use EVEN-l harmonics only — that is what makes
-    # ε_ij == ε_ji exact — so the irreps must be even parity throughout
-    # (odd blocks could never be populated; the model refuses them).
-    # The 1e block fills from the second edge layer.
-    pair_line:
-      hidden_irreps: "16x0e + 16x1e + 16x2e"
-      num_layers: 2
-
-    # ── Fragment line ───────────────────────────────────────────────
-    fragment_line:
-      hidden_irreps: "16x0e + 16x1o + 16x2e"
-      num_layers: 2 # fragment-fragment message-passing layers
-
-      # Centroid separation (Å) at which the fragment interaction envelope
-      # reaches zero. Far above the atom cutoff: fragment pairs between 8
-      # and 15 Å are exactly what the local lines cannot see. The pair SET
-      # is every k != l of a structure (never truncated), so pairs never
-      # enter or leave as atoms move — only the smooth envelope decays.
-      vnode_cutoff: 15.0
-
-      # Length scale (Å) of the atom → virtual-node basis (atom positions
-      # relative to their fragment centroid). GMD groups are ~1-1.5 Å in
-      # radius.
-      fragment_radius: 3.0
-
-      # Normaliser of the fragment-pair aggregation (a FIXED constant —
-      # a per-fragment count would break separability). null = 1.
-      avg_num_fragment_neighbors: null
-
-      # Safety cap on K per batch: pair enumeration is O(K²).
-      max_fragments: 512
-
-    # ── Line readouts (the only irreps → 0e collapses) ──────────────
-    # Bias-free. Atom and pair readouts: default init (primary energy
-    # terms). Fragment readout: ZERO-init (a design invariant, not a key),
-    # so the fragment line starts at exactly zero and its energy growing
-    # in energy_fragment_line is the signal it is being used.
-    readout:
-      n_scalar: 16
-      hidden: 16
+    # ── Equivariant pair artisans (primary learning component) ──────
+    # One artisan per unordered element pair per round (shared across
+    # rounds when share_artisan_weights is true).  Architecture must be
+    # "equivariant" — ARACE is equivariant throughout; invariants
+    # appear only in each layer's scalar energy readout.
+    # num_layers and the width fields (hidden_irreps, radial_hidden,
+    # n_scalar_out, final_hidden) are all tunable — see the HPO search
+    # space in src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml.
+    artisan:
+      architecture: equivariant
+      hidden_irreps: "16x0e + 16x1o + 16x2e" # node/pair equivariant width
+      num_layers: 1 # 1 = TP only; >1 adds residual EquivLinear+Norm layers
+      num_rbf: 8 # Bessel radial basis functions
+      radial_hidden: 32 # radial MLP hidden width
+      n_scalar_out: 16 # invariant scalars before the energy MLP
+      final_hidden: 16 # energy MLP hidden width
+      element_conditioned: true # modulate TP weights by destination element
+      n_elements: auto # conditioning-table rows = max(Z)+1 of the elements (absent → legacy 120)
 
     # ── Atomic-energy baseline ──────────────────────────────────────
+    # Subtracts per-element reference energies so the model learns
+    # residuals rather than absolute energies (O(thousand eV)).
+    #
+    # Elements are discovered automatically from the training set.
+    #
+    # mode options:
     #   "learned"  — nn.Parameter, zero-init, jointly optimised.
-    #   "dataset"  — least-squares on the training set (values: null;
-    #                train.py injects them).
-    #   "provided" — hand-set isolated-atom DFT values (eV).
-    # Same values as the other GMD-26 SIMURGH configs.
+    #                Works without any prior knowledge.
+    #   "dataset"  — least-squares regression on training set.
+    #                Leave values: null; computed automatically.
+    #   "provided" — hand-set values from isolated-atom DFT (eV), e.g.
+    #                PBE/def2-SVP for this dataset:
+    #                  1: -13.595298   # H
+    #                  6: -1028.481145 # C
+    #                  7: -1483.895483 # N
+    #                  8: -2041.117735 # O
     atomic_energies:
       mode: provided
       values:
@@ -350,15 +441,205 @@ model:
         6: -1028.481145 # C
         7: -1483.895483 # N
         8: -2041.117735 # O
-      compute_from_dataset: false
+      compute_from_dataset: false # set true to force "dataset" mode
 
-    # Multiplicative gain on all three line energies.
-    # null = auto-computed by train.py for "dataset"/"provided".
+    # Multiplicative scale on the artisan interaction energy.
+    # null = 1.0 for "learned" mode, auto-computed for "dataset"/"provided".
     scale: null
 
+    # elements: never set here — automatically extracted from the
+    #           training set by train.py via compute_unique_elements().
+    #           K elements → K*(K+1)/2 pair artisans per round.
+
+    # ══ OPTIONAL ADD-ON MODULES ═════════════════════════════════════
+    # Two independent add-ons hang off every ARACE round.  Both are OFF
+    # in this file.  Each is enabled purely by the PRESENCE of its config
+    # section, so the whole switch is a comment:
+    #
+    #   ENABLE  — uncomment the `fragment_interaction:` /
+    #             `adaptive_gate:` block
+    #   DISABLE — comment it out again (an *empty* section also counts as
+    #             absent, so commenting only the inner keys works too)
+    #
+    # Disabled means the round never builds the module: zero parameters,
+    # zero overhead, and a forward pass bit-identical to plain ARACE
+    # (tests assert exact equality, not just closeness).  The two compose
+    # freely — enable either, both, or neither.
+    #
+    # THE FOUR-RUN ABLATION LADDER, from this one file:
+    #   1. baseline  — as shipped, both blocks commented
+    #   2. fragment  — uncomment fragment_interaction
+    #   3. gate only — uncomment adaptive_gate
+    #   4. full      — uncomment both
+    # Either edit this file between runs, or drive it from the CLI without
+    # touching the file at all (Hydra `+` adds a section, `~` removes one):
+    #   goal-train --config-name simurgh_legacy_gmd26 \
+    #     '+model.backbone.adaptive_gate={n_scalar:16,hard_threshold:0.5,aux_loss_weight:0.01,init_bias:1.0,per_irrep:true}'
+    #   goal-train --config-name simurgh_legacy_gmd26 '~model.backbone.fragment_interaction'
+    # Give each run its own task_name/run_name_suffix so the logs stay
+    # separable, e.g. `task_name=simurgh_legacy_gmd26_full run_name_suffix=_full`.
+    #
+    # One round with both enabled:
+    #
+    #   artisan layer L  →  h_pair, E_L
+    #        ↓ h_pair              ↓ h  (same pre-update features)
+    #   ┌─────────────┐   ┌──────────────────────────────────┐
+    #   │ ACE BRANCH  │   │ FRAGMENT BRANCH (optional)       │
+    #   │ h_local     │   │ Δh = Σ_l TP(f_l, Y(r̂_kl); w(d)) │
+    #   │             │   │ full irreps — l=0, l=1, l=2      │
+    #   └─────────────┘   └──────────────────────────────────┘
+    #        └────────── MIXING (+ RMS renorm) ──────────┘
+    #                    ↓ h_new
+    #   ┌────────────────────────────────────────────────────┐
+    #   │ ADAPTIVE DEPTH GATE (optional)                     │
+    #   │ h_next = g·h_new + (1-g)·h,  g per irrep block    │
+    #   └────────────────────────────────────────────────────┘
+
+    # ── Equivariant Fragment Interaction (optional) ─────────────────
+    # WHAT: a convolution over the *fragment graph*, built from the same
+    # e3nn primitives as the pair artisans.  Per round:
+    #
+    #   f_k  = mean_{i∈k} h_i                       pool full irreps
+    #   c_k  = mean_{i∈k} r_i                       fragment centroid
+    #   m_k  = Σ_l TP(f_l, Y^l(r̂_kl); w(d_kl))/n_k  equivariant message
+    #   Δh_i = Linear(m_{frag(i)})                  per-atom correction
+    #
+    # Message passing only reaches as far as the bonded graph within
+    # num_rounds × cutoff, so two fragments that share no covalent path
+    # exchange information one bond at a time.  This gives them a direct
+    # channel — and, unlike a scalar summary, one that carries WHERE the
+    # other fragment is, through the spherical harmonics of the direction
+    # between the centroids.
+    #
+    # EQUIVARIANCE: exact, at every angular order.  Pooling sums features
+    # that already share the global frame; the tensor product of an
+    # equivariant feature with Y^l(r̂), weighted by a function of the
+    # invariant distance, is the standard e3nn convolution.  The
+    # correction therefore spans l=0, l=1 AND l=2 — it is not restricted
+    # to scalars.
+    #
+    # NOT ATTENTION: attention logits are invariant by necessity, so they
+    # cannot see direction at all, and with the K=2 fragments typical of
+    # this dataset a softmax over two tokens carries almost nothing.  The
+    # radial weights w(d) already give a learned, continuous,
+    # distance-dependent weighting, and the harmonics add the geometry
+    # attention would have discarded.
+    #
+    # LOCALITY: fragment pairs are cut off at `cutoff` (defaults to the
+    # backbone's neighbour radius) and tapered by the same polynomial
+    # envelope as the radial basis, so energies stay local, forces stay
+    # smooth, and a structure's energy never depends on a fragment
+    # arbitrarily far away.  Pairs are also confined to one structure, so
+    # mini-batch composition cannot change a prediction.
+    #
+    # A LONE FRAGMENT (K=1) has nothing to interact with: the correction
+    # is exactly zero, so this module is a strict no-op on single-molecule
+    # datasets (MD17 and friends) and only earns its keep where K ≥ 2 —
+    # which GMD FragmentDuplication guarantees by construction.
+    #
+    # REQUIRES: data.compute_fragment_index: true (above).  A missing
+    # fragment_index with this section enabled raises at the first forward.
+    #
+    # Uncomment the block below to enable; comment it out to disable.
+    fragment_interaction:
+      irreps_hidden:
+        null # null = reuse artisan.hidden_irreps; set a
+        #   narrower string to make the fragment channel
+        #   cheaper than the atom-level one
+      num_rbf: 8 # Bessel functions for the centroid separation
+      radial_hidden: 32 # radial MLP width producing the TP weights
+      num_layers:
+        1 # 1 = convolution only; >1 adds residual
+        #   EquivLinear+RMSNorm refinements
+      init_zero:
+        true # zero-init the output projection so the module
+        #   starts as an exact no-op and learns to activate.
+        #   Strongly recommended: switching it on cannot
+        #   degrade a converged model at step 0.
+      max_fragments:
+        512 # guard: pair enumeration is O(K²), and a
+        #   structure that shatters into single atoms
+        #   (K = N) would be expensive.  Raises rather
+        #   than silently crawling.
+      cutoff:
+        12.0 # max centroid separation (Å).  Omit to inherit the
+        # backbone cutoff.  Raise it if your fragments are
+        # large enough that their centroids sit further
+        # apart than their nearest atoms.
+
+    # ── Adaptive Depth Gate (optional) ──────────────────────────────
+    # WHAT: a per-atom gate deciding how much of each round's update an
+    # atom keeps.  Training uses SOFT gating
+    # (h_next = g·h_new + (1-g)·h_prev, fully differentiable, every atom
+    # still updates but the gate shapes each atom's gradient); inference
+    # uses a HARD threshold, so converged interior atoms exit early and
+    # boundary atoms keep getting rounds.
+    #
+    # EQUIVARIANCE: the gate value MUST be invariant — a gate that rotated
+    # with the frame would scale different irrep blocks by
+    # rotation-dependent factors and destroy the symmetry.  This is the
+    # same construction as e3nn's own nn.Gate (invariant scalars gating
+    # equivariant blocks), not a scalars-only shortcut.  Gate inputs are
+    # the l=0 scalars plus convergence ratios ‖Δh‖/‖h_prev‖, all
+    # invariant.  What `per_irrep` controls is how finely the gate
+    # resolves the feature vector — see below.
+    #
+    # LOSS: adds λ·mean(g) to the total training loss (so it is inside
+    # train/total), reported separately as train_gate/aux_loss.  No
+    # `losses:` entry is needed — the weight lives here, on the module
+    # that defines the term.
+    #
+    # LOGGING: gate diagnostics go to their own logger section,
+    # train_gate/ and val_gate/, so they never crowd out the energy and
+    # force metrics in train_energy/ / train_forces/ and their val
+    # counterparts (see the LOGGER SECTIONS note at the end of this file).  Watch train_gate/gate_mean_round_{L}:
+    #   ≈1.0 → gate always open, not selective (raise aux_loss_weight)
+    #   ≈0.5 → gate is discriminating between atoms (healthy)
+    #   →0   → whole rounds being skipped (lower aux_loss_weight)
+    #
+    # Uncomment the block below to enable; comment it out to disable.
+    # adaptive_gate:
+    #   n_scalar: 16 # width of the gate's scalar input projection
+    #   hard_threshold: 0.5 # inference-time cut: g > threshold → update
+    #   aux_loss_weight: 0.01 # λ on the sparsity penalty; 0.0 disables it
+    #   init_bias: 1.0 # initial gate-logit bias → sigmoid(1) ≈ 0.73, i.e.
+    #                  #   the gate starts OPEN (model begins as plain
+    #                  #   ARACE and must learn to close specific atoms —
+    #                  #   far more stable than starting closed).  Raise
+    #                  #   to ~2.5 (≈0.92) to start even more open.
+    #   per_irrep: true # one invariant gate PER IRREP BLOCK (l=0, l=1, l=2)
+    #                   #   instead of one for the whole vector, with a
+    #                   #   convergence ratio per block as extra input.
+    #                   #   Still exactly equivariant, strictly more
+    #                   #   expressive: the model can keep an atom's l=1
+    #                   #   update while damping a noisy l=2 one.
+    #                   #   false restores the single-gate behaviour.
+
   # ── Task head ──────────────────────────────────────────────────────
-  # Monolithic model — a task head is incompatible.
-  head: null
+  # The ARACE backbone populates NodeFeatures.node_energies, so the
+  # head sums it directly to get total energy.
+  #
+  # Forces = hybrid mode: F = -∂E/∂r (autograd, conservative, leading
+  # term) + correction_weight × F_direct (equivariant 1x1o projection
+  # of the artisan node features, a learnable non-conservative
+  # residual).  correction_weight is kept small so the autograd term
+  # dominates and the model stays close to energy-conserving.
+  # Requires irreps_in to contain 1o channels — the default
+  # artisan.hidden_irreps ("16x0e + 16x1o + 16x2e") already does.
+  #
+  # Other dual_forces modes: "autograd" (pure -∂E/∂r, same as
+  # energy_forces), "direct" (pure equivariant projection, cheap but
+  # non-conservative).  "pairwise" is NOT supported here — it needs
+  # features.node_forces, which SimurghAraceBackbone never populates.
+  #
+  # irreps_in must match the artisan equivariant width — interpolated
+  # from model.backbone.artisan.hidden_irreps so they never drift.
+  head:
+    name: energy_forces
+    irreps_in: ${model.backbone.artisan.hidden_irreps}
+    hidden_dim: 128
+    # mode: hybrid
+    # correction_weight: 0.05
 
 # ─────────────────────────────────────────────────────
 # TRAINER
@@ -542,20 +823,23 @@ training:
         energy: 1.0
         forces: 0.0
         newton: 0.0
+        gate_reg: 1.0e-4
 
     - name: "energy_forces"
-      epochs: 85
+      epochs: null
       loss_weights:
         energy: 1.0
         forces: 1.0
         newton: 0.0
+        gate_reg: 1.0e-4
 
-    - name: "full"
-      epochs: null # open-ended — runs to max_epochs
-      loss_weights:
-        energy: 1.0
-        forces: 1.0
-        newton: 0.01
+    # - name: "full"
+    #   epochs: null # open-ended — runs to max_epochs
+    #   loss_weights:
+    #     energy: 1.0
+    #     forces: 1.0
+    #     newton: 0.01
+    #     gate_reg: 1.0e-4
 
   # ── Loss functions ────────────────────────────────────────────────
   # Declares which loss components exist and their base weights.
@@ -587,6 +871,13 @@ training:
   #   "gate_reg"        — L2 on artisan gate params (prevents expert collapse)
   #   "dipole"          — dipole moment
   #   "scalar_property" — generic scalar, set property_name
+  #
+  # NOT declared here: "aux_loss".  When a model emits its own
+  # regularisation term (currently only the ARACE adaptive depth gate's
+  # λ·mean(g) sparsity penalty) GOALModule adds it to `total` and logs it
+  # as train/aux_loss automatically.  Its weight is
+  # model.backbone.adaptive_gate.aux_loss_weight — deliberately kept next
+  # to the module that defines the term rather than duplicated here.
   losses:
     - name: energy
       fn: mae
@@ -597,6 +888,10 @@ training:
       fn: mae
       weight: 1.0
       normalize_by_n_atoms: true
+
+    - name: gate_reg
+      fn: mse
+      weight: 1.0e-4
 
     # Newton violation (force conservation penalty) — included in stages
     # but only active when loss_weights.newton > 0:
@@ -663,16 +958,12 @@ checkpoint_manager:
     enabled: true
     filename: "last.ckpt"
 
-  # ── Self-contained .simurgh archives ─────────────────────────────
-  # A .simurgh archive bundles weights, config and the FROZEN MODEL
-  # SOURCE so a run can be reloaded without the repo at that commit.
-  # The model file, the shared simurgh_simplified_layers module and the
-  # primitives it imports are frozen together (import-graph walk).
-  #   save_archive     — write one alongside the best checkpoint
-  #   archive_interval — also write one at every interval checkpoint
-  #                      (costs disk; useful for long research runs)
-  save_archive: true
-  archive_interval: false
+  # Self-contained .simurgh archives (weights + resolved config +
+  # metadata + frozen model source in a single shippable zip).
+  # The model source is always frozen to {dirpath}/frozen_source/ at
+  # training start; these knobs only control archive packing.
+  save_archive: true # pack best checkpoint at end of training
+  archive_interval: false # also pack at every interval checkpoint (large!)
 
 # ─────────────────────────────────────────────────────
 # CALLBACKS
@@ -711,30 +1002,9 @@ callbacks:
     # that finished epoch with no metrics logged, which strict mode rejects.
     check_on_train_epoch_end: false
     monitor: "val_forces/forces_mae"
-
-    # ── min_delta IS IN THE METRIC'S OWN UNITS ───────────────────────
-    # val_forces/forces_mae is reported in eV/A, so the
-    # inherited 1.0e-4 meant "an epoch only counts as an improvement if
-    # it beats the best by 1e-4 eV/A". Late in training the
-    # per-epoch gain is far below that, so EVERY epoch scores as
-    # stalled and the run stops while the curve is still descending —
-    # on rMD17 aspirin that ended a 3,000-epoch budget at ~970 with
-    # val_forces/forces_mae still falling.
-    #
-    # 0.0 = any improvement counts, which is what you want when the
-    # metric is a slowly converging error. Set a positive value only if
-    # you know the noise floor of your validation set and want to stop
-    # inside it.
-    min_delta: 0.0
-
-    # Counted in epochs.
-    # 200 (200 epochs) is deliberately generous: this is a
-    # divergence guard, not a convergence detector. To remove the guard
-    # entirely, comment out this whole block — checkpoint_manager.top_k
-    # still keeps the best weights.
-    patience: 200
-
+    patience: 50 # epochs with no improvement before stopping
     mode: "min"
+    min_delta: 1.0e-4 # minimum improvement to count
     strict: true # crash if monitor not found in metrics
     check_finite: true # stop if monitor becomes NaN or Inf
     stopping_threshold: null # stop immediately if metric < threshold
@@ -775,25 +1045,69 @@ callbacks:
 # LOGGING
 # ─────────────────────────────────────────────────────
 # ── LOGGER SECTIONS (what lands where in W&B / TensorBoard) ─────────
-# The text before the first "/" is the section a curve is filed under:
+# The text before the first "/" is the section a curve is filed under.
+# GOALModule splits three ways: by SPLIT (train / val / test), by
+# PROPERTY (energy / forces), and by what you monitor vs what you only
+# occasionally inspect (the gate curves).
 #
-#   {split}/         total (the weighted loss), plus any loss component
-#                    that is neither energy nor forces
-#   {split}_energy/  the energy loss term, energy_mae_per_atom,
-#                    energy_rmse_per_atom, energy_round_{L}
-#   {split}_forces/  the forces loss term, forces_mae, forces_rmse,
-#                    forces_cosine_similarity, forces_magnitude_mae,
-#                    newton_violation and its _x/_y/_z components
-#   {split}_gate/    every gate diagnostic (gate_mean_round_{L},
-#                    aux_loss, gate_reg, artisan/…) — numerous, for
-#                    occasional inspection, never on the progress bar
+# The split prefix:
+#   train   the training batches
+#   val     the val_dir set — IN DISTRIBUTION here (GMD TestID), and the
+#           only set anything may be selected on (top_k, early stopping)
+#   test    the test_dir set — OUT OF DISTRIBUTION here (GMD TestOOD).
+#           Logged every validation epoch alongside val when
+#           data.monitor_test_during_training is on, otherwise only by an
+#           explicit trainer.test() run.  Read it, never select on it.
 #
-# {split} is train, val (the in-distribution set) or test (the
-# out-of-distribution set: logged every validation epoch when
-# data.monitor_test_during_training is on, otherwise only by an explicit
-# trainer.test() run).  Select on val_*, read test_*.
+# and the section suffix:
 #
-# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+#   {split}/              — the run's verdict, one curve:
+#         total                     (the weighted loss actually optimised)
+#       plus any loss component that is neither energy nor forces.
+#
+#   {split}_energy/       — everything about the energy:
+#         energy                    (its weighted loss component)
+#         energy_mae_per_atom, energy_rmse_per_atom
+#         energy_round_{L}          (per-ARACE-round energy share)
+#
+#   {split}_forces/       — everything about the forces:
+#         forces                    (its weighted loss component)
+#         forces_mae, forces_rmse, forces_magnitude_mae
+#         forces_cosine_similarity
+#         newton_violation_x, _y, _z, newton_violation
+#
+#   {split}_gate/         — every gate diagnostic, so the
+#       sections above stay readable — they are numerous (one per round,
+#       plus one per element pair per round) and none of them is on the
+#       progress bar:
+#         gate_mean_round_{L}       (adaptive depth gate, per round)
+#         aux_loss                  (the gate's λ·mean(g); still inside
+#                                    train/total)
+#         gate_reg                  (L2 on the artisan gates)
+#         artisan/round{L}/{pair}   (per-element-pair artisan gates —
+#                                    K*(K+1)/2 x num_rounds curves, the
+#                                    noisiest group by far.  Logged on
+#                                    train AND val: they are parameters,
+#                                    so reading them is free.  A gate
+#                                    drifting to ~0 means that element
+#                                    pair has been switched off.)
+#         artisan_load/{pair}       (load balance: mean |E| contributed
+#         artisan_load_variance      per artisan, and std/mean across
+#                                    them — >2.0 signals collapse.
+#                                    val_gate/ ONLY, because it costs a
+#                                    full extra forward of every artisan;
+#                                    and only the legacy ACE-first
+#                                    backbone exposes it, so ARACE runs
+#                                    simply do not emit these.)
+#
+# NEWTON VIOLATION is reported per Cartesian axis plus a total
+# (total = x + y + z exactly).  Σ_i F_i must vanish for an isolated
+# molecule; one number tells you it is broken, three tell you where.
+# Anisotropy (e.g. z far worse than x/y) points at a direction-dependent
+# cause — surface normal, cell vector, PBC flag, an unbalanced direct
+# force head — while three comparable values point at an isotropic one.
+# It is a *diagnostic*, not a loss: it is always computed, whether or not
+# a newton loss component is declared under training.losses.
 #
 # Multiple loggers can be active simultaneously.
 # Metrics are logged to all enabled loggers.
@@ -827,15 +1141,7 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags:
-      [
-        "simurgh",
-        "simurgh_simplified",
-        "monolithic",
-        "gmd",
-        "experimental",
-        "ablation",
-      ]
+    tags: ["simurgh_legacy", "gmd"]
 
   # TensorBoard:
   # tensorboard:

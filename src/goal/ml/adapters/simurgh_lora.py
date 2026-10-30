@@ -19,7 +19,7 @@ Usage
 Through the training CLI (recommended — checkpoint manager, archives,
 resume)::
 
-    goal-train --config-name finetune/simurgh_lora \\
+    goal-train --config-name finetune/simurgh_legacy_lora \\
         model.backbone.checkpoint_path=/abs/path/to/run/checkpoints \\
         data.train_paths=[data/dicarboxylic/train.xyz] ...
 

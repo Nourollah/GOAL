@@ -203,12 +203,12 @@ class TestFragmentAwareModelEndToEnd:
 
     def test_fragment_interaction_checkpoint_computes(self, tmp_path: Path) -> None:
         from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-        from goal.ml.nn.models.simurgh.backbone_arace import SimurghAraceBackbone
+        from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
         from goal.ml.training.loss import CompositeLoss
         from goal.ml.training.module import GOALModule
 
         backbone_cfg = {
-            "name": "simurgh_arace",
+            "name": "simurgh_legacy_arace",
             "elements": [1, 6, 8],
             "num_rounds": 1,
             "cutoff": 5.0,

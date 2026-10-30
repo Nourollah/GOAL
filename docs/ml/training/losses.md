@@ -253,7 +253,7 @@ Points to know:
 
 ### `gate_reg`: what it regularises
 
-Every SIMURGH artisan (one per element pair and round) multiplies its pair energy by a learnable scalar gate $P_{AB}$, initialised to 1. `gate_reg` adds $w_g \sum_{AB} P_{AB}^2$ to the loss, which keeps a single pair channel from absorbing the interaction energy through an ever-growing gate. `GOALModule.forward` collects the gates as `predictions["gate_values"]` from every artisan class — `PotentialArtisan` / `RarePotentialArtisan` (legacy `simurgh`, `simurgh_monolithic`) and the ARACE artisans (`simurgh_arace`, `monolithic_arace`, `nf_simurgh`) — on the modular and the monolithic path. Models without artisans (HyperSpec, InvariantGNN, SIMURGH Simplified, foundation models) contribute nothing.
+Every SIMURGH artisan (one per element pair and round) multiplies its pair energy by a learnable scalar gate $P_{AB}$, initialised to 1. `gate_reg` adds $w_g \sum_{AB} P_{AB}^2$ to the loss, which keeps a single pair channel from absorbing the interaction energy through an ever-growing gate. `GOALModule.forward` collects the gates as `predictions["gate_values"]` from every artisan class — `PotentialArtisan` / `RarePotentialArtisan` (legacy `simurgh_legacy`, `simurgh_legacy_monolithic`) and the ARACE artisans (`simurgh_legacy_arace`, `simurgh_legacy_monolithic_arace`, `simurgh_legacy_nf`) — on the modular and the monolithic path. Models without artisans (HyperSpec, InvariantGNN, SIMURGH Simplified, foundation models) contribute nothing.
 
 With gates at 1.0 the term starts at the number of gates times $w_g$ (12 gates × 1e-4 for a two-round H/C/O ARACE), and its gradient pulls each gate by $2 w_g P_{AB}$.
 

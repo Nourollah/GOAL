@@ -280,15 +280,15 @@ def _run_training(cfg: DictConfig) -> None:
     # This replaces any manually-specified elements list in the config —
     # the dataset is always authoritative. Other backbones (hyperspec,
     # invariant_gnn) use a fixed-size embedding table and ignore this key.
-    backbone_name: str = cfg.model.backbone.name
+    backbone_name: str = BACKBONE_REGISTRY.canonical(cfg.model.backbone.name)
     if (
         backbone_name
         in (
-            "simurgh",
-            "simurgh_ace_first",
-            "simurgh_arace",
-            "simurgh_monolithic",
-            "monolithic_arace",
+            "simurgh_legacy",
+            "simurgh_legacy_ace_first",
+            "simurgh_legacy_arace",
+            "simurgh_legacy_monolithic",
+            "simurgh_legacy_monolithic_arace",
         )
         and "elements" not in reused
     ):
@@ -343,7 +343,10 @@ def _run_training(cfg: DictConfig) -> None:
 
     # avg_num_neighbors for the ARACE backbone — it has no dressing_kwargs
     # sub-config; the normaliser is a top-level backbone key instead.
-    if backbone_name == "simurgh_arace" and backbone_kwargs.get("avg_num_neighbors") is None:
+    if (
+        backbone_name == "simurgh_legacy_arace"
+        and backbone_kwargs.get("avg_num_neighbors") is None
+    ):
         avg_nn_arace: float = compute_avg_num_neighbors(datamodule.data_train)
         backbone_kwargs["avg_num_neighbors"] = avg_nn_arace
         print(f"[stats] avg_num_neighbors={avg_nn_arace:.4f}")
@@ -352,7 +355,7 @@ def _run_training(cfg: DictConfig) -> None:
     # Injected when a backbone declares rare_artisan.enabled=true.  The
     # two model families spell the artisan sub-config differently —
     # "artisan_config" on the legacy SIMURGH backbones, "artisan" on the
-    # ARACE ones (simurgh_arace / monolithic_arace / nf_simurgh) — so both
+    # ARACE ones (simurgh_legacy_arace / simurgh_legacy_monolithic_arace / simurgh_legacy_nf) — so both
     # keys are checked.  The routing layout inside is identical.
     for artisan_key in ("artisan_config", "artisan"):
         artisan_cfg_raw: typing.Any = backbone_kwargs.get(artisan_key)
@@ -514,13 +517,13 @@ def _run_training(cfg: DictConfig) -> None:
         (checkpoint_dir / SENTINEL_NAME).touch()
 
 
-@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_gmd26")
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_legacy_gmd26")
 def train_ml(cfg: DictConfig) -> None:
     """GOAL training entry point for self-contained src/goal/configs/ml/ experiment files.
 
     Usage:
-        goal-train-ml                                  # loads simurgh_gmd26.yaml (default)
-        goal-train-ml --config-name simurgh_md17        # loads simurgh_md17.yaml
+        goal-train-ml                                  # loads simurgh_legacy_gmd26.yaml (default)
+        goal-train-ml --config-name simurgh_legacy_md17        # loads simurgh_legacy_md17.yaml
         goal-train-ml --config-name hyperspec_md17     # loads hyperspec_md17.yaml
 
     All parameters live in a single file under src/goal/configs/ml/.
@@ -531,7 +534,7 @@ def train_ml(cfg: DictConfig) -> None:
     Continue a run that already finished by raising the budget and
     pointing at its checkpoints:
         goal-train-ml trainer.max_epochs=2000 \
-            resume.from=logs/simurgh_gmd26/runs/<old_run>/checkpoints
+            resume.from=logs/simurgh_legacy_gmd26/runs/<old_run>/checkpoints
     """
     _run_training(cfg)
 

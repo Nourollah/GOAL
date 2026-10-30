@@ -30,7 +30,7 @@ The default config runs Langevin NVT of ethanol for 1000 steps at 1.0 fs with a 
 
 ```bash
 pixi run -e cuda-full goal-simulate calculator.checkpoint=logs/my_exp/runs/<run>/checkpoints
-pixi run -e cuda-full goal-simulate calculator.checkpoint=models/simurgh_gmd26.simurgh calculator.device=cuda \
+pixi run -e cuda-full goal-simulate calculator.checkpoint=models/simurgh_legacy_gmd26.simurgh calculator.device=cuda \
     'molecule.smiles="CC(=O)O"' steps=5000 output_dir=outputs/md/acetic_acid
 ```
 

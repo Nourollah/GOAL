@@ -105,8 +105,8 @@ pip install "goal-atomistic[all]"       # every extra except mace
 With the environment activated, the console scripts work from any directory; no clone is needed:
 
 ```bash
-goal-train --cfg job -p model.backbone.name              # prints: simurgh_arace
-goal-train --config-name nf_simurgh_md17 --cfg job       # bundled experiment configs
+goal-train --cfg job -p model.backbone.name              # prints: simurgh_legacy_arace
+goal-train --config-name simurgh_legacy_nf_md17 --cfg job       # bundled experiment configs
 python -c 'import goal; print(goal.CONFIGS_DIR)'         # where the bundled configs live
 ```
 
@@ -222,7 +222,7 @@ This setup has been verified end to end with Python 3.14, torch 2.13+cu126, e3nn
 
 ## Ray Tune and Optuna
 
-`ray[tune]` and `optuna` are needed for `goal-tune` with `method: ray`, which `src/goal/configs/ml/simurgh_gmd26_hpo.yaml` uses. Ray publishes Python 3.14 wheels for x86-64 and aarch64, and both packages are already in every ML pixi environment. With pip, use `pip install "goal-atomistic[tune]"`. `method: tuner` (Lightning's LR / batch-size finder) and `method: wandb` (W&B Sweeps) need no extra packages.
+`ray[tune]` and `optuna` are needed for `goal-tune` with `method: ray`, which `src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml` uses. Ray publishes Python 3.14 wheels for x86-64 and aarch64, and both packages are already in every ML pixi environment. With pip, use `pip install "goal-atomistic[tune]"`. `method: tuner` (Lightning's LR / batch-size finder) and `method: wandb` (W&B Sweeps) need no extra packages.
 
 See [Hyperparameter tuning](../ml/training/hyperparameter-tuning.md).
 
@@ -244,10 +244,10 @@ print("backbones:", BACKBONE_REGISTRY.list_available())
 print("heads:", HEAD_REGISTRY.list_available())
 ```
 
-The backbone list should include `simurgh_arace`, `nf_simurgh`, `monolithic_arace`, `simurgh_simplified_routed` and friends. Then check that the console scripts are on your `PATH` and that Hydra can compose the default config without training anything:
+The backbone list should include `simurgh_legacy_arace`, `simurgh_legacy_nf`, `simurgh_legacy_monolithic_arace`, `simurgh_legacy_simplified_routed` and friends. Then check that the console scripts are on your `PATH` and that Hydra can compose the default config without training anything:
 
 ```bash
-pixi run -e cuda goal-train --cfg job -p model.backbone.name   # prints: simurgh_arace
+pixi run -e cuda goal-train --cfg job -p model.backbone.name   # prints: simurgh_legacy_arace
 pixi run -e cuda goal-inspect --help
 pixi run -e cuda test                          # or: pytest -k 'not slow'
 ```

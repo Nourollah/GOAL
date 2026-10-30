@@ -1,7 +1,7 @@
 """Hydra-based fine-tuning entry point.
 
 Fine-tunes a pre-trained model on a downstream dataset.  The default
-config, ``finetune/simurgh_lora``, adapts a trained SIMURGH checkpoint with
+config, ``finetune/simurgh_legacy_lora``, adapts a trained SIMURGH checkpoint with
 LoRA::
 
     goal-finetune model.backbone.checkpoint_path=logs/<task>/runs/<run>/checkpoints \
@@ -74,7 +74,9 @@ def _build_backbone(backbone_cfg: DictConfig) -> typing.Any:
     return adapter_cls(**backbone_kwargs)
 
 
-@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="finetune/simurgh_lora")
+@hydra.main(
+    version_base=None, config_path=CONFIGS_ML_DIR, config_name="finetune/simurgh_legacy_lora"
+)
 def finetune(cfg: DictConfig) -> None:
     """GOAL fine-tuning entry point.
 

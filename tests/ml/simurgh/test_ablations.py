@@ -40,17 +40,20 @@ from torch_geometric.data import Batch
 
 from goal.ml.data.fragments import compute_fragment_index
 from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-from goal.ml.nn.models.simurgh.backbone_arace import SimurghAraceBackbone
+from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
 from goal.ml.registry import BACKBONE_REGISTRY
 from tests.ml.simurgh.conftest import _build_graph
 from tests.ml.simurgh.test_fragment_interaction import _methane_positions
 
 _CONFIGS_ML_DIR = Path(__file__).parents[3] / "src" / "goal" / "configs" / "ml"
-_BASE_CONFIG = "simurgh_gmd26"
+_BASE_CONFIG = "simurgh_legacy_gmd26"
 
 # Configs that document the add-ons inline.  Both must keep the blocks in
 # sync — the monolithic variant takes the identical keys.
-ARACE_CONFIG_FILES: list[str] = ["simurgh_gmd26.yaml", "monolithic_arace_gmd26.yaml"]
+ARACE_CONFIG_FILES: list[str] = [
+    "simurgh_legacy_gmd26.yaml",
+    "simurgh_legacy_monolithic_arace_gmd26.yaml",
+]
 
 ADDON_KEYS: list[str] = ["fragment_interaction", "adaptive_gate"]
 
@@ -64,7 +67,10 @@ LADDER: list[tuple[str, tuple[str, ...]]] = [
 
 # Legacy ACE-first backbone: the add-ons attach to an artisan+ACE round it
 # does not have, so these files must NOT offer uncommentable blocks.
-LEGACY_CONFIG_FILES: list[str] = ["simurgh_ace_first_gmd26.yaml", "simurgh_md17.yaml"]
+LEGACY_CONFIG_FILES: list[str] = [
+    "simurgh_legacy_ace_first_gmd26.yaml",
+    "simurgh_legacy_md17.yaml",
+]
 
 
 # ----------------------------------------------------------------------
@@ -144,8 +150,8 @@ def _cfg_with_addons(sections: tuple[str, ...]) -> DictConfig:
     OmegaConf.set_struct(cfg, False)
     for key in ADDON_KEYS:
         if key in sections:
-            block = _documented_block("simurgh_gmd26.yaml", key)
-            assert block is not None, f"simurgh_gmd26.yaml documents no '{key}' block"
+            block = _documented_block("simurgh_legacy_gmd26.yaml", key)
+            assert block is not None, f"simurgh_legacy_gmd26.yaml documents no '{key}' block"
             cfg.model.backbone[key] = OmegaConf.create(block)
         else:
             cfg.model.backbone.pop(key, None)
@@ -238,10 +244,10 @@ class TestDocumentedBlocks:
             "self",
             "irreps_node",
         }
-        documented = set(_documented_block("simurgh_gmd26.yaml", key) or {})
+        documented = set(_documented_block("simurgh_legacy_gmd26.yaml", key) or {})
         unknown = documented - accepted
         assert not unknown, (
-            f"simurgh_gmd26.yaml documents {sorted(unknown)} under '{key}', "
+            f"simurgh_legacy_gmd26.yaml documents {sorted(unknown)} under '{key}', "
             f"but {module_cls.__name__} accepts only {sorted(accepted)}"
         )
 
@@ -252,14 +258,14 @@ class TestDocumentedBlocks:
         tempt anyone with a block to uncomment — only a pointer to ARACE."""
         assert _documented_block(config_file, key) is None, (
             f"{config_file} carries a '{key}' block, but its backbone "
-            f"(name: simurgh) does not accept that key"
+            f"(name: simurgh_legacy) does not accept that key"
         )
 
     @pytest.mark.parametrize("config_file", LEGACY_CONFIG_FILES)
     def test_legacy_configs_point_at_the_arace_configs(self, config_file: str) -> None:
         text = (_CONFIGS_ML_DIR / config_file).read_text()
         assert "ARACE-only" in text
-        assert "simurgh_gmd26.yaml" in text
+        assert "simurgh_legacy_gmd26.yaml" in text
 
 
 # ----------------------------------------------------------------------
@@ -274,7 +280,7 @@ class TestAblationLadder:
     ) -> None:
         cfg = _cfg_with_addons(sections)
 
-        assert cfg.model.backbone.name == "simurgh_arace"
+        assert cfg.model.backbone.name == "simurgh_legacy_arace"
         assert BACKBONE_REGISTRY.get(cfg.model.backbone.name) is SimurghAraceBackbone
         for key in ADDON_KEYS:
             assert (cfg.model.backbone.get(key, None) is not None) is (key in sections)
@@ -358,10 +364,10 @@ class TestAblationLadder:
         backbone = _backbone_from_cfg(cfg)
 
         assert backbone.fragment_interaction_enabled is (
-            _live_block("simurgh_gmd26.yaml", "fragment_interaction") is not None
+            _live_block("simurgh_legacy_gmd26.yaml", "fragment_interaction") is not None
         )
         assert backbone.adaptive_gate_enabled is (
-            _live_block("simurgh_gmd26.yaml", "adaptive_gate") is not None
+            _live_block("simurgh_legacy_gmd26.yaml", "adaptive_gate") is not None
         )
 
 
@@ -378,7 +384,7 @@ class TestDocumentedCliRecipe:
             "+model.backbone.adaptive_gate="
             "{n_scalar:16,hard_threshold:0.5,aux_loss_weight:0.01,init_bias:1.0}"
         ]
-        if _live_block("simurgh_gmd26.yaml", "adaptive_gate") is not None:
+        if _live_block("simurgh_legacy_gmd26.yaml", "adaptive_gate") is not None:
             # Already enabled in the working copy — drop it first, then the
             # `+` recipe is what puts it back.
             overrides = ["~model.backbone.adaptive_gate", *overrides]
@@ -390,7 +396,7 @@ class TestDocumentedCliRecipe:
     def test_tilde_override_removes_a_section(self) -> None:
         # Ensure the section is present (from the file or from `+`), then
         # delete it the way the config's comment says to.
-        block = _documented_block("simurgh_gmd26.yaml", "fragment_interaction")
+        block = _documented_block("simurgh_legacy_gmd26.yaml", "fragment_interaction")
         base = _compose()
         OmegaConf.set_struct(base, False)
         base.model.backbone.fragment_interaction = OmegaConf.create(block)
@@ -402,7 +408,7 @@ class TestDocumentedCliRecipe:
         stripped = _compose(
             overrides=(
                 ["~model.backbone.fragment_interaction"]
-                if _live_block("simurgh_gmd26.yaml", "fragment_interaction") is not None
+                if _live_block("simurgh_legacy_gmd26.yaml", "fragment_interaction") is not None
                 else []
             )
         )

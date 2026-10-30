@@ -13,12 +13,12 @@
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "simurgh_md17"
+  name: "simurgh_legacy_md17"
   description: "SIMURGH on MD17 aspirin (rMD17, 950 train / 50 val)"
-  tags: ["simurgh", "md17", "aspirin"]
+  tags: ["simurgh_legacy", "md17", "aspirin"]
 
 seed: 42
-task_name: "simurgh_md17"
+task_name: "simurgh_legacy_md17"
 run_name_suffix: "" # optional tag, prepend "_": e.g. "_aspirin"
 run_name: ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}${run_name_suffix}
 
@@ -89,10 +89,10 @@ data:
 # MODEL
 # ─────────────────────────────────────────────────────
 # backbone.name options:
-#   "simurgh_arace" (default ARACE architecture — different config keys,
-#   see src/goal/configs/ml/simurgh_gmd26.yaml), "simurgh" (legacy ACE-first, this
-#   file; alias "simurgh_ace_first"), "simurgh_monolithic",
-#   "monolithic_arace", "hyperspec", "invariant_gnn", "monolithic_example"
+#   "simurgh_legacy_arace" (default ARACE architecture — different config keys,
+#   see src/goal/configs/ml/simurgh_legacy_gmd26.yaml), "simurgh_legacy" (legacy ACE-first, this
+#   file; alias "simurgh_legacy_ace_first"), "simurgh_legacy_monolithic",
+#   "simurgh_legacy_monolithic_arace", "hyperspec", "invariant_gnn", "monolithic_example"
 #
 # head.name options:
 #   "energy_forces", "dual_forces", "direct_forces",
@@ -100,14 +100,14 @@ data:
 # ─────────────────────────────────────────────────────
 model:
   backbone:
-    name: simurgh
+    name: simurgh_legacy
     cutoff: ${model.backbone.dressing_kwargs.cutoff}
 
     # NOTE: the optional `fragment_interaction` / `adaptive_gate` add-ons are
     # ARACE-only — they attach to an artisan+ACE round, which this legacy
     # backbone does not have, and `SimurghBackbone.__init__` rejects those
-    # keys.  See src/goal/configs/ml/simurgh_gmd26.yaml (modular ARACE) or
-    # monolithic_arace_gmd26.yaml, where both are documented inline and
+    # keys.  See src/goal/configs/ml/simurgh_legacy_gmd26.yaml (modular ARACE) or
+    # simurgh_legacy_monolithic_arace_gmd26.yaml, where both are documented inline and
     # enabled by uncommenting.  MD17 is single-molecule anyway, so
     # fragment CA would see K = 1 fragment and act as a per-structure bias.
 
@@ -296,7 +296,7 @@ training:
 # CHECKPOINTING
 # ─────────────────────────────────────────────────────
 # Three independent pools: top_k, interval, last.
-# See simurgh_gmd26.yaml for full documentation of all options.
+# See simurgh_legacy_gmd26.yaml for full documentation of all options.
 # ─────────────────────────────────────────────────────
 checkpoint_manager:
   _target_: goal.ml.training.callbacks.checkpoint_manager.GOALCheckpointManager
@@ -317,14 +317,14 @@ checkpoint_manager:
     enabled: true
     filename: "last.ckpt"
 
-  # Self-contained .simurgh archives — see simurgh_gmd26.yaml for docs.
+  # Self-contained .simurgh archives — see simurgh_legacy_gmd26.yaml for docs.
   save_archive: true
   archive_interval: false
 
 # ─────────────────────────────────────────────────────
 # CALLBACKS
 # ─────────────────────────────────────────────────────
-# See simurgh_gmd26.yaml for full documentation of all available callbacks.
+# See simurgh_legacy_gmd26.yaml for full documentation of all available callbacks.
 # ─────────────────────────────────────────────────────
 callbacks:
   rich_progress_bar:
@@ -376,9 +376,9 @@ callbacks:
 # data.monitor_test_during_training is on, otherwise only by an explicit
 # trainer.test() run).  Select on val_*, read test_*.
 #
-# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+# Full section reference: src/goal/configs/ml/simurgh_legacy_gmd26.yaml
 #
-# See simurgh_gmd26.yaml for full documentation of all available loggers.
+# See simurgh_legacy_gmd26.yaml for full documentation of all available loggers.
 # ─────────────────────────────────────────────────────
 logger:
   csv:
@@ -394,7 +394,7 @@ logger:
   #   save_dir: "${paths.output_dir}"
   #   offline: false
   #   log_model: false
-  #   tags: ["simurgh", "md17"]
+  #   tags: ["simurgh_legacy", "md17"]
 
   # tensorboard:
   # mlflow:
@@ -405,7 +405,7 @@ logger:
 # ─────────────────────────────────────────────────────
 # DISTRIBUTED TRAINING
 # ─────────────────────────────────────────────────────
-# See simurgh_gmd26.yaml for full documentation of all strategy options.
+# See simurgh_legacy_gmd26.yaml for full documentation of all strategy options.
 # ─────────────────────────────────────────────────────
 strategy:
   name: auto
@@ -491,5 +491,5 @@ ckpt_path: null
 # ─────────────────────────────────────────────────────
 # HYPERPARAMETER SEARCH
 # ─────────────────────────────────────────────────────
-# See simurgh_gmd26.yaml for full search configuration options.
+# See simurgh_legacy_gmd26.yaml for full search configuration options.
 hparams_search: null

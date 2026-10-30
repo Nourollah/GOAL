@@ -4,9 +4,9 @@
 #
 #   goal-eval ckpt_path=logs/<task>/runs/<run>/checkpoints          # best weights
 #   goal-eval ckpt_path=logs/<task>/runs/<run>/checkpoints checkpoint=last
-#   goal-eval ckpt_path=models/simurgh_gmd26.simurgh trainer.accelerator=gpu
+#   goal-eval ckpt_path=models/simurgh_legacy_gmd26.simurgh trainer.accelerator=gpu
 #   goal-eval ckpt_path=<ckpt> '+data.test_paths=[data/other_test.xyz]'
-#   goal-eval --config-name simurgh_gmd26 ckpt_path=<ckpt>      # an experiment's data section
+#   goal-eval --config-name simurgh_legacy_gmd26 ckpt_path=<ckpt>      # an experiment's data section
 #
 # The MODEL always comes from the checkpoint: frozen source (archive or
 # checkpoint directory), the saved config with its dataset-derived values,

@@ -67,7 +67,7 @@ Energy as above, plus conservative autograd forces. Keys: `irreps_in`, `hidden_d
 | `correction_weight` | 0.1 | $w$ in `hybrid` mode |
 | `pairwise_correction_weight` | 0.0 | in `pairwise` mode: `0` gives pure pairwise forces; `>0` gives $\mathbf F_\text{autograd} + w\,\mathbf F_\text{pairwise}$ |
 
-`pairwise` takes `features.node_forces` from the backbone. Newton's third law is then exact by construction. Only the legacy `simurgh` backbone with `compute_pairwise_forces: true` provides `node_forces`. `simurgh_arace` does not, so `pairwise` raises there. The shipped legacy config `simurgh_ace_first_gmd26.yaml` uses `mode: hybrid`.
+`pairwise` takes `features.node_forces` from the backbone. Newton's third law is then exact by construction. Only the legacy `simurgh_legacy` backbone with `compute_pairwise_forces: true` provides `node_forces`. `simurgh_legacy_arace` does not, so `pairwise` raises there. The shipped legacy config `simurgh_legacy_ace_first_gmd26.yaml` uses `mode: hybrid`.
 
 ```yaml
 head:
@@ -137,8 +137,8 @@ Example: energy, forces, HOMO and LUMO on top of the default ARACE backbone. The
 ```yaml
 model:
   backbone:
-    name: simurgh_arace
-    # ... as in src/goal/configs/ml/simurgh_gmd26.yaml
+    name: simurgh_legacy_arace
+    # ... as in src/goal/configs/ml/simurgh_legacy_gmd26.yaml
   head:
     name: multi
     heads:

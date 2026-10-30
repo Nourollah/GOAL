@@ -14,7 +14,7 @@ from torch_geometric.data import Batch
 
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.data.statistics import compute_unique_elements
-from goal.ml.nn.models.simurgh.backbone import SimurghBackbone
+from goal.ml.nn.models.simurgh.legacy.backbone import SimurghBackbone
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -76,7 +76,7 @@ Point the `goal_model` calculator at the `.simurgh` archive (or checkpoint direc
 from goal.md import CalculatorFactory, MoleculeFactory, Simulation
 from ase.optimize import BFGS
 
-CKPT = "logs/simurgh_gmd26/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh"
+CKPT = "logs/simurgh_legacy_gmd26/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh"
 
 atoms = MoleculeFactory.create("from_smiles", smiles="CCO")
 atoms.calc = CalculatorFactory.create("goal_model", checkpoint=CKPT, device="cuda")

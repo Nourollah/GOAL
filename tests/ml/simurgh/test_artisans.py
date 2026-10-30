@@ -25,7 +25,7 @@ from goal.ml.nn.blocks.artisans import (
     PotentialArtisan,
     _EquivariantArtisanCore,
 )
-from goal.ml.nn.models.simurgh import SimurghMonolithic
+from goal.ml.nn.models.simurgh.legacy import SimurghMonolithic
 from tests.ml.simurgh.conftest import random_so3
 
 IRREPS_IN = Irreps("8x0e + 8x1o + 8x2e")

@@ -34,7 +34,7 @@ The archive is unpacked into a temporary directory. That directory lives as long
 
 ```python
 calc = GOALCalculator(
-    checkpoint_path="logs/simurgh_gmd26/runs/<run>/checkpoints",
+    checkpoint_path="logs/simurgh_legacy_gmd26/runs/<run>/checkpoints",
     checkpoint="best",        # "best" (default) | "last" | "epoch=N" | "<name>.ckpt"
 )
 ```

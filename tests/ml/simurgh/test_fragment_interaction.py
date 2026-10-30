@@ -34,7 +34,7 @@ from goal.ml.nn.blocks.fragment_interaction import (
     build_fragment_geometry,
 )
 from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-from goal.ml.nn.models.simurgh.backbone_arace import SimurghAraceBackbone
+from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
 from tests.ml.simurgh.conftest import _build_graph, random_so3
 
 CUTOFF = 5.0

@@ -34,6 +34,7 @@ class Registry:
         self.name: str = name
         self._registry: dict[str, type] = {}
         self._lazy: dict[str, str] = {}  # name → 'module.path:ClassName'
+        self._aliases: dict[str, str] = {}  # deprecated name → current name
 
     # ------------------------------------------------------------------
     # Registration mechanisms
@@ -86,12 +87,32 @@ class Registry:
         """
         self._registry[name] = cls
 
+    def register_alias(self, old: str, new: str) -> None:
+        """Keep a renamed entry reachable under its old name.
+
+        ``get(old)`` returns the class registered as ``new`` and emits a
+        ``DeprecationWarning``.
+        """
+        self._aliases[old] = new
+
+    def canonical(self, name: str) -> str:
+        """Current name for ``name``: the alias target, or ``name`` itself."""
+        return self._aliases.get(name, name)
+
     # ------------------------------------------------------------------
     # Lookup and instantiation
     # ------------------------------------------------------------------
 
     def get(self, name: str) -> type:
         """Retrieve a registered class by name, resolving lazy imports as needed."""
+        if name in self._aliases:
+            warnings.warn(
+                f"'{name}' is a deprecated {self.name} registry name; "
+                f"use '{self._aliases[name]}'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            name = self._aliases[name]
         if name not in self._registry:
             if name in self._lazy:
                 module_path: str
@@ -152,7 +173,7 @@ class Registry:
     # ------------------------------------------------------------------
 
     def __contains__(self, name: str) -> bool:
-        return name in self._registry or name in self._lazy
+        return name in self._registry or name in self._lazy or name in self._aliases
 
     def list_available(self) -> list[str]:
         """Return sorted list of all registered and lazily-registered names."""

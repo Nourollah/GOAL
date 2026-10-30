@@ -40,9 +40,9 @@ src/goal/
     ├── cli/                        # console-script entry points (see ML → Reference → CLI)
     │   ├── __init__.py             #   CONFIGS_DIR / CONFIGS_ML_DIR, registry population, torch.load patch
     │   ├── builders.py             #   loss / head / callback / logger builders shared by the Hydra CLIs
-    │   ├── train.py                #   goal-train / goal-train-ml (Hydra, default config simurgh_gmd26)
+    │   ├── train.py                #   goal-train / goal-train-ml (Hydra, default config simurgh_legacy_gmd26)
     │   ├── evaluate.py             #   goal-eval (default config eval; model rebuilt from the checkpoint)
-    │   ├── finetune.py             #   goal-finetune (default config finetune/simurgh_lora)
+    │   ├── finetune.py             #   goal-finetune (default config finetune/simurgh_legacy_lora)
     │   ├── finetune_upet.py        #   goal-finetune-upet (argparse → metatrain `mtt train`)
     │   ├── tune.py                 #   goal-tune (Lightning Tuner / Ray Tune / W&B Sweeps)
     │   ├── inspect_ckpt.py         #   goal-inspect
@@ -86,14 +86,15 @@ src/goal/
     │   └── models/
     │       ├── base.py             #     Backbone / Head / MonolithicModel protocols
     │       ├── simurgh/            #     native SIMURGH family
-    │       │   ├── backbone_arace.py     # simurgh_arace: DEFAULT modular ARACE backbone
-    │       │   ├── backbone.py           # simurgh / simurgh_ace_first: legacy ACE-first backbone
-    │       │   ├── arace.py              # monolithic_arace: self-contained ARACE
-    │       │   ├── monolithic.py         # simurgh_monolithic
-    │       │   ├── nf_simurgh.py         # nf_simurgh: Native Fragment SIMURGH (fragment virtual nodes)
-    │       │   ├── simurgh_simplified_layers.py      # shared skeleton of the three-line models
-    │       │   ├── simurgh_simplified_routed.py      # simurgh_simplified_routed
-    │       │   ├── simurgh_simplified_monolithic.py  # simurgh_simplified_monolithic
+    │       │   ├── legacy/               # older SIMURGH models (deprecated keys still resolve)
+    │       │   │   ├── backbone_arace.py     # simurgh_legacy_arace: modular ARACE backbone
+    │       │   │   ├── backbone.py           # simurgh_legacy / simurgh_legacy_ace_first: ACE-first backbone
+    │       │   │   ├── arace.py              # simurgh_legacy_monolithic_arace: self-contained ARACE
+    │       │   │   ├── monolithic.py         # simurgh_legacy_monolithic
+    │       │   │   ├── nf_simurgh.py         # simurgh_legacy_nf: Native Fragment SIMURGH (fragment virtual nodes)
+    │       │   │   ├── simurgh_simplified_layers.py      # shared skeleton of the three-line models
+    │       │   │   ├── simurgh_simplified_routed.py      # simurgh_legacy_simplified_routed
+    │       │   │   └── simurgh_simplified_monolithic.py  # simurgh_legacy_simplified_monolithic
     │       │   └── geometry.py           # differentiable edge-geometry recomputation
     │       ├── ablations/          #     simurgh_ablation: isolated, frozen ablation-study model
     │       ├── foundation/         #     trainable foundation backbones: mace_finetune, uma_finetune
@@ -172,27 +173,27 @@ The configs are part of the package (installed as `goal/configs/`; the absolute 
 ```text
 src/goal/configs/
 ├── ml/                                   # self-contained goal.ml experiment configs (goal-train's config dir)
-│   ├── simurgh_gmd26.yaml                #   DEFAULT: SIMURGH ARACE on GMD-26 FragmentDuplication
-│   ├── simurgh_gmd26_hpo.yaml            #   Ray Tune search space over ARACE (composes simurgh_gmd26)
-│   ├── simurgh_ace_first_gmd26.yaml      #   legacy ACE-first SIMURGH on GMD-26
-│   ├── monolithic_arace_gmd26.yaml       #   monolithic ARACE on GMD-26
-│   ├── nf_simurgh_gmd26.yaml             #   NF_SIMURGH on GMD-26 FragmentDuplication
-│   ├── nf_simurgh_gmd26_typecond.yaml    #   NF_SIMURGH + type-conditioned virtual nodes (FragmentDuplication)
-│   ├── nf_simurgh_gmd26_FF.yaml          #   same model on the GMD FragmentFusion split
-│   ├── nf_simurgh_md17.yaml              #   NF_SIMURGH on rMD17 aspirin
-│   ├── nf_simurgh_md17_benzene.yaml      #   NF_SIMURGH on rMD17 benzene (fragment channel inert)
-│   ├── nf_simurgh_md22.yaml              #   NF_SIMURGH on MD22 Ac-Ala3-NHMe
-│   ├── nf_simurgh_qm9.yaml               #   NF_SIMURGH on QM9 U0
-│   ├── nf_simurgh_omol25.yaml            #   NF_SIMURGH on the OMol25 4M organic subset
-│   ├── simurgh_simplified_routed_{gmd26,md17}.yaml      # SIMURGH Simplified, Routed
-│   ├── simurgh_simplified_monolithic_{gmd26,md17}.yaml  # SIMURGH Simplified, Monolithic
-│   ├── simurgh_md17.yaml                 #   legacy SIMURGH on MD17 aspirin
+│   ├── simurgh_legacy_gmd26.yaml                #   DEFAULT: SIMURGH ARACE on GMD-26 FragmentDuplication
+│   ├── simurgh_legacy_gmd26_hpo.yaml            #   Ray Tune search space over ARACE (composes simurgh_legacy_gmd26)
+│   ├── simurgh_legacy_ace_first_gmd26.yaml      #   legacy ACE-first SIMURGH on GMD-26
+│   ├── simurgh_legacy_monolithic_arace_gmd26.yaml       #   monolithic ARACE on GMD-26
+│   ├── simurgh_legacy_nf_gmd26.yaml             #   NF_SIMURGH on GMD-26 FragmentDuplication
+│   ├── simurgh_legacy_nf_gmd26_typecond.yaml    #   NF_SIMURGH + type-conditioned virtual nodes (FragmentDuplication)
+│   ├── simurgh_legacy_nf_gmd26_FF.yaml          #   same model on the GMD FragmentFusion split
+│   ├── simurgh_legacy_nf_md17.yaml              #   NF_SIMURGH on rMD17 aspirin
+│   ├── simurgh_legacy_nf_md17_benzene.yaml      #   NF_SIMURGH on rMD17 benzene (fragment channel inert)
+│   ├── simurgh_legacy_nf_md22.yaml              #   NF_SIMURGH on MD22 Ac-Ala3-NHMe
+│   ├── simurgh_legacy_nf_qm9.yaml               #   NF_SIMURGH on QM9 U0
+│   ├── simurgh_legacy_nf_omol25.yaml            #   NF_SIMURGH on the OMol25 4M organic subset
+│   ├── simurgh_legacy_simplified_routed_{gmd26,md17}.yaml      # SIMURGH Simplified, Routed
+│   ├── simurgh_legacy_simplified_monolithic_{gmd26,md17}.yaml  # SIMURGH Simplified, Monolithic
+│   ├── simurgh_legacy_md17.yaml                 #   legacy SIMURGH on MD17 aspirin
 │   ├── hyperspec_md17.yaml               #   HyperSpec baseline on MD17 aspirin
 │   ├── eval.yaml                         #   goal-eval default (ckpt_path + test-loop settings)
 │   ├── finetune/                         #   fine-tuning (run with goal-train)
 │   │   ├── mace.yaml                     #     mace_finetune
 │   │   ├── uma.yaml                      #     uma_finetune
-│   │   └── simurgh_lora.yaml             #     simurgh_lora (also goal-finetune's default)
+│   │   └── simurgh_legacy_lora.yaml      #     simurgh_lora (also goal-finetune's default)
 │   └── ablations/                        #   SIMURGH ablation study (simurgh_ablation model)
 │       ├── README.md                     #     study design, ladder, controls, run order
 │       ├── _ablation_base.yaml           #     shared base (not a run)

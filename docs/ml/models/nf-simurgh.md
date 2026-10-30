@@ -1,11 +1,13 @@
 # NF_SIMURGH
 
-**NF_SIMURGH** (Native Fragment SIMURGH, registry name `nf_simurgh`) is an experimental monolithic model. It runs ordinary ARACE rounds, pools the per-atom energies and features onto **fragment virtual nodes** (one per molecular fragment), and lets those virtual nodes interact pairwise over a much longer range than the atom-level cutoff. It is built to capture coupling between distant parts of a structure that local message passing reaches only slowly or not at all.
+> **Legacy model.** This model lives in `goal.ml.nn.models.simurgh.legacy` under a `simurgh_legacy*` registry key. Its previous key still loads, with a deprecation warning, until the new SIMURGH model is released; `scripts/simurgh_dev/migrate_legacy_checkpoints.py` rewrites saved checkpoints.
 
-Source: [`models/simurgh/nf_simurgh.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/nf_simurgh.py). Fragment decomposition: [`data/fragments.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/data/fragments.py). Read [SIMURGH](simurgh.md) first for the ARACE rounds this model reuses.
+**NF_SIMURGH** (Native Fragment SIMURGH, registry name `simurgh_legacy_nf`) is an experimental monolithic model. It runs ordinary ARACE rounds, pools the per-atom energies and features onto **fragment virtual nodes** (one per molecular fragment), and lets those virtual nodes interact pairwise over a much longer range than the atom-level cutoff. It is built to capture coupling between distant parts of a structure that local message passing reaches only slowly or not at all.
+
+Source: [`models/simurgh/legacy/nf_simurgh.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/nf_simurgh.py). Fragment decomposition: [`data/fragments.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/data/fragments.py). Read [SIMURGH](simurgh.md) first for the ARACE rounds this model reuses.
 
 > [!IMPORTANT]
-> NF_SIMURGH is **not** "ARACE with a fragment switch". No key disables the virtual nodes, and there is no fallback when fragment labels are missing: a graph without `fragment_index` raises. The model also rejects `virtual_node.{use_fragments, enable_virtual_nodes, use_fragment_ca, enabled, init_zero}`. NF_SIMURGH without virtual nodes *is* `monolithic_arace`, so run that instead.
+> NF_SIMURGH is **not** "ARACE with a fragment switch". No key disables the virtual nodes, and there is no fallback when fragment labels are missing: a graph without `fragment_index` raises. The model also rejects `virtual_node.{use_fragments, enable_virtual_nodes, use_fragment_ca, enabled, init_zero}`. NF_SIMURGH without virtual nodes *is* `simurgh_legacy_monolithic_arace`, so run that instead.
 
 ## Architecture
 
@@ -25,7 +27,7 @@ flowchart TD
 
 The pipeline from the module docstring:
 
-1. **ARACE rounds** run unchanged. NF_SIMURGH builds `AraceBackbone` with both add-ons off, so with the same seed its rounds are bit-identical to `monolithic_arace`. They produce per-atom energies $e_i$ and features $h_i$.
+1. **ARACE rounds** run unchanged. NF_SIMURGH builds `AraceBackbone` with both add-ons off, so with the same seed its rounds are bit-identical to `simurgh_legacy_monolithic_arace`. They produce per-atom energies $e_i$ and features $h_i$.
 2. **Fragment base energy.** $E_\text{base}[k] = \sum_{i\in k} e_i$. This is a plain `index_add`, so $\sum_k E_\text{base}[k] = \sum_i e_i$ holds *exactly*. Nothing is learned or approximated here.
 3. **Fragment representation.** The $l=0$ channels of each fragment's atoms are pooled (`mean` by default) and concatenated with $\log(1+n_k)$, plus an optional pooled element embedding, then passed through an MLP to give $s_k$. The fragment centroid geometry is computed alongside.
 4. **Stage 1: distance-modulated attention.** For every ordered pair $k \ne l$ of fragments in the same structure:
@@ -78,24 +80,24 @@ Measured decompositions recorded in the shipped configs:
 
 | Molecule (config) | Scheme | K, sizes | Far pairs |
 |---|---|---|---|
-| butanoic acid, C4 (`nf_simurgh_gmd26`) | `custom` `["[CX4]-[CX4]", "[CX4]-[CX3]"]` | K=4, [4,3,3,4] | |
-| decanoic acid, C10 (`nf_simurgh_gmd26`) | same | K=10, [4,3,3,3,3,3,3,3,3,4] = COOH + 8×CH2 + CH3 | 4 of 45 centroid pairs beyond 8 Å (max 9.8 Å) |
-| aspirin (`nf_simurgh_md17`) | `custom` `["[C:1](=O)-[O:2]", "c-[CX3]"]` + keep `C(=O)[OX2H1]` | K=3: ring+O (11), acetyl (6), carboxyl (4) | 1 of 3 beyond 5 Å |
+| butanoic acid, C4 (`simurgh_legacy_nf_gmd26`) | `custom` `["[CX4]-[CX4]", "[CX4]-[CX3]"]` | K=4, [4,3,3,4] | |
+| decanoic acid, C10 (`simurgh_legacy_nf_gmd26`) | same | K=10, [4,3,3,3,3,3,3,3,3,4] = COOH + 8×CH2 + CH3 | 4 of 45 centroid pairs beyond 8 Å (max 9.8 Å) |
+| aspirin (`simurgh_legacy_nf_md17`) | `custom` `["[C:1](=O)-[O:2]", "c-[CX3]"]` + keep `C(=O)[OX2H1]` | K=3: ring+O (11), acetyl (6), carboxyl (4) | 1 of 3 beyond 5 Å |
 | aspirin (comparison) | `rotatable` | K=6 (includes a bare O and a lone HO) | 3 of 15 |
-| Ac-Ala3-NHMe (`nf_simurgh_md22`) | `custom` `["[CX4:1]-[CX3:2](=O)"]` + keep `C(=O)N` | 5 residue units | mean 5.5 of 10 beyond 5 Å, up to 12.4 Å |
-| benzene (`nf_simurgh_md17_benzene`) | every scheme | K=1 | none: the channel is dead on benzene |
+| Ac-Ala3-NHMe (`simurgh_legacy_nf_md22`) | `custom` `["[CX4:1]-[CX3:2](=O)"]` + keep `C(=O)N` | 5 residue units | mean 5.5 of 10 beyond 5 Å, up to 12.4 Å |
+| benzene (`simurgh_legacy_nf_md17_benzene`) | every scheme | K=1 | none: the channel is dead on benzene |
 
 ## Configuration reference
 
 ### Backbone keys
 
-`nf_simurgh` takes the `monolithic_arace` keys (`num_rounds`, `share_artisan_weights`, `artisan` including `rare_artisan`/`pair_counts`, `cutoff`, `embedding_dim`, `num_elements`, `avg_num_neighbors`, `atomic_energies`, `scale`, `num_elements_table`), **plus**:
+`simurgh_legacy_nf` takes the `simurgh_legacy_monolithic_arace` keys (`num_rounds`, `share_artisan_weights`, `artisan` including `rare_artisan`/`pair_counts`, `cutoff`, `embedding_dim`, `num_elements`, `avg_num_neighbors`, `atomic_energies`, `scale`, `num_elements_table`), **plus**:
 
 | Key | Meaning |
 |---|---|
-| `elements` | **must be set by hand.** `goal-train` does not inject it for `nf_simurgh`, and a wrong list is silent (missing pairs are zero-masked). |
-| `avg_num_neighbors` | not auto-injected for `nf_simurgh`. `null` means no aggregation normalisation; set a number to enable it. |
-| `correlation` | `null` (default) or 1/2/3: MACE-style per-element `SymmetricContraction` inside each ARACE round, raising the body order. Exposed only through `nf_simurgh` (`simurgh_arace` and `monolithic_arace` do not accept it). The coupling table is sized by `elements`, not `num_elements`. |
+| `elements` | **must be set by hand.** `goal-train` does not inject it for `simurgh_legacy_nf`, and a wrong list is silent (missing pairs are zero-masked). |
+| `avg_num_neighbors` | not auto-injected for `simurgh_legacy_nf`. `null` means no aggregation normalisation; set a number to enable it. |
+| `correlation` | `null` (default) or 1/2/3: MACE-style per-element `SymmetricContraction` inside each ARACE round, raising the body order. Exposed only through `simurgh_legacy_nf` (`simurgh_legacy_arace` and `simurgh_legacy_monolithic_arace` do not accept it). The coupling table is sized by `elements`, not `num_elements`. |
 | `virtual_node` | hyperparameters of the always-on mechanism (below). An empty section means "defaults", not "off". |
 
 ### `virtual_node` keys
@@ -121,23 +123,23 @@ All are self-contained (`head: null`) and run with `goal-train --config-name <na
 
 | Config | Data | Fragments | Notable settings |
 |---|---|---|---|
-| [`nf_simurgh_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_gmd26.yaml) | GMD-26 FragmentDuplication | `custom` CH3/CH2/COOH | `elements: [1,6,8]`, cutoff 8, batch 48, `vnode_cutoff: 15`. The direct A/B against `monolithic_arace_gmd26` (same data, artisans, optimiser, loss). |
-| [`nf_simurgh_gmd26_typecond`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_gmd26_typecond.yaml) | same | same | the **only** change is `vnode_type_conditioned: true` (+1,088 parameters). The config motivates it by showing that ID monoacids and OOD diacids give identical fragment-size multisets. |
-| [`nf_simurgh_gmd26_FF`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_gmd26_FF.yaml) | GMD-26 **FragmentFusion** | same | identical to `_typecond` apart from the data directories and task name (`nf_simurgh_gmd26_fusion`) |
-| [`nf_simurgh_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_md17.yaml) | rMD17 aspirin | `custom` K=3 | cutoff 5, batch 6, `precision: "64"`, `correlation: 3`, `vnode_cutoff: 10`, `avg_num_neighbors: 14.3806` |
-| [`nf_simurgh_md17_benzene`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_md17_benzene.yaml) | rMD17 benzene | `connected` (K=1) | an **atom-level baseline only**: the virtual-node channel is dead on benzene. `correlation: 3`, batch 24. |
-| [`nf_simurgh_md22`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_md22.yaml) | MD22 Ac-Ala3-NHMe | `custom` residue cut | `elements: [1,6,7,8]`, `correlation: 3`, `vnode_cutoff: 13` |
-| [`nf_simurgh_qm9`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_qm9.yaml) | QM9 (U0) | `rotatable`, `fallback` | **no forces**: losses are energy (+ gate_reg) only, and checkpoint/early stopping monitor `val_energy/energy_mae_per_atom`. Batch 32, `vnode_cutoff: 10`, `elements: [1,6,7,8,9]`. |
-| [`nf_simurgh_omol25`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/nf_simurgh_omol25.yaml) | OMol25 train_4M (`aselmdb`) | `connected`, `fallback` | 72 elements with **rare-pair routing on** (`min_pair_frequency: 2.0e-2`), cutoff 6, `max_atoms: 128`, charge 0 / spin 1 only, precomputed `scale` and `avg_num_neighbors` |
+| [`simurgh_legacy_nf_gmd26`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_gmd26.yaml) | GMD-26 FragmentDuplication | `custom` CH3/CH2/COOH | `elements: [1,6,8]`, cutoff 8, batch 48, `vnode_cutoff: 15`. The direct A/B against `simurgh_legacy_monolithic_arace_gmd26` (same data, artisans, optimiser, loss). |
+| [`simurgh_legacy_nf_gmd26_typecond`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_gmd26_typecond.yaml) | same | same | the **only** change is `vnode_type_conditioned: true` (+1,088 parameters). The config motivates it by showing that ID monoacids and OOD diacids give identical fragment-size multisets. |
+| [`simurgh_legacy_nf_gmd26_FF`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_gmd26_FF.yaml) | GMD-26 **FragmentFusion** | same | identical to `_typecond` apart from the data directories and task name (`simurgh_legacy_nf_gmd26_fusion`) |
+| [`simurgh_legacy_nf_md17`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_md17.yaml) | rMD17 aspirin | `custom` K=3 | cutoff 5, batch 6, `precision: "64"`, `correlation: 3`, `vnode_cutoff: 10`, `avg_num_neighbors: 14.3806` |
+| [`simurgh_legacy_nf_md17_benzene`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_md17_benzene.yaml) | rMD17 benzene | `connected` (K=1) | an **atom-level baseline only**: the virtual-node channel is dead on benzene. `correlation: 3`, batch 24. |
+| [`simurgh_legacy_nf_md22`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_md22.yaml) | MD22 Ac-Ala3-NHMe | `custom` residue cut | `elements: [1,6,7,8]`, `correlation: 3`, `vnode_cutoff: 13` |
+| [`simurgh_legacy_nf_qm9`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_qm9.yaml) | QM9 (U0) | `rotatable`, `fallback` | **no forces**: losses are energy (+ gate_reg) only, and checkpoint/early stopping monitor `val_energy/energy_mae_per_atom`. Batch 32, `vnode_cutoff: 10`, `elements: [1,6,7,8,9]`. |
+| [`simurgh_legacy_nf_omol25`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml) | OMol25 train_4M (`aselmdb`) | `connected`, `fallback` | 72 elements with **rare-pair routing on** (`min_pair_frequency: 2.0e-2`), cutoff 6, `max_atoms: 128`, charge 0 / spin 1 only, precomputed `scale` and `avg_num_neighbors` |
 
-The MD17, benzene, MD22 and QM9 files are derived from `nf_simurgh_gmd26_typecond.yaml` (same model, same artisan and virtual-node settings). Each changes only the numbers that depend on the dataset.
+The MD17, benzene, MD22 and QM9 files are derived from `simurgh_legacy_nf_gmd26_typecond.yaml` (same model, same artisan and virtual-node settings). Each changes only the numbers that depend on the dataset.
 
 > [!NOTE]
-> The only benchmark number recorded in the repository for this model is in a comment in `nf_simurgh_md17.yaml`: the config "reached 21 meV/Å force MAE on rMD17 aspirin against MACE's published 6.6, with 5.2 M parameters". That result is the stated reason `correlation: 3` was switched on. The same comment gives the cost as 5.2 M → 6.8 M parameters.
+> The only benchmark number recorded in the repository for this model is in a comment in `simurgh_legacy_nf_md17.yaml`: the config "reached 21 meV/Å force MAE on rMD17 aspirin against MACE's published 6.6, with 5.2 M parameters". That result is the stated reason `correlation: 3` was switched on. The same comment gives the cost as 5.2 M → 6.8 M parameters.
 
 ### Rare-pair routing on OMol25
 
-From the comments in `nf_simurgh_gmd26.yaml` and `nf_simurgh_omol25.yaml`, measured at a 6 Å cutoff:
+From the comments in `simurgh_legacy_nf_gmd26.yaml` and `simurgh_legacy_nf_omol25.yaml`, measured at a 6 Å cutoff:
 
 | `min_pair_frequency` | Dedicated pairs | Params | Edges covered |
 |---|---|---|---|
@@ -156,8 +158,8 @@ Peak memory for a full training step (forward, autograd forces, backward, AdamW)
 
 | Config | Element pairs | Batch | Edges | Peak |
 |---|---|---|---|---|
-| `nf_simurgh_md17` (aspirin) | 6 | 6 / 12 / 24 | 1,790 / 3,596 / 7,208 | 1.9 / 3.8 / 7.5 GiB |
-| `nf_simurgh_qm9` | 15 | 8 / 16 / 24 / 32 / 48 | 2,078 / 4,304 / 6,700 / 8,954 / 13,406 | 5.3 / 11.1 / 17.2 / 22.9 / 34.2 GiB (64: OOM on 48 GB) |
+| `simurgh_legacy_nf_md17` (aspirin) | 6 | 6 / 12 / 24 | 1,790 / 3,596 / 7,208 | 1.9 / 3.8 / 7.5 GiB |
+| `simurgh_legacy_nf_qm9` | 15 | 8 / 16 / 24 / 32 / 48 | 2,078 / 4,304 / 6,700 / 8,954 / 13,406 | 5.3 / 11.1 / 17.2 / 22.9 / 34.2 GiB (64: OOM on 48 GB) |
 
 These two measurements agree to 3% on a rule of thumb of **≈ 0.175 MiB per edge per element pair**: about 1.1 MiB/edge at 6 pairs and about 2.6 MiB/edge at 15 pairs. Use it to size a batch before a long run:
 
@@ -168,17 +170,17 @@ The pair count matters because every artisan runs on every edge under zero-maski
 - **MD22 (10 pairs):** about 1.75 MiB/edge, so batch 8 (≈ 7,180 edges) needs about 12.6 GiB. The 370-atom nanotube is about 7,900 edges in *one* structure, so use batch 1–2 there.
 - **Benzene (3 pairs):** about 0.53 MiB/edge, so batch 24 needs about 1.6 GiB.
 
-Two things double the figure: `precision: "64"`, as in `nf_simurgh_md17`, and turning on `correlation` or wider `hidden_irreps`. `trainer.precision: bf16-mixed` roughly halves it, at some risk to the accuracy of autograd forces. Measure on your card first.
+Two things double the figure: `precision: "64"`, as in `simurgh_legacy_nf_md17`, and turning on `correlation` or wider `hidden_irreps`. `trainer.precision: bf16-mixed` roughly halves it, at some risk to the accuracy of autograd forces. Measure on your card first.
 
 > [!WARNING]
-> In `nf_simurgh_md22.yaml` the memory table marks batch 8 as "this file", but the actual key is `batch_size: 24`. By the rule above that is about 38 GiB. Lower it to 8 unless your GPU has that much memory.
+> In `simurgh_legacy_nf_md22.yaml` the memory table marks batch 8 as "this file", but the actual key is `batch_size: 24`. By the rule above that is about 38 GiB. Lower it to 8 unless your GPU has that much memory.
 
 ## Pitfalls
 
 - **Set `elements` yourself, and set it correctly.** A missing element's edges contribute exactly zero, with no warning.
 - **Fragment labels are mandatory**, including at inference: graphs built for an ASE calculator must also carry `fragment_index`.
 - **Check K before trusting a result.** Watch `vnode_interaction_energies`: if it stays at zero, either K = 1 everywhere or the channel is not learning.
-- **Keep the A/B fair.** `nf_simurgh_gmd26` and `monolithic_arace_gmd26` share the atomic-energy baseline and leave `avg_num_neighbors: null`. Change both, or neither.
-- The header of `nf_simurgh_md17.yaml` still says `rotatable` is used. The live key is `fragment_scheme: custom`, and the body of the file explains why `rotatable` was rejected for aspirin.
+- **Keep the A/B fair.** `simurgh_legacy_nf_gmd26` and `simurgh_legacy_monolithic_arace_gmd26` share the atomic-energy baseline and leave `avg_num_neighbors: null`. Change both, or neither.
+- The header of `simurgh_legacy_nf_md17.yaml` still says `rotatable` is used. The live key is `fragment_scheme: custom`, and the body of the file explains why `rotatable` was rejected for aspirin.
 
 See also: [Benchmark datasets](../data/benchmarks.md), [ASE-LMDB & OMol25](../data/aselmdb-omol25.md), [SIMURGH Simplified](simurgh-simplified.md) (which has its own fragment line).

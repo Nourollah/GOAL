@@ -12,7 +12,7 @@ unchanged.
 | MACE (MACE-MP-0, local `.model` files) | in-process, trainable | `mace_finetune` via `goal-train --config-name finetune/mace` | [`src/goal/configs/ml/finetune/mace.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/mace.yaml) |
 | UMA / FairChem | in-process, **needs a raw-module load path** in your fairchem version | `uma_finetune` via `goal-train --config-name finetune/uma` | [`src/goal/configs/ml/finetune/uma.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/uma.yaml) |
 | UPET / PET | metatrain subprocess (`mtt train`) | `goal-finetune-upet` | command-line flags |
-| **SIMURGH** (your own trained checkpoint) | in-process, LoRA on the artisans | `simurgh_lora` via `goal-train --config-name finetune/simurgh_lora` (also `goal-finetune`'s default) | [`src/goal/configs/ml/finetune/simurgh_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_lora.yaml) |
+| **SIMURGH** (your own trained checkpoint) | in-process, LoRA on the artisans | `simurgh_lora` via `goal-train --config-name finetune/simurgh_legacy_lora` (also `goal-finetune`'s default) | [`src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml) |
 
 Per-model pages: [MACE](mace.md), [UMA / FairChem](uma.md), [UPET / PET](upet.md), [SIMURGH LoRA](../../integrations/lora_finetune.md).
 

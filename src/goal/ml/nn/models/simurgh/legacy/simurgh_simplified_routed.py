@@ -2,9 +2,9 @@
 
 Three parallel lines (atom, pair, fragment) over one shared input,
 combined only at the readout — see
-:mod:`~goal.ml.nn.models.simurgh.simurgh_simplified_layers` for the
+:mod:`~goal.ml.nn.models.simurgh.legacy.simurgh_simplified_layers` for the
 skeleton and its design invariants.  This model and
-``simurgh_simplified_monolithic`` run the identical skeleton and differ
+``simurgh_legacy_simplified_monolithic`` run the identical skeleton and differ
 **only** in the processors plugged into the three line slots:
 
 * **atom line — frequency-routed artisans.**  Each frequent element owns
@@ -67,8 +67,8 @@ probabilities are renormalised.  An optional Switch load-balancing loss
 default ``0``) is returned as ``aux_loss``, which ``GOALModule`` adds to
 the training total.
 
-Registered as ``"simurgh_simplified_routed"`` (auto-discovered;
-``head: null``).  Config: ``src/goal/configs/ml/simurgh_simplified_routed_gmd26.yaml``.
+Registered as ``"simurgh_legacy_simplified_routed"`` (auto-discovered;
+``head: null``).  Config: ``src/goal/configs/ml/simurgh_legacy_simplified_routed_gmd26.yaml``.
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ from e3nn.o3 import Irreps
 
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.nn.blocks.artisans import parse_pair_counts, route_element_pairs
-from goal.ml.nn.models.simurgh.simurgh_simplified_layers import (
+from goal.ml.nn.models.simurgh.legacy.simurgh_simplified_layers import (
     AtomLineProcessor,
     EquivariantMessageUnit,
     FragmentLine,
@@ -468,8 +468,8 @@ class FragmentMixtureOfExperts(FragmentLineProcessor):
 # ---------------------------------------------------------------------------
 
 
-@MODEL_REGISTRY.register("simurgh_simplified_routed")
-@BACKBONE_REGISTRY.register("simurgh_simplified_routed")
+@MODEL_REGISTRY.register("simurgh_legacy_simplified_routed")
+@BACKBONE_REGISTRY.register("simurgh_legacy_simplified_routed")
 class RoutedSimurghSimplified(SimurghSimplifiedModel):
     """SIMURGH Simplified with frequency-routed artisans and a fragment MoE.
 
@@ -478,7 +478,7 @@ class RoutedSimurghSimplified(SimurghSimplifiedModel):
     cutoff, embedding_dim, num_elements, num_rbf, radial_hidden, sh_lmax,
     avg_num_neighbors, combination, atom_line, pair_line, fragment_line,
     readout, atomic_energies, scale, num_elements_table :
-        Exactly as :class:`~goal.ml.nn.models.simurgh.simurgh_simplified_monolithic.MonolithicSimurghSimplified`.
+        Exactly as :class:`~goal.ml.nn.models.simurgh.legacy.simurgh_simplified_monolithic.MonolithicSimurghSimplified`.
     artisan : dict
         ``rare_artisan: {enabled, min_element_frequency, min_pair_frequency,
         type_embed_dim}`` and ``pair_counts``.  ``enabled`` must be
@@ -542,7 +542,7 @@ class RoutedSimurghSimplified(SimurghSimplifiedModel):
             raise ValueError(f"Unknown key(s) {sorted(unknown)} in artisan.rare_artisan.")
         if not bool(rare_cfg.get("enabled", False)):
             raise ValueError(
-                "simurgh_simplified_routed needs artisan.rare_artisan.enabled: true.  The "
+                "simurgh_legacy_simplified_routed needs artisan.rare_artisan.enabled: true.  The "
                 "rare artisans always exist in this model (unseen types route to them); "
                 "the flag is what makes train.py count the training split's element "
                 "pairs and inject artisan.pair_counts."
@@ -552,7 +552,7 @@ class RoutedSimurghSimplified(SimurghSimplifiedModel):
         )
         if pair_counts is None:
             raise ValueError(
-                "simurgh_simplified_routed needs artisan.pair_counts (training-split "
+                "simurgh_legacy_simplified_routed needs artisan.pair_counts (training-split "
                 "statistics).  train.py injects them; outside it, pass "
                 "compute_pair_counts(train_graphs) explicitly."
             )

@@ -3,7 +3,7 @@
 Evaluates a trained checkpoint on a test split::
 
     goal-eval ckpt_path=logs/<task>/runs/<run>/checkpoints          # managed directory
-    goal-eval ckpt_path=models/simurgh_gmd26.simurgh                # archive
+    goal-eval ckpt_path=models/simurgh_legacy_gmd26.simurgh                # archive
     goal-eval ckpt_path=.../last.ckpt +data.test_paths=[data/test.xyz]
 
 The **model** is always rebuilt from the checkpoint itself — the same

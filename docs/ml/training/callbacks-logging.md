@@ -131,7 +131,7 @@ logger:
     id: null # set to continue an existing W&B run
     log_model: false # true uploads checkpoints to W&B
     group: ""
-    tags: ["simurgh", "gmd"]
+    tags: ["simurgh_legacy", "gmd"]
 ```
 
 These are also in the files, commented out:
@@ -167,7 +167,7 @@ The CSV logger writes `csv_logs/version_0/metrics.csv` in the run directory. It 
 ```python
 import pandas as pd
 
-df = pd.read_csv("logs/simurgh_gmd26/runs/<run>/csv_logs/version_0/metrics.csv")
+df = pd.read_csv("logs/simurgh_legacy_gmd26/runs/<run>/csv_logs/version_0/metrics.csv")
 val = df.dropna(subset=["val_forces/forces_mae"]).set_index("epoch")
 val[["val_forces/forces_mae", "val_energy/energy_mae_per_atom"]].plot(logy=True)
 ```

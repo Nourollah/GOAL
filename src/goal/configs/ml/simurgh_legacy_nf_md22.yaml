@@ -3,8 +3,9 @@
 # Model  : NF_SIMURGH (Native Fragment SIMURGH) — monolithic ARACE
 #          rounds whose per-atom energies are pooled onto FRAGMENT
 #          VIRTUAL NODES, which then interact pairwise
-#          (see goal.ml.nn.models.simurgh.nf_simurgh)
-# Dataset: rMD17 aspirin (revised MD17, PBE/def2-SVP DFT MD at 500 K)
+#          (see goal.ml.nn.models.simurgh.legacy.nf_simurgh)
+# Dataset: MD22 Ac-Ala3-NHMe (alanine tripeptide, 42 atoms,
+#          PBE+MBD AIMD at 500 K)
 #
 # Self-contained config. Every parameter the project supports is
 # listed here — either set to its value for this experiment, or
@@ -13,38 +14,40 @@
 #
 # EXPERIMENTAL. This is a research/ablation model.
 #
-# Derived from src/goal/configs/ml/nf_simurgh_gmd26_typecond.yaml — same model,
+# Derived from src/goal/configs/ml/simurgh_legacy_nf_gmd26_typecond.yaml — same model,
 # same artisan geometry, same virtual-node settings including
 # `vnode_type_conditioned: true`. What changes is the dataset and the
 # handful of numbers that are properties of it.
 #
-# ── WHAT rMD17 ASKS OF THIS MODEL ────────────────────────────────────
-# One molecule, 950 training frames, and a force MAE as the verdict.
-# Three consequences worth knowing before the first run:
+# ── WHY MD22 SUITS THIS MODEL ────────────────────────────────────────
+# MD22 is MD17's successor from the same group: seven molecules of 42 to
+# 370 atoms, an order of magnitude larger, sampled from PBE+MBD AIMD.
+# The size is the point — MD17's molecules are small enough that almost
+# everything is inside a 5 Å cutoff, and a fragment-interaction channel
+# has little left to explain.
 #
-#  1. FRAGMENTS MUST BE CUT. An MD17 trajectory is a single covalently
+#  1. THE VIRTUAL-NODE CHANNEL HAS REAL WORK HERE. With the residue
+#     decomposition this file uses (see fragment_scheme), the peptide
+#     splits into 5 units and a mean of **5.5 of the 10 centroid pairs
+#     sit beyond the 5 Å atom cutoff**, with separations reaching
+#     12.4 Å. On MD17 aspirin the same measurement is 3 of 15 at
+#     6.1 Å. More than half the residue pairs here are invisible to
+#     single-hop atom-level message passing, which is the regime
+#     NF_SIMURGH was built for.
+#
+#  2. FRAGMENTS MUST STILL BE CUT. An MD22 trajectory is one covalently
 #     bonded molecule, so `fragment_scheme: connected` returns K=1 for
 #     every frame: one virtual node, no pairs, and an interaction term
-#     that is identically zero on every batch. The model would train and
-#     report numbers with the entire mechanism under test switched off.
-#     `rotatable` is used instead — measured on aspirin: K=6, sizes
-#     [10,4,2,2,2,1], and 3 of the 15 centroid pairs sit beyond the
-#     5 Å atom cutoff. Those three pairs are exactly what the
-#     virtual-node channel exists to carry.
+#     identically zero on every batch. The model would train and report
+#     numbers with the mechanism under test switched off.
 #
-#  2. PERCEPTION IS FREE HERE. rdkit bond perception is cached on the
-#     bond graph, and an MD trajectory does not change its topology, so
-#     all 950 frames share one decomposition: `rotatable` measured
-#     18,800 structures/s against `connected`'s 18,300 — i.e. both are
-#     cache lookups after the first frame.
+#  3. PERCEPTION IS FREE. rdkit bond perception is cached on the bond
+#     graph, and an MD trajectory does not change its topology, so the
+#     whole trajectory shares one decomposition.
 #
-#  3. THE MODEL IS LARGE FOR THE DATA. 5.21 M parameters against 950
-#     training structures. That is the architecture this file is a
-#     variant of, kept unchanged so the comparison holds; MD17 supplies
-#     60k force numbers (950 x 21 x 3) rather than 950, which is what
-#     makes it trainable at all. If it overfits, the first knob is
-#     model.backbone.artisan.hidden_irreps -> "8x0e + 8x1o + 8x2e"
-#     (1.32 M parameters), not the round count.
+#  4. THE DATA/MODEL RATIO IS BETTER THAN MD17'S. 6,000 training frames
+#     against 8.7 M parameters, and 42 x 3 = 126 force numbers per
+#     frame. MD17 gave this architecture 950 frames.
 #
 # This file deliberately does NOT inherit from, interpolate into, or
 # share keys with any other config. NF_SIMURGH's model namespace is its
@@ -56,16 +59,15 @@
 # EXPERIMENT METADATA
 # ─────────────────────────────────────────────────────
 experiment:
-  name: "nf_simurgh_md17"
-  description: "NF_SIMURGH (type-conditioned virtual nodes) on rMD17 aspirin"
+  name: "simurgh_legacy_nf_md22"
+  description: "NF_SIMURGH (type-conditioned virtual nodes) on MD22 Ac-Ala3-NHMe"
   tags:
     [
-      "simurgh",
-      "nf_simurgh",
+      "simurgh_legacy",
+      "simurgh_legacy_nf",
       "arace",
-      "md17",
-      "rmd17",
-      "aspirin",
+      "md22",
+      "peptide",
       "experimental",
       "type_conditioned",
     ]
@@ -74,12 +76,12 @@ seed: 42
 
 # task_name: used by Hydra to namespace the output directory.
 # Log dir = {paths.log_dir}/{task_name}/runs/{run_name}
-task_name: "nf_simurgh_md17"
+task_name: "simurgh_legacy_nf_md22"
 
 # run_name_suffix: optional descriptive tag appended to the run name.
 # null or "" → no suffix; any string → appended with "_".
-# Example: "aspirin" → 2026-06-02_18-30_rmd17_nf_simurgh_aspirin
-run_name_suffix: "_aspirin" # prepend "_"; set to "" for no suffix
+# Example: "ac_ala3_nhme" → 2026-06-02_18-30_md22_nf_simurgh_ac_ala3_nhme
+run_name_suffix: "_ac_ala3_nhme" # prepend "_"; set to "" for no suffix
 
 # run_name: leaf of the log directory AND the W&B run name — always in sync.
 # Format: YYYY-MM-DD_HH-MM-SS_{dataset_type}_{backbone_name}{suffix}
@@ -122,7 +124,8 @@ paths:
 #   "lmdb"       — FairChem/OCP pickled-graph LMDB (.lmdb)
 #   "aselmdb"    — FairChem ASE-LMDB shards (.aselmdb): OMol25 et al.
 #   "trajectory" — ASE trajectory files (.traj, .db)
-#   "md17"       — MD17/rMD17 benchmark (goal.ml.data.benchmarks.md17)
+#   "md17"/"rmd17" — MD17 benchmark (goal.ml.data.benchmarks.md17)
+#   "md22"       — MD22 large-molecule benchmark (goal.ml.data.benchmarks.md22)
 #   "qm9"        — QM9 quantum chemistry (goal.ml.data.benchmarks.qm9)
 #   "ani1"/"ani1x" — ANI-1/ANI-1x (goal.ml.data.benchmarks.ani1)
 #
@@ -149,81 +152,96 @@ paths:
 #     test_dir:  /path/test/          # optional
 # ─────────────────────────────────────────────────────
 data:
-  # "rmd17" and "md17" are the same class (goal.ml.data.benchmarks.md17) — the
-  # `revised:` flag below is what picks the corpus, and the registry name
-  # is only a label. Kept as "rmd17" so the run name says which one.
+  # src/goal/ml/data/benchmarks/md22.py — a benchmark adapter, not one of the core
+  # goal.ml.data.datasets loaders. It downloads its own .npz from
+  # quantum-machine.org, converts every frame to an AtomicGraph once and
+  # caches that under `root`, and does its own train/val/test split. So
+  # `root` is a cache directory, not a file to read.
   #
-  # NOTE this is a benchmark adapter from src/goal/ml/data/benchmarks/, not one of
-  # the core goal.ml.data.datasets loaders. It downloads and caches
-  # itself, does its own train/val/test split, and holds every frame in
-  # memory as a pre-built graph — so `root` below is a cache directory,
-  # not a file to read.
-  dataset_type: rmd17
+  # First run downloads 138 MB and spends ~90 s building neighbour lists
+  # for all 85,109 conformations; later runs load the cache.
+  dataset_type: md22
 
-  root: ${paths.data_dir}/md17
-  molecule: aspirin # see the table under model.backbone.elements
-  revised: true # rMD17 (PBE/def2-SVP, consistent reference frame)
+  root: ${paths.data_dir}/md22
+
+  # ── Molecule ─────────────────────────────────────────────────────
+  # One of the seven MD22 molecules. They differ by an order of
+  # magnitude in size, which changes batch_size, elements and
+  # vnode_cutoff — this file is set up for Ac-Ala3-NHMe:
+  #
+  #   molecule                 atoms   frames   elements       train
+  #   Ac-Ala3-NHMe  <- this       42   85,109   [1, 6, 7, 8]   6,000
+  #   DHA                         56   69,753   [1, 6, 8]      8,000
+  #   stachyose                   87   27,272   [1, 6, 8]      8,000
+  #   AT-AT                       60   20,001   [1, 6, 7, 8]   3,000
+  #   AT-AT-CG-CG                118   10,153   [1, 6, 7, 8]   2,000
+  #   buckyball-catcher          148    6,102   [1, 6]           600
+  #   double-walled_nanotube     370    5,032   [1, 6]           800
+  #
+  # The `train` column is the MD22 paper's sGDML training size, which
+  # the loader uses by default — published MD22 numbers are almost
+  # always at one of these. CHANGING `molecule` MEANS CHANGING
+  # model.backbone.elements AND avg_num_neighbors TOO; neither is
+  # auto-derived for this backbone.
+  molecule: Ac-Ala3-NHMe
 
   # ── Split ────────────────────────────────────────────────────────
   # The dataset splits ITSELF from these sizes; the DataModule just asks
-  # it for "train" / "val" / "test" in turn. data.split_ratio and
-  # data.split_seed are therefore ignored here and are not set.
+  # it for "train" / "val" / "test" in turn, so data.split_ratio and
+  # data.split_seed do not apply and are not set. Everything not taken
+  # by train+val becomes the test split (78,609 frames here).
   #
-  # 950/50 is the revised MD17 benchmark protocol (Schütt et al. 2017) — every
-  # published MD17 number you might compare against uses it. The
-  # remaining ~99,000 frames become the test split.
-  train_size: 950
-  val_size: 50
-  test_size: 50
+  # train_size: null uses the per-molecule default in the table above.
+  train_size: 6000
+  val_size: 500
   seed: 42
 
-  # float64 labels: rMD17 energies are ~-17,617 eV with a spread of
-  # 0.27 eV, so the signal is the 5th significant figure of the label.
+  # float64 labels: MD22 energies are ~-26,914 eV with a spread of
+  # 0.36 eV, so the signal is the 5th significant figure of the label.
   # trainer.precision below still runs the network in float32.
   dtype: float64
 
   # ── MONITOR THE TEST SET DURING TRAINING ─────────────────────────
-  # false, and not negotiable here: the test split is everything the
-  # 950+50 did not take — about 99,000 frames. Running it through the
-  # validation loop every epoch would cost ~100x the validation pass
-  # for a set that is drawn from the same trajectory as val, so it is
-  # not even out-of-distribution. Evaluate it once at the end with
-  # goal-eval instead.
-  monitor_test_during_training: True
+  # false: the test split is ~78,600 frames from the same trajectory as
+  # val, so running it through the validation loop every epoch would
+  # cost ~150x the validation pass for a set that is not even
+  # out-of-distribution. Evaluate it once at the end with goal-eval.
+  monitor_test_during_training: false
 
   # Neighbour cutoff radius (Å). Must match model.backbone.cutoff.
-  # 5.0 is the MD17 convention. Aspirin is 7.94 Å across, so this is a
-  # genuine cutoff rather than a formality — and it is what leaves 3 of
-  # the 15 fragment-centroid pairs out of reach of atom-level message
+  # 5.0, the MD17/MD22 convention. Ac-Ala3-NHMe is 9.5 Å across, so this
+  # is a real cutoff and not a formality — it is what leaves 54 of the
+  # 120 fragment-centroid pairs out of reach of atom-level message
   # passing (see the header).
   cutoff: 5.0
 
   # ── DataLoader ───────────────────────────────────────────────────
-  # 6 structures x 21 atoms = 126 atoms and ~1,790 edges per batch,
-  # which is 159 optimiser steps per epoch over the 950 training frames.
+  # 8 structures x 42 atoms = ~7,180 edges per batch (897 edges per
+  # structure, measured). With 6,000 training frames that is 750
+  # optimiser steps per epoch.
   #
-  # SMALL DATA WANTS STEPS, NOT THROUGHPUT. At batch 24 this set gives
-  # only 40 steps per epoch, and memory is nowhere near the constraint
-  # (1.9 GiB at batch 6, 7.5 GiB at 24). MACE trains rMD17 at batch 5.
+  # DERIVED, NOT MEASURED ON THIS MOLECULE: peak memory for a full train
+  # step scales as ~0.175 MiB per edge per element PAIR — measured at
+  # 6 pairs (MD17, 1.1 MiB/edge) and 15 pairs (QM9, 2.6 MiB/edge), which
+  # agree to 3%. At 10 pairs that is ~1.75 MiB/edge:
   #
-  # MEASURED peak CUDA memory for a full train step (forward + autograd
-  # forces + backward + AdamW), at precision "32" — double it for the
-  # "64" this file now uses:
+  #   batch_size   edges    expected peak
+  #        4       3,588        6.3 GiB
+  #        8       7,176       12.6 GiB   <- this file
+  #       16      14,352       25.1 GiB
   #
-  #   batch_size   atoms   edges   peak
-  #        6         126    1,790   1.9 GiB   <- this file
-  #       12         252    3,596   3.8 GiB
-  #       24         504    7,208   7.5 GiB
-  batch_size: 6
+  # Check it on your card before a long run. For the larger molecules
+  # scale by atom count — the 370-atom nanotube is ~7,900 edges in ONE
+  # structure, so batch_size 1-2 there.
+  batch_size: 24
 
-  # num_workers: 0 IS THE RIGHT VALUE FOR THIS DATASET, unlike the
-  # lazily-decoded ones. Every frame is already a built graph in the
-  # parent process's memory, so __getitem__ is a list index — there is
-  # no work to hand to a worker, and forking would copy the whole
-  # trajectory per worker (Python refcounting defeats copy-on-write)
-  # while adding IPC to move graphs back. It also keeps the lazily
-  # attached fragment labels in ONE process, so each frame is
-  # decomposed once for the whole run rather than once per worker.
+  # num_workers: 0 IS THE RIGHT VALUE FOR THIS DATASET. Every frame is
+  # already a built graph in the parent process's memory, so __getitem__
+  # is a list index — there is no work to hand to a worker, and forking
+  # would copy the whole trajectory per worker (Python refcounting
+  # defeats copy-on-write). It also keeps the lazily attached fragment
+  # labels in ONE process, so each frame is decomposed once for the
+  # whole run rather than once per worker.
   num_workers: 0
   pin_memory: false # true if you move to CUDA and profile a win
   persistent_workers: false # only meaningful with num_workers > 0
@@ -232,20 +250,18 @@ data:
   # Label keys do NOT apply: this adapter reads the .npz fields itself
   # and builds AtomicGraphs directly. Setting energy_key/forces_key here
   # would be forwarded to the dataset and raise TypeError.
-  # energy_key: energy
-  # forces_key: forces
 
   # ══ FRAGMENT LABELS — MANDATORY FOR THIS MODEL ═══════════════════
   # NF_SIMURGH computes on fragment virtual nodes. Unlike the optional
   # fragment channel of the other SIMURGH configs, this is not a feature
   # that can be left off: with compute_fragment_index: false the model
   # raises at the first batch rather than silently degrading to
-  # atom-level-only (which would be `monolithic_arace` wearing a
+  # atom-level-only (which would be `simurgh_legacy_monolithic_arace` wearing a
   # different name, producing plausible numbers from the wrong model).
   #
-  # The benchmark adapters in src/goal/ml/data/benchmarks/ accept these options
-  # too, and attach the labels lazily on first access — so each frame is
-  # decomposed exactly once per process, not once per epoch.
+  # The benchmark adapters accept these options too, and attach the
+  # labels lazily on first access — so each frame is decomposed exactly
+  # once per process, not once per epoch.
   compute_fragment_index: true
 
   # Bond threshold for the distance-graph part of the decomposition (Å).
@@ -259,85 +275,83 @@ data:
   #   recap            RECAP cleavage rules
   #   custom           cut exactly the bonds named in fragment_smarts
   #
-  # Measured on rMD17 aspirin (C9H8O4, 21 atoms). "far" counts centroid
+  # Measured on MD22 Ac-Ala3-NHMe (42 atoms). "far" counts centroid
   # pairs separated by more than the 5 Å atom cutoff:
   #
-  #   scheme                          K  far    fragments
-  #   connected                       1  0/0    the whole molecule
-  #   rdkit_components                1  0/0    the whole molecule
-  #   rotatable                       6  3/15   ring · CH3 · CO · CO · HO · O
-  #   brics                           5  2/10   ring · CH3CO · CO · HO · O
-  #   custom (this file)              3  1/3    ring+O · acetyl · COOH
+  #   scheme                       K   far     fragments
+  #   connected                    1   0/0     the whole peptide
+  #   rotatable                   16  54/120   CH3 · CO · NH · CH · …
+  #   brics                        8  12/28    acetyl · NH · residue · …
+  #   rotatable + keep C(=O)N     12  33/66    CH3 · HCNO · CH · …
+  #   custom (this file)           5   6/10    Ac · 3 × C3H5NO · NHMe
   #
-  # `rotatable` IS THE WRONG CUT FOR THIS MOLECULE, which is why this
-  # file does not use it. Look at what it produces: a bare 'O', a lone
-  # 'HO', and the carboxyl split across two fragments. Those are not
-  # chemical groups, they are whatever fell out of cutting every
-  # non-ring single bond — and the model is being asked to learn a
-  # pooled representation of each one.
+  # `rotatable` IS THE WRONG CUT FOR A PEPTIDE, which is why this file
+  # does not use it. It cuts every non-ring single bond, and that
+  # includes the PEPTIDE BOND: the fragments it produces are 'CO' and
+  # 'HN' as separate units. The amide is planar and conjugated — the
+  # one bond in a peptide that should never be cut — and splitting it
+  # asks the model to pool a bare carbonyl and a bare N-H as if they
+  # were independent groups. BRICS splits the amide nitrogen off too.
   #
-  # The custom patterns below cut the two bonds that actually separate
-  # aspirin's three chemical units, and `fragment_keep_groups` then
-  # forbids the carboxyl from being split:
+  # The single custom pattern below cuts only the Cα–C(=O) bond, and
+  # `fragment_keep_groups` forbids the amide from being split. That is
+  # the canonical peptide-unit decomposition: an acetyl cap, three
+  # alanine residues of exactly C3H5NO each, and the N-methylamide cap.
+  # Every virtual node is then a residue — which is also the level at
+  # which peptide conformational energetics is usually described, so
+  # the inter-fragment term the model learns has a reading.
   #
-  #   [C:1](=O)-[O:2]   the ester bond, detaching the acetyl group
-  #   c-[CX3]           the aromatic-to-carboxyl bond
+  # NOTE a 3-atom pattern needs ':1'/':2' atom maps to say WHICH bond
+  # to cut — '[CX4]-[CX3](=O)' is rejected as ambiguous.
   #
-  # giving ring+ester-O (11 atoms), acetyl (6), carboxyl (4).
-  #
-  # NOTE a 3-atom pattern needs ':1'/':2' atom maps to say WHICH bond to
-  # cut — '[CX3](=O)-[OX2]' is rejected as ambiguous. Two-atom patterns
-  # need no maps.
-  #
-  # THE HONEST CAVEAT: on aspirin this is a second-order knob. Two
-  # rounds of 5 Å message passing give a 10 Å receptive field against
-  # the molecule's 8.48 Å extent, so the atom-level backbone already
-  # sees every atom pair and the virtual-node channel is supplying an
-  # inductive bias, not missing reach. Expect chemistry, not a large
-  # accuracy jump; `correlation` above is the change aimed at the
-  # MACE gap.
+  # THE TRADE: K drops from 16 to 5, so the fragment channel sees 10
+  # pairs instead of 120. Of those 10, a mean of 5.5 are beyond the
+  # atom cutoff (measured over 400 frames) — a higher *fraction* than
+  # rotatable's 54/120, and every one of them is a residue–residue
+  # separation rather than an artefact of where a single bond fell. If
+  # you want a finer channel, `rotatable` with
+  # fragment_keep_groups: ["C(=O)N"] gives K=12 with the amide intact.
   fragment_scheme: custom
 
-  # Total charge handed to rdkit's bond perception. rMD17 molecules are
+  # Total charge handed to rdkit's bond perception. MD22 molecules are
   # all neutral closed-shell.
   fragment_charge: 0
 
   # "fallback" — warn ONCE and use `connected` for that structure
   # "raise"    — stop the run
   #
-  # `raise` here, as in the GMD config and for the same reason: there is
-  # ONE topology in this dataset. If perception fails it fails for every
-  # frame, and the run would quietly train K=1 — the mechanism under
-  # test switched off — rather than stopping. A fallback that fires
-  # 100% of the time is not a fallback.
+  # `raise`: there is ONE topology in this dataset. If perception fails
+  # it fails for every frame, and the run would quietly train K=1 — the
+  # mechanism under test switched off — rather than stopping. A fallback
+  # that fires 100% of the time is not a fallback.
   fragment_on_failure: raise
 
-  # SMARTS whose matched atoms must stay in one fragment. Works with
-  # every scheme. Without this the carboxyl comes apart into 'CO' and
-  # 'HO' even under the custom cuts below.
-  fragment_keep_groups: ["C(=O)[OX2H1]"]
+  # SMARTS whose matched atoms must stay in one fragment. Without this
+  # the amide still comes apart at the N-Cα bond under the cut below.
+  fragment_keep_groups: ["C(=O)N"]
 
   # Bond patterns to CUT — used ONLY by `fragment_scheme: custom`.
-  # See the scheme block above for what each one separates.
-  fragment_smarts: ["[C:1](=O)-[O:2]", "c-[CX3]"]
+  # One bond: Cα to its carbonyl carbon, which is what separates one
+  # peptide unit from the next.
+  fragment_smarts: ["[CX4:1]-[CX3:2](=O)"]
 
 # ─────────────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────────────
 # backbone.name options:
-#   "nf_simurgh"         — NF_SIMURGH: ARACE rounds + fragment virtual
+#   "simurgh_legacy_nf"         — NF_SIMURGH: ARACE rounds + fragment virtual
 #                          nodes, monolithic (this file). EXPERIMENTAL.
-#   "monolithic_arace"   — SIMURGH ARACE monolithic, no virtual nodes.
-#                          The direct baseline for this file. No MD17
+#   "simurgh_legacy_monolithic_arace"   — SIMURGH ARACE monolithic, no virtual nodes.
+#                          The direct baseline for this file. No MD22
 #                          config for it exists yet; copy this one,
 #                          change backbone.name, and delete the whole
 #                          virtual_node: block (it is not a key that
 #                          backbone understands).
-#   "simurgh_arace"      — DEFAULT: same ARACE rounds, modular
-#                          (backbone + head; see src/goal/configs/ml/simurgh_gmd26.yaml)
-#   "simurgh"            — legacy ACE-dressing-first artisan-bank model
-#                          (alias: "simurgh_ace_first")
-#   "simurgh_monolithic" — legacy SIMURGH without backbone/head split
+#   "simurgh_legacy_arace"      — DEFAULT: same ARACE rounds, modular
+#                          (backbone + head; see src/goal/configs/ml/simurgh_legacy_gmd26.yaml)
+#   "simurgh_legacy"            — legacy ACE-dressing-first artisan-bank model
+#                          (alias: "simurgh_legacy_ace_first")
+#   "simurgh_legacy_monolithic" — legacy SIMURGH without backbone/head split
 #   "hyperspec"          — E(3)-equivariant GNN (HyperSpec)
 #   "invariant_gnn"      — invariant SchNet-like GNN
 #   "monolithic_example" — minimal reference monolithic model
@@ -366,11 +380,11 @@ data:
 # pooling reproduces the atom-level energy exactly, by construction, not
 # because a residual happens to stay small. The ONLY new physics is the
 # step-5 correction — and it starts at exactly zero, so at
-# initialisation this model IS monolithic_arace, numerically.
+# initialisation this model IS simurgh_legacy_monolithic_arace, numerically.
 # ─────────────────────────────────────────────────────
 model:
   backbone:
-    name: nf_simurgh
+    name: simurgh_legacy_nf
 
     # Neighbour cutoff radius (Å) — must match data.cutoff.
     cutoff: ${data.cutoff}
@@ -378,29 +392,28 @@ model:
     # ── Elements ────────────────────────────────────────────────────
     # UNLIKE EVERY OTHER SIMURGH CONFIG, THIS ONE MUST BE SET BY HAND.
     # train.py auto-extracts elements from the training set only for a
-    # hard-coded list of backbone names (simurgh, simurgh_ace_first,
-    # simurgh_arace, simurgh_monolithic, monolithic_arace) — see
-    # src/goal/ml/cli/train.py. "nf_simurgh" is not in that list, and
+    # hard-coded list of backbone names (simurgh, simurgh_legacy_ace_first,
+    # simurgh_legacy_arace, simurgh_legacy_monolithic, simurgh_legacy_monolithic_arace) — see
+    # src/goal/ml/cli/train.py. "simurgh_legacy_nf" is not in that list, and
     # adding it is a change to shared code this model does not make.
     #
     # GETTING THIS WRONG IS SILENT: an edge whose element pair has no
     # artisan is zero-masked, so it contributes exactly zero energy and
     # nothing warns. Set it to the elements actually present.
     #
-    # PER-MOLECULE, and this file's default is aspirin (C9H8O4).
+    # PER-MOLECULE, and this file's default is Ac-Ala3-NHMe (C12H22N4O4).
     # Change `data.molecule` and you MUST change this line too:
     #
-    #   aspirin, salicylic_acid, malonaldehyde, ethanol   [1, 6, 8]
-    #   paracetamol, uracil                               [1, 6, 7, 8]
-    #   azobenzene                                        [1, 6, 7]
-    #   benzene, naphthalene, toluene                     [1, 6]
+    #   Ac-Ala3-NHMe, AT-AT, AT-AT-CG-CG      [1, 6, 7, 8]
+    #   DHA, stachyose                        [1, 6, 8]
+    #   buckyball-catcher, nanotube           [1, 6]
     #
-    # Declaring the union [1, 6, 7, 8] works for every molecule and
+    # Declaring the union [1, 6, 7, 8] works for every MD22 molecule and
     # costs only unused artisans — but those parameters then receive no
     # gradient, which DDP rejects unless strategy.find_unused_parameters
-    # is true. On one device the union is the convenient choice; for
-    # multi-GPU, name the molecule's own elements.
-    elements: [1, 6, 8]
+    # is true. On one device the union is convenient; for multi-GPU,
+    # name the molecule's own elements.
+    elements: [1, 6, 7, 8]
 
     # ── Atomic-energy baseline ──────────────────────────────────────
     #   "learned"  — nn.Parameter, zero-init, jointly optimised.
@@ -412,16 +425,16 @@ model:
     # reasons it is both cheap and correct on MD17:
     #
     #   * cheap — the regression walks the training split, and that is
-    #     950 already-built graphs in memory. It costs under a second,
+    #     6,000 already-built graphs in memory. It costs seconds,
     #     unlike a lazily-decoded corpus where the same pass would
     #     rebuild every neighbour list.
-    #   * correct — rMD17 labels are total energies around -17,617 eV
-    #     with a spread of 0.27 eV. The baseline has to remove that
+    #   * correct — MD22 labels are total energies around -26,914 eV
+    #     with a spread of 0.36 eV. The baseline has to remove that
     #     offset or the network is fitting the 5th significant figure.
     #
     # WHAT THE REGRESSION ACTUALLY DOES HERE: one molecule means one
     # composition, so the species-count matrix has a single distinct row
-    # ([9, 8, 4] for C9H8O4) and the system is rank-deficient.
+    # ([12, 22, 4, 4] for C12H22N4O4) and the system is rank-deficient.
     # `compute_atomic_references` returns the minimum-norm solution,
     # which makes Σ_Z n_Z e_Z equal to the MEAN training energy — a
     # constant shift, not a per-element decomposition. That is exactly
@@ -441,8 +454,8 @@ model:
     # the correction is an interaction energy in exactly that sense.
     #
     # Left null so train.py computes std(E - baseline)/mean(n_atoms)
-    # over the 950 training frames — a sub-second pass here. Expect it
-    # to print [stats] scale≈0.0128 (0.269 eV spread / 21 atoms); a
+    # over the 6,000 training frames — a seconds-long pass here. Expect it
+    # to print [stats] scale≈0.0086 (0.359 eV spread / 42 atoms); a
     # wildly different number means the split or the molecule is not
     # what this file assumes.
     scale: null
@@ -458,9 +471,8 @@ model:
     #
     # with PER-ELEMENT couplings, raising the body order inside each
     # round. This is the ingredient the MACE paper credits for its
-    # rMD17 accuracy, and until now nothing in the ARACE family could
-    # reach it — the block existed only for the legacy ACE-first
-    # backbone's environment dressing.
+    # MD17/MD22 accuracy, and until recently nothing in the ARACE
+    # family could reach it.
     #
     #   null  no contraction; a round is exactly what it was before
     #         this option existed (bit-for-bit, no extra parameters)
@@ -468,22 +480,17 @@ model:
     #   2     + 2-fold CG contraction
     #   3     + 3-fold — MACE's standard setting
     #
-    # WHY IT IS ON HERE: this config reached 21 meV/Å force MAE on
-    # rMD17 aspirin against MACE's published 6.6, with 5.2 M parameters
-    # against MACE's ~1 M. Being bigger and worse points at
-    # expressiveness rather than capacity, and body order is the
-    # difference. Equivariance is preserved exactly (energy invariant,
-    # forces rotating with the frame, verified to float64 precision in
-    # tests/ml/simurgh/test_arace_correlation.py).
+    # Equivariance is preserved exactly — energy invariant, forces
+    # rotating with the frame, verified to float64 precision in
+    # tests/ml/simurgh/test_arace_correlation.py.
     #
-    # Cost on this model: 5.2 M -> 6.8 M parameters going from null to
-    # 3. Note the contraction's per-element coupling table is sized by
-    # `elements` above, NOT by `num_elements` — with 120 rows for a
-    # three-element molecule it would be 27 M instead of 6.8 M, forty
-    # times more rows than can ever be gathered.
+    # The contraction's per-element coupling table is sized by
+    # `elements` above, NOT by `num_elements`: it is gathered by atomic
+    # number, so 120 rows for a four-element molecule would be mostly
+    # rows that can never be reached.
     correlation: 3
 
-    # ── ARACE stacking (identical to monolithic_arace) ──────────────
+    # ── ARACE stacking (identical to simurgh_legacy_monolithic_arace) ──────────────
     # Each round = one artisan layer (per-element-pair equivariant
     # artisans on edges) + one ACE block (edge → node aggregation with
     # equivariant linear + residual + RMS norm):
@@ -503,12 +510,14 @@ model:
     # Mean neighbours per atom for the ACE aggregation normalisation
     # (message_sum / sqrt(avg_num_neighbors), as in MACE).
     # null = no normalisation. train.py auto-injects this only for
-    # "simurgh_arace", so set a number here to enable it.
+    # "simurgh_legacy_arace", so set a number here to enable it.
     #
-    # 14.3806 = mean degree at cutoff 5.0 Å over all 950 training
-    # frames of rMD17 aspirin (measured, not estimated). Depends on
-    # data.cutoff and on the molecule — re-measure if you change either.
-    avg_num_neighbors: 14.3806
+    # 21.3552 = mean degree at cutoff 5.0 Å over the Ac-Ala3-NHMe
+    # frames (measured, not estimated; 897 edges per 42-atom structure).
+    # Depends on data.cutoff AND on the molecule — a larger or denser
+    # MD22 molecule has a different value, so re-measure when you change
+    # either.
+    avg_num_neighbors: 21.3552
 
     # ── Equivariant pair artisans (primary learning component) ──────
     # One artisan per unordered element pair per layer. Architecture must
@@ -517,36 +526,6 @@ model:
     artisan:
       architecture: "equivariant"
       hidden_irreps: "16x0e + 16x1o + 16x2e" # node/pair equivariant width
-      # ── num_layers: 2, and num_rbf: 12 — both nearly free ─────────
-      # UNTESTED ON THIS MODEL. Set together on 2026-10-04 after the
-      # 9.8 meV/A run; revert either independently if it regresses.
-      #
-      # The parameter budget here is dominated by the radial MLP
-      # feeding tp.weight_numel, NOT by depth or readout width, so
-      # several expressiveness knobs cost almost nothing (measured, 6
-      # element pairs x 2 rounds):
-      #
-      #   current                             6.85 M
-      #   num_rbf 8 -> 12                     6.85 M   (+0.00)
-      #   num_layers 1 -> 2                   6.86 M   (+0.01)
-      #   n_scalar_out/final_hidden 16 -> 32  6.86 M   (+0.01)
-      #   radial_hidden 32 -> 64              7.97 M   (+1.12)
-      #
-      # num_layers: 1 means each artisan is a SINGLE tensor product
-      # with no further equivariant mixing before its scalar readout —
-      # the thinnest part of the model. 2 adds one residual
-      # EquivLinear + RMSNorm inside every artisan.
-      #
-      # num_rbf: 8 Bessel functions across a 5 A cutoff is coarse
-      # radial resolution for a molecule whose bond lengths cluster
-      # near 1.0-1.5 A; 12 costs nothing because only the MLP's input
-      # layer grows.
-      #
-      # REVERTED to 1 / 8 on 2026-10-05. The run that changed these
-      # together with forces 1 -> 10 was at 14 meV/A val force MAE
-      # where the 9.8 run (1 / 8, forces 1) was at 11 at the same
-      # epoch. Two variables moved, so this file now changes only the
-      # force weight; retry 2 / 12 separately at forces 1.
       num_layers: 1 # 1 = TP only; >1 adds residual EquivLinear+Norm layers
       num_rbf: 8 # Bessel radial basis functions
       radial_hidden: 32 # radial MLP hidden width
@@ -597,10 +576,10 @@ model:
       # every pair clears it, nothing is routed, and no rare artisan is
       # built — the setting costs nothing there.
       # OFF by default. At these element counts nothing would fall below
-      # the threshold anyway — the bank is 6 pairs, all of them common —
+      # the threshold anyway — the bank is 10 pairs, all of them common —
       # so switching it on would build no rare artisan and only add a
       # pass over the training split to count pairs. Turn it on when the
-      # element set grows; see src/goal/configs/ml/nf_simurgh_omol25.yaml, where
+      # element set grows; see src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml, where
       # 2,628 pairs make it the difference between 2.3 B parameters and
       # 84 M.
       rare_artisan:
@@ -626,7 +605,7 @@ model:
     # RUNS. None of them switches the virtual-node machinery off; there
     # is no such switch, and the model raises if you invent one
     # (`use_fragments`, `enable_virtual_nodes`, `init_zero`, ...).
-    # NF_SIMURGH without virtual nodes is `monolithic_arace`, which
+    # NF_SIMURGH without virtual nodes is `simurgh_legacy_monolithic_arace`, which
     # already exists — run that instead.
     virtual_node:
       # ── node construction (REPRESENTATION only) ───────────────────
@@ -661,19 +640,24 @@ model:
       # entire point: fragment pairs between 5 and 10 Å are exactly the
       # ones atom-level message passing cannot see.
       #
-      # 10.0, not the GMD file's 15.0, because aspirin is only 7.94 Å
-      # across: measured fragment-centroid separations under
-      # `rotatable` reach 6.07 Å, and 3 of the 15 pairs exceed the 5 Å
-      # atom cutoff. At 15 Å the envelope would be essentially flat over
-      # that whole range, wasting its radial resolution; at 10 Å it
-      # decays across the separations that actually occur.
+      # 13.0 for Ac-Ala3-NHMe. Measured residue-centroid separations
+      # over 400 frames: mean max 7.95 Å, p95 10.67 Å, max 12.39 Å — a
+      # flexible peptide samples a wide range as it folds and extends.
+      # 13 Å covers the observed tail and still decays across it; 15 Å
+      # would be nearly flat over everything that occurs, spending the
+      # radial basis on empty space, and 12 Å would clip the extended
+      # conformations exactly where the long-range term matters most.
+      #
+      # RAISE IT for the bigger molecules — the 370-atom nanotube spans
+      # far more than 12 Å, and fragment pairs beyond this cutoff
+      # contribute nothing.
       #
       # Note the pair SET is not truncated at this radius — all ordered
       # k != l inside a structure are enumerated, and only the smooth
       # envelope decays. Truncating the set would make the attention
       # denominator jump as a fragment crossed the boundary, putting a
       # discontinuity in E and therefore a wrong F.
-      vnode_cutoff: 10.0
+      vnode_cutoff: 13.0
 
       # ── virtual-node interaction ──────────────────────────────────
       n_heads: 4 # attention heads; context_k is their concatenation
@@ -682,13 +666,14 @@ model:
 
       # Safety cap on K. Pair enumeration is O(K²), so a structure
       # decomposed into many tiny fragments (a gas of single atoms) gets
-      # expensive. `rotatable` gives K=6 on aspirin, so this is slack,
-      # not a live constraint.
+      # expensive. The residue split gives K=5 on Ac-Ala3-NHMe, so this
+      # is slack, not a live constraint — the nanotube will produce far
+      # more, and its cut patterns will differ anyway.
       vnode_max_fragments: 512
 
       # NOTE: there is no `init_zero` key. Zero-init of the correction
       # readout is a design invariant — it is what makes a fresh
-      # NF_SIMURGH numerically identical to monolithic_arace, and the
+      # NF_SIMURGH numerically identical to simurgh_legacy_monolithic_arace, and the
       # reduction test depends on it — not a configurable option.
 
       # ── l>0 pooled invariants ─────────────────────────────────────
@@ -730,7 +715,7 @@ model:
       # Turn on only if the diagnostics suggest specialisation is
       # missing.
       #
-      # ══ ON by inheritance from nf_simurgh_gmd26_typecond.yaml ══
+      # ══ ON by inheritance from simurgh_legacy_nf_gmd26_typecond.yaml ══
       # and it earns its place here for the same structural reason.
       #
       # `rotatable` cuts aspirin into fragments of sizes
@@ -786,26 +771,17 @@ trainer:
 
   # Epoch budget — max_epochs is THE authoritative epoch count.
   #
-  # An epoch here is 159 optimiser steps (950 frames / batch 6), so
-  # 1000 epochs is ~159k steps — the order the MD17 literature trains
-  # at. Early stopping on val_forces/forces_mae usually ends it first.
-  min_epochs: 50 # prevents premature early stopping
+  # An epoch here is 750 optimiser steps (6,000 frames / batch 8), so
+  # 250 epochs is ~188k steps — comparable to what this file's MD17
+  # sibling does in 1000 epochs of 159 steps. Early stopping on
+  # val_forces/forces_mae usually ends it first.
+  min_epochs: 20 # prevents premature early stopping
   max_epochs: 3000 # total epochs; scheduler T_max follows this value
 
   accelerator: gpu # "cpu" also finishes this one in reasonable time
   devices: 1
   num_nodes: 1
-  # ── precision: "64", NOT "32" ────────────────────────────────────
-  # rMD17 labels are total energies around -17,617 eV and the energy
-  # loss is the difference of two numbers that size. float32 resolves
-  # ~2e-3 eV there — roughly 10% of the energy error being chased — so
-  # the label is quantised at the scale of the signal. MACE trains
-  # rMD17 in float64 for the same reason.
-  #
-  # Costs ~2x memory and time. On a 21-atom molecule that is nothing;
-  # revisit it for MD22's larger molecules or OMol25, where "32" (or
-  # "bf16-mixed" on A100/H100) is the right call.
-  precision: "64"
+  precision: "32" # use "bf16-mixed" on A100/H100 for ~2x speedup
 
   # Strategy — "auto" works for single-GPU and CPU.
   # For DDP: strategy: ddp (and set devices: N, accelerator: gpu)
@@ -822,7 +798,9 @@ trainer:
     # int >= 1 = every N training batches
 
   # Logging
-  log_every_n_steps: 1
+  # 10, not 1: at 750 steps per epoch, per-step logging is a lot of
+  # points for little extra resolution.
+  log_every_n_steps: 10
 
   # Gradient clipping — set null here; handled by training.gradient_clip
   # (GOALModule.on_before_optimizer_step). Lightning refuses both at once.
@@ -940,54 +918,33 @@ training:
   # Rationale for the three-stage curriculum:
   #   Stage 1 — energy only: warm up the backbone on energies alone.
   #             Forces are noisy early when the energy surface is wrong.
-  #   Stage 2 — force-heavy, open-ended: the phase that actually trains
-  #             this model, weighted the way the benchmark is scored.
-  #
-  # ── FORCE WEIGHT: 10.0 (first test above 1.0) ───────────────────
-  # Set to 10.0 on 2026-10-04 as the first run above parity. If it
-  # helps, try 100.0 next; if it hurts, go back to 1.0. The run
-  # history before this change, all at forces: 1.0:
-  #
-  #   (forces 10 + artisan num_layers 2 / num_rbf 12 together: 14 vs
-  #    11 meV/A at equal epoch, mid-run -> worse, cause not isolated;
-  #    the artisan change is reverted so the next run tests 10 alone)
-  #
-  #   21.0 meV/A   before the early-stopping fix (truncated run)
-  #   13.3 meV/A   + correlation 3, chemistry-aware fragmentation
-  #    9.8 meV/A   + gate_reg 0, batch 6, precision 64, no early stop
-  #
-  # (MACE published on rMD17 aspirin: 6.6 meV/A, same 950-frame split.)
-  #
-  # 10.0 IS THE FIRST TEST OF A HIGHER WEIGHT. The argument for it is that
-  # MACE trains rMD17 at forces:energy = 1000:1 and this file is scored
-  # on force MAE. The argument against is that MACE's loss is squared
-  # error with its own per-atom normalisation, so its ratio does not
-  # map onto the per-atom MAE terms used here — and forces are -dE/dr,
-  # so letting the energy go slack has a cost that ratio does not
-  # capture. Worth one run at 10 and one at 100 before believing
-  # either argument.
-  #
-  # NO `newton` KEY. There is no `newton` loss in LOSS_REGISTRY
-  # (available: charge, dipole, energy, forces, gate_reg,
-  # scalar_property, stress), so listing it here does nothing except
-  # make train.py warn that the label is undeclared on every run.
-  # Newton violation is a logged METRIC — watch
-  # {split}_forces/newton_violation, which should sit at ~0 because
-  # these forces are -dE/dr by autograd.
+  #   Stage 2 — add forces: once energy is stable, add force supervision
+  #             at parity with the energy term.
+  #   Stage 3 — full: raise the force weight to 4.0. There is no Newton
+  #             term to add (see the note under `losses`); on MD22 the
+  #             published verdict is the force MAE, and forces carry 126
+  #             numbers per frame against the energy's one.
   stages:
     - name: "energy_only"
       epochs: 5
       loss_weights:
         energy: 1.0
         forces: 0.0
-        gate_reg: 0.0
+        gate_reg: 1.0e-4
 
-    - name: "forces"
+    - name: "energy_forces"
+      epochs: 85
+      loss_weights:
+        energy: 1.0
+        forces: 1.0
+        gate_reg: 1.0e-4
+
+    - name: "full"
       epochs: null # open-ended — runs to max_epochs
       loss_weights:
         energy: 1.0
-        forces: 10.0
-        gate_reg: 0.0
+        forces: 4.0
+        gate_reg: 1.0e-4
 
   # ── Loss functions ────────────────────────────────────────────────
   # Declares which loss components exist and their base weights.
@@ -1030,20 +987,9 @@ training:
       weight: 1.0
       normalize_by_n_atoms: true
 
-    # ── gate_reg: DECLARED BUT OFF ────────────────────────────────
-    # GateRegLoss returns `(gate_values ** 2).sum()` — a SUM over every
-    # artisan gate, not a mean. With 6 element pairs x 2 rounds = 12
-    # gates initialised at 1.0 that is ~12, and at the old weight of
-    # 1.0e-4 the term was ~1.2e-3: the same order as the energy loss,
-    # pulling every gate toward zero with no data behind it.
-    #
-    # Kept declared at weight 0 rather than deleted, so the stage
-    # loss_weights above still name a label that exists and the gate
-    # diagnostics under {split}_gate/ keep being logged. Raise it only
-    # if the gates actually run away.
     - name: gate_reg
       fn: mse
-      weight: 0.0
+      weight: 1.0e-4
 
     # NO "newton" ENTRY, and none in the stages above either. The GMD
     # configs carry a commented-out one and list `newton` in every
@@ -1088,11 +1034,11 @@ training:
 #   "val/total"                           — total weighted loss (min)
 #
 # "val_forces/forces_mae" is kept as the selection metric because it is
-# the number MD17 is published on — every comparison you might draw is
+# the number MD22 is published on — every comparison you might draw is
 # a force MAE in meV/Å on the held-out frames.
 #
 # data.monitor_test_during_training is off here (the test split is
-# ~99,000 frames from the same trajectory), so nothing is logged under
+# ~78,600 frames from the same trajectory), so nothing is logged under
 # test/ during training; run goal-eval on the test split at the end.
 #
 # Atomic writes (write .tmp then os.replace) prevent corrupted files.
@@ -1158,37 +1104,41 @@ callbacks:
     max_depth: 1 # nesting depth to display (-1 = all)
 
   # Early stopping — uncomment to enable:
-  # ── EARLY STOPPING IS OFF FOR THIS BENCHMARK RUN ─────────────────
-  # The LR schedule is cosine with T_max = trainer.max_epochs (3000).
-  # Stopping at epoch 1,200 does not just cut the run short — it ends
-  # it with the learning rate still at a large fraction of its initial
-  # value, and the last stretch of accuracy on rMD17 comes precisely
-  # from the decay to min_lr. A "plateau" observed at a high LR is
-  # usually the LR, not the model.
-  #
-  # So: run the full schedule. checkpoint_manager.top_k still keeps the
-  # best five weights by val_forces/forces_mae, so nothing is lost by
-  # letting it run past its best.
-  #
-  # Uncomment to restore the guard. Note min_delta must stay 0.0 — it
-  # is in the metric's units, and 1.0e-4 there means 0.1 meV/A, which
-  # scores every late epoch as stalled (that is what ended a 3,000
-  # epoch budget at ~970 with the curve still descending).
-  #
-  # early_stopping:
-  #   _target_: lightning.pytorch.callbacks.EarlyStopping
-  # Check right after validation, not at the end of the training epoch:
-  # a run resumed from a checkpoint saved after validation first closes
-  # that finished epoch with no metrics logged, which strict mode rejects.
-  check_on_train_epoch_end: false
-  #   monitor: "val_forces/forces_mae"
-  #   min_delta: 0.0
-  #   patience: 200
-  #   mode: "min"
-  #   strict: true
-  #   check_finite: true
-  #   stopping_threshold: null
-  #   divergence_threshold: null
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    # Check right after validation, not at the end of the training epoch:
+    # a run resumed from a checkpoint saved after validation first closes
+    # that finished epoch with no metrics logged, which strict mode rejects.
+    check_on_train_epoch_end: false
+    monitor: "val_forces/forces_mae"
+
+    # ── min_delta IS IN THE METRIC'S OWN UNITS ───────────────────────
+    # val_forces/forces_mae is reported in eV/A, so the
+    # inherited 1.0e-4 meant "an epoch only counts as an improvement if
+    # it beats the best by 1e-4 eV/A". Late in training the
+    # per-epoch gain is far below that, so EVERY epoch scores as
+    # stalled and the run stops while the curve is still descending —
+    # on rMD17 aspirin that ended a 3,000-epoch budget at ~970 with
+    # val_forces/forces_mae still falling.
+    #
+    # 0.0 = any improvement counts, which is what you want when the
+    # metric is a slowly converging error. Set a positive value only if
+    # you know the noise floor of your validation set and want to stop
+    # inside it.
+    min_delta: 0.0
+
+    # Counted in epochs.
+    # 200 (200 epochs) is deliberately generous: this is a
+    # divergence guard, not a convergence detector. To remove the guard
+    # entirely, comment out this whole block — checkpoint_manager.top_k
+    # still keeps the best weights.
+    patience: 200
+
+    mode: "min"
+    strict: true # crash if monitor not found in metrics
+    check_finite: true # stop if monitor becomes NaN or Inf
+    stopping_threshold: null # stop immediately if metric < threshold
+    divergence_threshold: null # stop if metric > threshold (diverging)
 
   # Backbone finetuning (for transfer learning from pretrained models):
   # backbone_finetuning:
@@ -1243,7 +1193,7 @@ callbacks:
 # data.monitor_test_during_training is on, otherwise only by an explicit
 # trainer.test() run).  Select on val_*, read test_*.
 #
-# Full section reference: src/goal/configs/ml/simurgh_gmd26.yaml
+# Full section reference: src/goal/configs/ml/simurgh_legacy_gmd26.yaml
 #
 # Multiple loggers can be active simultaneously.
 # Metrics are logged to all enabled loggers.
@@ -1269,7 +1219,7 @@ logger:
   # Weights & Biases (recommended for research tracking):
   wandb:
     _target_: lightning.pytorch.loggers.wandb.WandbLogger
-    name: ${run_name} # format: YYYY-MM-DD_HH-MM-SS_rmd17_nf_simurgh
+    name: ${run_name} # format: YYYY-MM-DD_HH-MM-SS_md22_nf_simurgh
     project: "goal"
     entity: null # null = your default W&B entity
     save_dir: "${paths.output_dir}"
@@ -1277,7 +1227,8 @@ logger:
     id: null # set to resume a specific W&B run
     log_model: false # true = upload checkpoints to W&B
     group: ""
-    tags: ["simurgh", "nf_simurgh", "md17", "rmd17", "experimental"]
+    tags:
+      ["simurgh_legacy", "simurgh_legacy_nf", "md22", "peptide", "experimental"]
 
   # TensorBoard:
   # tensorboard:
@@ -1290,7 +1241,7 @@ logger:
   # MLflow:
   # mlflow:
   #   _target_: lightning.pytorch.loggers.mlflow.MLFlowLogger
-  #   experiment_name: "simurgh-md17"
+  #   experiment_name: "simurgh-md22"
   #   tracking_uri: "http://localhost:5000"
   #   tags: null
 
@@ -1305,7 +1256,7 @@ logger:
   # aim:
   #   _target_: aim.pytorch_lightning.AimLogger
   #   repo: ${paths.log_dir}/aim
-  #   experiment: "simurgh-md17"
+  #   experiment: "simurgh-md22"
   #   system_tracking_interval: 10   # seconds; null = disable system metrics
   #   log_system_params: true
   #   capture_terminal_logs: false   # avoid console log loop

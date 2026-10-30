@@ -2,13 +2,13 @@
 
 Three parallel lines (atom, pair, fragment) over one shared input,
 combined only at the readout — see
-:mod:`~goal.ml.nn.models.simurgh.simurgh_simplified_layers` for the
+:mod:`~goal.ml.nn.models.simurgh.legacy.simurgh_simplified_layers` for the
 skeleton and its design invariants.
 
 **Monolithic** means every line's processor slot holds a *single* stack
 of simple equivariant layers that processes all of that line's inputs:
 no artisans, no routing, no experts.  It is the ablation baseline for
-``simurgh_simplified_routed``: both models run the identical skeleton
+``simurgh_legacy_simplified_routed``: both models run the identical skeleton
 (shared input, line wiring, residuals, norms, readouts, combination,
 E0/scale, forces), and differ only in the three processors below.
 
@@ -20,9 +20,9 @@ Processors
 * fragment line — one :class:`EquivariantMessageUnit` per virtual-node
   layer.
 
-Registered as ``"simurgh_simplified_monolithic"`` in ``MODEL_REGISTRY``
+Registered as ``"simurgh_legacy_simplified_monolithic"`` in ``MODEL_REGISTRY``
 and ``BACKBONE_REGISTRY`` (auto-discovered; configure with
-``head: null``).  Config: ``src/goal/configs/ml/simurgh_simplified_monolithic_gmd26.yaml``.
+``head: null``).  Config: ``src/goal/configs/ml/simurgh_legacy_simplified_monolithic_gmd26.yaml``.
 
 Isolation: a new file that imports stable primitives, blocks and the
 shared skeleton; no existing model is modified.
@@ -36,7 +36,7 @@ import torch
 import torch.nn as nn
 from e3nn.o3 import Irreps
 
-from goal.ml.nn.models.simurgh.simurgh_simplified_layers import (
+from goal.ml.nn.models.simurgh.legacy.simurgh_simplified_layers import (
     AtomLineProcessor,
     EquivariantMessageUnit,
     FragmentLineProcessor,
@@ -183,8 +183,8 @@ class MonolithicFragmentProcessor(FragmentLineProcessor):
 # ---------------------------------------------------------------------------
 
 
-@MODEL_REGISTRY.register("simurgh_simplified_monolithic")
-@BACKBONE_REGISTRY.register("simurgh_simplified_monolithic")
+@MODEL_REGISTRY.register("simurgh_legacy_simplified_monolithic")
+@BACKBONE_REGISTRY.register("simurgh_legacy_simplified_monolithic")
 class MonolithicSimurghSimplified(SimurghSimplifiedModel):
     """SIMURGH Simplified with a single monolithic stack in every line.
 

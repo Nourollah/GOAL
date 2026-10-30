@@ -6,12 +6,12 @@ This page is the reference for every `goal.ml` console script declared in `[proj
 
 | Command | Entry point | Configured by | Default config | Purpose |
 |---|---|---|---|---|
-| `goal-train` | `goal.ml.cli.train:train_ml` | Hydra | `src/goal/configs/ml/simurgh_gmd26.yaml` | Train (and fine-tune) any model |
+| `goal-train` | `goal.ml.cli.train:train_ml` | Hydra | `src/goal/configs/ml/simurgh_legacy_gmd26.yaml` | Train (and fine-tune) any model |
 | `goal-train-ml` | same function | Hydra | same | Alias of `goal-train` |
 | `goal-eval` | `goal.ml.cli.evaluate:evaluate` | Hydra | `src/goal/configs/ml/eval.yaml` | Test a checkpoint on the test split |
-| `goal-finetune` | `goal.ml.cli.finetune:finetune` | Hydra | `src/goal/configs/ml/finetune/simurgh_lora.yaml` | Fine-tune a pre-trained backbone (default: LoRA on a SIMURGH checkpoint) |
+| `goal-finetune` | `goal.ml.cli.finetune:finetune` | Hydra | `src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml` | Fine-tune a pre-trained backbone (default: LoRA on a SIMURGH checkpoint) |
 | `goal-finetune-upet` | `goal.ml.cli.finetune_upet:main` | argparse | — | Fine-tune UPET/PET through metatrain |
-| `goal-tune` | `goal.ml.cli.tune:tune` | Hydra | `src/goal/configs/ml/simurgh_gmd26_hpo.yaml` | LR finder, Ray Tune, W&B Sweeps |
+| `goal-tune` | `goal.ml.cli.tune:tune` | Hydra | `src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml` | LR finder, Ray Tune, W&B Sweeps |
 | `goal-inspect` | `goal.ml.cli.inspect_ckpt:main` | argparse | — | Describe a checkpoint without loading the model |
 | `goal-pack-archive` | `goal.ml.cli.pack:main` | argparse | — | Pack a self-contained `.simurgh` archive |
 | `goal-pack-zarr` | `goal.ml.cli.pack_zarr:main` | argparse | — | Convert structure files to a GOAL Zarr store ([Zarr data](../../integrations/zarr_data.md)) |
@@ -25,7 +25,7 @@ Every module also runs with `python -m`, for example `python -m goal.ml.cli.trai
 
 | Flag | Meaning |
 |---|---|
-| `--config-name NAME` / `-cn NAME` | Config file to load, relative to the command's config directory, without `.yaml` (for example `nf_simurgh_gmd26`, `ablations/01_gmd26_base`) |
+| `--config-name NAME` / `-cn NAME` | Config file to load, relative to the command's config directory, without `.yaml` (for example `simurgh_legacy_nf_gmd26`, `ablations/01_gmd26_base`) |
 | `--config-dir DIR` / `-cd DIR` | Add a directory to the search path |
 | `key=value`, `+key=value`, `++key=value`, `~key` | Override, add, force or delete a config key |
 | `-m` / `--multirun` | Sweep over comma-separated values |
@@ -36,7 +36,7 @@ Every module also runs with `python -m`, for example `python -m goal.ml.cli.trai
 The config directories are absolute paths into the configs bundled with the package (`goal/configs/`, which is `src/goal/configs/` in a clone; the path is available as `goal.CONFIGS_DIR`). They are computed in `goal/ml/cli/__init__.py`, so every command finds them from any working directory, in a clone or in a pip/conda install:
 
 - all four search **`goal/configs/ml/`**, so `--config-name <experiment>` picks any experiment file there;
-- each has a default config that exists: `simurgh_gmd26` (`goal-train`), `eval` (`goal-eval`), `finetune/simurgh_lora` (`goal-finetune`), `simurgh_gmd26_hpo` (`goal-tune`).
+- each has a default config that exists: `simurgh_legacy_gmd26` (`goal-train`), `eval` (`goal-eval`), `finetune/simurgh_legacy_lora` (`goal-finetune`), `simurgh_legacy_gmd26_hpo` (`goal-tune`).
 
 The shared presets in `goal/configs/debug/` and `goal/configs/hparams_search/` sit one level up, so attaching one needs that directory on the search path. In a clone:
 
@@ -73,11 +73,11 @@ What it does, in order:
 7. Fits, then writes `TRAINING_COMPLETE` into the checkpoint directory on rank 0.
 
 ```bash
-# Default: SIMURGH ARACE on GMD-26 (src/goal/configs/ml/simurgh_gmd26.yaml)
+# Default: SIMURGH ARACE on GMD-26 (src/goal/configs/ml/simurgh_legacy_gmd26.yaml)
 pixi run -e cuda goal-train
 
 # Another experiment file
-pixi run -e cuda goal-train --config-name nf_simurgh_md17
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md17
 pixi run -e cuda goal-train --config-name ablations/05_gmd26_body_order
 pixi run -e cuda goal-train --config-name finetune/uma
 
@@ -93,10 +93,10 @@ pixi run -e cuda goal-train --config-dir src/goal/configs +debug=fdr
 
 # Extend a finished run to 3000 epochs
 pixi run -e cuda goal-train trainer.max_epochs=3000 \
-    resume.from=logs/simurgh_gmd26/runs/<old_run>/checkpoints
+    resume.from=logs/simurgh_legacy_gmd26/runs/<old_run>/checkpoints
 
 # Check the composed config without training
-pixi run -e cuda goal-train --config-name nf_simurgh_gmd26 --cfg job -p model
+pixi run -e cuda goal-train --config-name simurgh_legacy_nf_gmd26 --cfg job -p model
 ```
 
 Related pages: [Distributed training](../training/distributed.md), [Resuming & extending](../training/resuming.md), [Performance engineering](../training/performance.md).
@@ -106,7 +106,7 @@ Related pages: [Distributed training](../training/distributed.md), [Resuming & e
 Tests a checkpoint on a test split. The **model comes from the checkpoint** (frozen source, saved config, EMA weights) through the same loader as `GOALCalculator`; the config only chooses the data and the hardware. Minimal invocation:
 
 ```bash
-pixi run -e cuda goal-eval ckpt_path=logs/simurgh_gmd26/runs/<run>/checkpoints
+pixi run -e cuda goal-eval ckpt_path=logs/simurgh_legacy_gmd26/runs/<run>/checkpoints
 ```
 
 | Key | Meaning |
@@ -122,14 +122,14 @@ pixi run -e cuda goal-eval ckpt_path=logs/simurgh_gmd26/runs/<run>/checkpoints
 
 ## `goal-finetune`
 
-Fine-tunes a pre-trained backbone. Its default config, [`finetune/simurgh_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_lora.yaml), adapts a trained **SIMURGH checkpoint with LoRA**. Minimal invocation:
+Fine-tunes a pre-trained backbone. Its default config, [`finetune/simurgh_legacy_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml), adapts a trained **SIMURGH checkpoint with LoRA**. Minimal invocation:
 
 ```bash
-pixi run -e cuda goal-finetune model.backbone.checkpoint_path=/abs/path/logs/simurgh_gmd26/runs/<run>/checkpoints \
+pixi run -e cuda goal-finetune model.backbone.checkpoint_path=/abs/path/logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
     'data.train_paths=[data/dicarboxylic/train.xyz]' 'data.val_paths=[data/dicarboxylic/val.xyz]'
 ```
 
-`goal-train --config-name finetune/simurgh_lora` runs the same config through the full training path (`GOALCheckpointManager`, archives, resume) and is the recommended route; see [LoRA fine-tuning of SIMURGH](../../integrations/lora_finetune.md).
+`goal-train --config-name finetune/simurgh_legacy_lora` runs the same config through the full training path (`GOALCheckpointManager`, archives, resume) and is the recommended route; see [LoRA fine-tuning of SIMURGH](../../integrations/lora_finetune.md).
 
 Other configs build the backbone in one of three modes:
 
@@ -192,21 +192,21 @@ Hyperparameter search, dispatched on `hparams_search.method`:
 Its default config is the ready-made ARACE search, so the minimal invocation is:
 
 ```bash
-pixi run -e cuda goal-tune          # = --config-name simurgh_gmd26_hpo (Ray Tune + Optuna, needs [tune])
+pixi run -e cuda goal-tune          # = --config-name simurgh_legacy_gmd26_hpo (Ray Tune + Optuna, needs [tune])
 ```
 
 To use the generic presets in `src/goal/configs/hparams_search/` with any experiment, put `goal/configs` on the search path and append them **into the global package**:
 
 ```bash
 # Lightning LR finder on the default experiment
-pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_gmd26 +hparams_search@_global_=basic
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 +hparams_search@_global_=basic
 
 # Ray Tune (ASHA + Optuna) over lr / weight_decay / loss weight / EMA decay
-pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_gmd26 +hparams_search@_global_=ray_tune
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 +hparams_search@_global_=ray_tune
 
 # W&B Sweep, or resume one
-pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_gmd26 +hparams_search@_global_=wandb_sweep
-pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_gmd26 +hparams_search@_global_=wandb_sweep \
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 +hparams_search@_global_=wandb_sweep
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 +hparams_search@_global_=wandb_sweep \
     hparams_search.sweep_id=<SWEEP_ID>
 ```
 
@@ -215,7 +215,7 @@ pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_g
 
 Caveats of the tune path:
 
-- It builds the backbone and head **directly from the config**, with no dataset-derived injection. Pin `model.backbone.elements` (as `simurgh_gmd26_hpo.yaml` does) and do not rely on `atomic_energies.mode: dataset`.
+- It builds the backbone and head **directly from the config**, with no dataset-derived injection. Pin `model.backbone.elements` (as `simurgh_legacy_gmd26_hpo.yaml` does) and do not rely on `atomic_energies.mode: dataset`.
 - Monolithic configs (`head: null`) are supported; the head is built with the same rules as `goal-train`.
 - Ray and W&B trials build their own `L.Trainer` (`accelerator="auto"`, no checkpointing) and use `hparams_search.max_epochs` (Ray) or `training.max_epochs` (W&B, default 500) as the epoch budget, not `trainer.max_epochs`.
 
@@ -232,9 +232,9 @@ usage: goal-inspect [-h] path
 `path` can be any of the three checkpoint formats:
 
 ```bash
-pixi run -e cuda goal-inspect logs/simurgh_gmd26/runs/<run>/checkpoints/best_val_forces_mae.simurgh   # archive
-pixi run -e cuda goal-inspect logs/simurgh_gmd26/runs/<run>/checkpoints/                              # managed directory
-pixi run -e cuda goal-inspect logs/simurgh_gmd26/runs/<run>/checkpoints/last.ckpt                      # bare .ckpt
+pixi run -e cuda goal-inspect logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/best_val_forces_mae.simurgh   # archive
+pixi run -e cuda goal-inspect logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/                              # managed directory
+pixi run -e cuda goal-inspect logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/last.ckpt                      # bare .ckpt
 ```
 
 The report contains the format, whether the model source is frozen (self-contained), the GOAL version, git commit, save time, model class, elements, the number of dedicated and rare artisan pairs, average neighbours, scale, and, from the `.json` sidecar, the epoch, pool and `val/*` metrics. For a directory it also lists the available checkpoints. It exits with code 1 if the path does not exist.
@@ -250,10 +250,10 @@ This command packs one checkpoint from a `GOALCheckpointManager` directory into 
 | `--output` | no | `<ckpt stem>.simurgh` inside the checkpoint directory | Output path |
 
 ```bash
-pixi run -e cuda goal-pack-archive --checkpoint-dir logs/simurgh_gmd26/runs/<run>/checkpoints \
-    --checkpoint best --output models/simurgh_gmd26.simurgh
+pixi run -e cuda goal-pack-archive --checkpoint-dir logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
+    --checkpoint best --output models/simurgh_legacy_gmd26.simurgh
 
-pixi run -e cuda goal-pack-archive --checkpoint-dir logs/simurgh_gmd26/runs/<run>/checkpoints --checkpoint epoch=1124
+pixi run -e cuda goal-pack-archive --checkpoint-dir logs/simurgh_legacy_gmd26/runs/<run>/checkpoints --checkpoint epoch=1124
 ```
 
 It prints `Packed <ckpt> -> <archive>` on success and exits with code 1 on a missing or invalid directory. Load the archive with `GOALCalculator(checkpoint_path="model.simurgh")`. See [Checkpoints & archives](../deployment/archives.md).

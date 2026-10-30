@@ -5,12 +5,12 @@ This page covers a `goal.ml` training run from start to finish: launching on a G
 ## The short version
 
 ```bash
-pixi run -e cuda goal-train                                   # SIMURGH ARACE on GMD-26, src/goal/configs/ml/simurgh_gmd26.yaml
-pixi run -e cuda goal-train --config-name simurgh_md17        # any other file in src/goal/configs/ml/
+pixi run -e cuda goal-train                                   # SIMURGH ARACE on GMD-26, src/goal/configs/ml/simurgh_legacy_gmd26.yaml
+pixi run -e cuda goal-train --config-name simurgh_legacy_md17        # any other file in src/goal/configs/ml/
 pixi run -e cuda goal-train trainer.max_epochs=300 data.batch_size=32 training.optimizer.lr=5e-3
 ```
 
-Each run is described by one self-contained experiment file in [`src/goal/configs/ml/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/configs/ml). That file holds the data, model, trainer, losses, checkpointing, logging and strategy settings. `--config-name` selects the file, and any key can be overridden on the command line using Hydra's `dotted.key=value` syntax. The default file is [`src/goal/configs/ml/simurgh_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_gmd26.yaml), which trains the default model, SIMURGH ARACE (`model.backbone.name: simurgh_arace`), on the GMD-26 FragmentDuplication set.
+Each run is described by one self-contained experiment file in [`src/goal/configs/ml/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/configs/ml). That file holds the data, model, trainer, losses, checkpointing, logging and strategy settings. `--config-name` selects the file, and any key can be overridden on the command line using Hydra's `dotted.key=value` syntax. The default file is [`src/goal/configs/ml/simurgh_legacy_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26.yaml), which trains the default model, SIMURGH ARACE (`model.backbone.name: simurgh_legacy_arace`), on the GMD-26 FragmentDuplication set.
 
 You can launch the same entry point in four ways:
 
@@ -91,11 +91,11 @@ flowchart TD
 3. **Global performance settings.** `torch.set_float32_matmul_precision` and the cuDNN flags are applied from `training.performance` (see [Performance engineering](performance.md)).
 4. **Resume decision.** `resolve_resume(cfg)` decides between a fresh start, resuming an interrupted run, extending a finished one, and refusing to start because the epoch budget is already spent. This runs *before* any data is loaded, so a SLURM requeue of a finished job exits in seconds. See [Resuming & extending](resuming.md).
 5. **Data.** `GOALDataModule(cfg)` is built, and `prepare_data()` and `setup("fit")` are called straight away so that statistics can be computed from the training split before the model exists. Lightning calls `setup` again later, and that second call is a no-op.
-6. **Dataset-derived model inputs.** For the SIMURGH family (`simurgh`, `simurgh_ace_first`, `simurgh_arace`, `simurgh_monolithic`, `monolithic_arace`), these values are computed from the training set and injected into the backbone kwargs, overriding the config:
+6. **Dataset-derived model inputs.** For the SIMURGH family (`simurgh_legacy`, `simurgh_legacy_ace_first`, `simurgh_legacy_arace`, `simurgh_legacy_monolithic`, `simurgh_legacy_monolithic_arace`), these values are computed from the training set and injected into the backbone kwargs, overriding the config:
     - `elements`: the unique atomic numbers. The dataset always takes precedence over whatever the YAML says.
     - `atomic_energies.values`: a least-squares fit of per-element reference energies when `atomic_energies.mode` is `dataset` (or `compute_from_dataset: true`) and no values are given.
     - `scale`: the ScaleShift gain, computed for `dataset` and `provided` modes when `scale: null`.
-    - `avg_num_neighbors`: for `simurgh_arace` (top-level key) and for legacy backbones with a `dressing_kwargs` block, when it is `null`.
+    - `avg_num_neighbors`: for `simurgh_legacy_arace` (top-level key) and for legacy backbones with a `dressing_kwargs` block, when it is `null`.
     - `pair_counts`: when an artisan block enables `rare_artisan`. These counts are also written back into the config, so `config.yaml` (and therefore every checkpoint) carries the routing they imply.
 7. **Model.** The backbone class comes from `BACKBONE_REGISTRY`. The head comes from `HEAD_REGISTRY`, unless the backbone is monolithic, in which case `model.head` must be `null`. A mismatch in either direction raises a `ValueError` at this point rather than failing deep inside the loop. The loss is built from `training.losses` (see [Loss functions](losses.md)), and everything is wrapped in `GOALModule`.
 8. **Callbacks and loggers.** `LearningRateMonitor` and `RichLoggingCallback` are always added. Everything under `callbacks:` and `logger:` is instantiated through Hydra, and the top-level `checkpoint_manager:` block becomes a `GOALCheckpointManager`. On a resume, `LRScheduleRetarget` is also added. Having a Lightning `ModelCheckpoint` and `GOALCheckpointManager` active at the same time is an error (see [Callbacks & logging](callbacks-logging.md)).
@@ -144,12 +144,12 @@ The directory is `${paths.log_dir}/${task_name}/runs/${run_name}`. `paths.root_d
 A finished run looks like this:
 
 ```text
-logs/simurgh_gmd26/runs/2026-10-16_14-30-45_trajectory_simurgh_arace_fragment_duplication/
+logs/simurgh_legacy_gmd26/runs/2026-10-16_14-30-45_trajectory_simurgh_arace_fragment_duplication/
 ├── .hydra/
 │   ├── config.yaml              # composed config (before stats injection)
 │   ├── hydra.yaml
 │   └── overrides.yaml           # exactly what you typed on the command line
-├── simurgh_gmd26.log            # Python logging output for the run
+├── simurgh_legacy_gmd26.log            # Python logging output for the run
 ├── csv_logs/version_0/metrics.csv
 ├── wandb/                       # W&B local files (if the W&B logger is on)
 └── checkpoints/                 # training.checkpoint_dir == checkpoint_manager.dirpath
@@ -282,7 +282,7 @@ export PROJECT_ROOT=$PWD             # logs/ and data/ relative to the repo
 mkdir -p logs/slurm
 
 srun pixi run -e cuda python -m goal.ml.cli.train \
-    --config-name simurgh_gmd26 \
+    --config-name simurgh_legacy_gmd26 \
     run_name=arace_gmd26_${SLURM_JOB_ID} \
     strategy.name=ddp \
     trainer.devices=${SLURM_NTASKS_PER_NODE} \

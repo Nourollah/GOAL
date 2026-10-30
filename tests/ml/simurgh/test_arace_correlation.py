@@ -26,7 +26,7 @@ import torch
 from torch_geometric.data import Batch
 
 from goal.ml.data.graph import AtomicGraph
-from goal.ml.nn.models.simurgh.nf_simurgh import MonolithicNFSimurgh
+from goal.ml.nn.models.simurgh.legacy.nf_simurgh import MonolithicNFSimurgh
 from tests.ml.simurgh.conftest import random_so3
 
 CUTOFF: float = 5.0

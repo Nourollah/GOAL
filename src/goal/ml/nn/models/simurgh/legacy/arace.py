@@ -43,7 +43,7 @@ One full round (stacked ``num_rounds`` times)::
 
 This module is completely isolated from the standard SIMURGH classes —
 it reuses only the shared primitives and helpers, and registers the
-monolithic model as ``"monolithic_arace"``.
+monolithic model as ``"simurgh_legacy_monolithic_arace"``.
 """
 
 from __future__ import annotations
@@ -801,8 +801,8 @@ class AraceBackbone(nn.Module):
         )
 
 
-@MODEL_REGISTRY.register("monolithic_arace")
-@BACKBONE_REGISTRY.register("monolithic_arace")
+@MODEL_REGISTRY.register("simurgh_legacy_monolithic_arace")
+@BACKBONE_REGISTRY.register("simurgh_legacy_monolithic_arace")
 class MonolithicArace(nn.Module):
     """Self-contained ARACE SIMURGH model.
 
@@ -841,7 +841,7 @@ class MonolithicArace(nn.Module):
         Size of the Z-indexed atomic-energy parameter/buffer.
     fragment_interaction : dict, optional
         Equivariant fragment-channel sub-config — see
-        :class:`~goal.ml.nn.models.simurgh.backbone_arace.SimurghAraceBackbone`.
+        :class:`~goal.ml.nn.models.simurgh.legacy.backbone_arace.SimurghAraceBackbone`.
         ``None`` (default) → disabled.
     adaptive_gate : dict, optional
         Adaptive depth-gate sub-config.  ``None`` (default) → disabled.

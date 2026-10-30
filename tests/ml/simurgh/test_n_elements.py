@@ -16,8 +16,8 @@ from omegaconf import OmegaConf
 
 from goal import CONFIGS_DIR
 from goal.ml.nn.blocks.artisans import LEGACY_N_ELEMENTS, resolve_n_elements
-from goal.ml.nn.models.simurgh.arace import MonolithicArace
-from goal.ml.nn.models.simurgh.backbone_arace import SimurghAraceBackbone
+from goal.ml.nn.models.simurgh.legacy.arace import MonolithicArace
+from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
 
 ELEMENTS = (1, 6, 8)
 ARTISAN = {
@@ -131,7 +131,8 @@ class TestBackboneSizing:
 
 
 @pytest.mark.parametrize(
-    "config_name", ["simurgh_gmd26", "nf_simurgh_gmd26", "monolithic_arace_gmd26"]
+    "config_name",
+    ["simurgh_legacy_gmd26", "simurgh_legacy_nf_gmd26", "simurgh_legacy_monolithic_arace_gmd26"],
 )
 def test_shipped_gmd26_configs_are_sized_by_auto(config_name: str) -> None:
     """The production GMD-26 configs set ``n_elements: auto``: with the H/C/O
@@ -164,7 +165,7 @@ class TestDerivedArgsPersisted:
             {
                 "model": {
                     "backbone": {
-                        "name": "simurgh_arace",
+                        "name": "simurgh_legacy_arace",
                         "scale": None,
                         "avg_num_neighbors": None,
                         "atomic_energies": {"mode": "dataset", "values": None},

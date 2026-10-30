@@ -34,7 +34,7 @@ from goal.ml.nn.blocks.artisans import (
     parse_pair_counts,
     route_element_pairs,
 )
-from goal.ml.nn.models.simurgh.arace import MonolithicArace
+from goal.ml.nn.models.simurgh.legacy.arace import MonolithicArace
 from tests.ml.simurgh.conftest import random_so3
 
 CUTOFF: float = 5.0
