@@ -115,6 +115,7 @@ nav:
           - Benchmark datasets: ml/data/benchmarks.md
       - Models:
           - Overview & model zoo: ml/models/overview.md
+          - SIMURGH (development): ml/models/simurgh-dev.md
           - SIMURGH ARACE (legacy): ml/models/simurgh.md
           - NF_SIMURGH (legacy): ml/models/nf-simurgh.md
           - SIMURGH Simplified (legacy): ml/models/simurgh-simplified.md
