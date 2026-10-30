@@ -335,7 +335,15 @@ class GOALModule(L.LightningModule):
 
     def _maybe_advance_stage(self, epoch: int) -> None:
         """Resolve the active stage, apply its weights, and log
-        transitions.  Cheap to call every step."""
+        transitions.  Cheap to call every step.
+
+        A stage may also set ``lr``: on entering it, every optimiser
+        parameter group takes that learning rate (meant for constant or
+        plateau schedules; a cosine schedule recomputes the rate each epoch).
+        """
+        set_epoch: typing.Any = getattr(self.backbone, "set_epoch", None)
+        if callable(set_epoch):
+            set_epoch(epoch)
         stage: typing.Any = self._get_current_stage(epoch)
         if stage is None:
             return
@@ -343,6 +351,12 @@ class GOALModule(L.LightningModule):
         stage_name: str = str(stage.get("name", "?"))
         if stage_name != self._current_stage_name:
             self._current_stage_name = stage_name
+            stage_lr: typing.Any = stage.get("lr", None)
+            trainer: typing.Any = getattr(self, "_trainer", None)
+            if stage_lr is not None and trainer is not None:
+                for optimizer in trainer.optimizers:
+                    for group in optimizer.param_groups:
+                        group["lr"] = float(stage_lr)
             active: dict[str, float] = {
                 lbl: float(wl.weight) for lbl, wl in self._weighted_loss_by_label.items()
             }
@@ -848,16 +862,22 @@ class GOALModule(L.LightningModule):
         scheduler_type: str = opt_cfg.get("scheduler_type", "reduce_on_plateau")
         weight_decay: float = float(opt_cfg.get("weight_decay", 0.0))
 
-        param_groups = self._split_param_groups(
-            lr=float(opt_cfg.lr),
-            weight_decay=weight_decay,
-        )
-
-        optimizer: torch.optim.AdamW = torch.optim.AdamW(
-            param_groups,
-            lr=opt_cfg.lr,
-            amsgrad=opt_cfg.get("amsgrad", True),
-        )
+        # A monolithic backbone may build its own optimiser (its own parameter
+        # groups, weight-decay rules or update rule); it receives the whole
+        # ``training.optimizer`` block.
+        build_optimizer: typing.Any = getattr(self.backbone, "build_optimizer", None)
+        if self.head is None and callable(build_optimizer):
+            optimizer: torch.optim.Optimizer = build_optimizer(opt_cfg)
+        else:
+            param_groups = self._split_param_groups(
+                lr=float(opt_cfg.lr),
+                weight_decay=weight_decay,
+            )
+            optimizer = torch.optim.AdamW(
+                param_groups,
+                lr=opt_cfg.lr,
+                amsgrad=opt_cfg.get("amsgrad", True),
+            )
 
         # max_epochs for the scheduler: prefer trainer.max_epochs (what Lightning
         # actually uses) over training.max_epochs (legacy, scheduler-only field).

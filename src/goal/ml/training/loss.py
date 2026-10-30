@@ -70,6 +70,55 @@ _ELEMENTWISE_FN_MAP: dict[str, typing.Callable[..., torch.Tensor]] = {
 }
 
 
+def _huber(delta: float) -> typing.Callable[..., torch.Tensor]:
+    """``huber_loss`` with threshold ``delta`` (the built-in entry uses 1.0)."""
+
+    def fn(p: torch.Tensor, t: torch.Tensor, reduction: str = "mean") -> torch.Tensor:
+        return nn.functional.huber_loss(p, t, reduction=reduction, delta=delta)
+
+    return fn
+
+
+def _force_norm_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    fn_name: str,
+    delta: float,
+    batch_index: torch.Tensor | None,
+    weight: torch.Tensor | None,
+    per_structure: bool,
+) -> torch.Tensor:
+    """Loss on the per-atom force-error norm ``e_i = ‖F_pred,i - F_ref,i‖``.
+
+    ``huber``: ``½e²`` for ``e <= delta``, ``delta (e - ½ delta)`` beyond;
+    ``mse``: ``e²``; ``mae`` / ``l1``: ``e``; ``rmse``: ``sqrt(mean e²)``.
+    Unchanged under a global rotation of predictions and labels, unlike a
+    per-component loss.  Averaged over the atoms of each structure and
+    then over structures when ``per_structure``, else over all atoms.
+    """
+    sq: torch.Tensor = (pred - target).square().sum(dim=-1)  # (N,)
+    norm: torch.Tensor = torch.sqrt(sq.clamp_min(1e-30))  # finite gradient at e = 0
+    if fn_name == "huber":
+        per_atom = torch.where(norm <= delta, 0.5 * sq, delta * (norm - 0.5 * delta))
+    elif fn_name in ("mse", "rmse"):
+        per_atom = sq
+    elif fn_name in ("mae", "l1"):
+        per_atom = norm
+    else:
+        raise ValueError(f"error: norm supports huber, mse, rmse, mae and l1, not {fn_name!r}")
+    if per_structure and batch_index is not None:
+        num_structs: int = int(batch_index.max().item()) + 1
+        per_struct = torch.zeros(num_structs, dtype=per_atom.dtype, device=per_atom.device)
+        counts = torch.zeros_like(per_struct)
+        per_struct.index_add_(0, batch_index, per_atom)
+        counts.index_add_(0, batch_index, torch.ones_like(per_atom))
+        values, index = per_struct / counts.clamp_min(1.0), None
+    else:
+        values, index = per_atom, batch_index
+    out = values.mean() if weight is None else _weighted_mean(values, weight, index)
+    return torch.sqrt(out) if fn_name == "rmse" else out
+
+
 def _weighted_mean(
     values: torch.Tensor,
     weight: torch.Tensor,
@@ -296,10 +345,13 @@ class EnergyLoss(nn.Module):
     plain ``loss_fn(p, t)`` reduction is used.
     """
 
-    def __init__(self, loss_fn: str = "mse") -> None:
+    def __init__(self, loss_fn: str = "mse", delta: float = 1.0) -> None:
         super().__init__()
         self._loss_fn_name: str = loss_fn
         self.loss_fn: typing.Callable[..., torch.Tensor] = resolve_loss_fn(loss_fn)
+        self.delta: float = float(delta)
+        if loss_fn == "huber":
+            self.loss_fn = _huber(self.delta)
 
     def forward(
         self,
@@ -342,6 +394,8 @@ class EnergyLoss(nn.Module):
         if weight is None or weight.numel() == 0:
             return self.loss_fn(p, t)
         # Energy is one element per graph — no batch_index needed.
+        if self._loss_fn_name == "huber":
+            return _weighted_mean(self.loss_fn(p, t, reduction="none"), weight)
         return _weighted_loss_value(p, t, weight, self._loss_fn_name)
 
 
@@ -444,11 +498,23 @@ class ForcesLoss(nn.Module):
         dict targets in unit tests) — the flat mean is used in that case.
     """
 
-    def __init__(self, loss_fn: str = "mse", normalize_by_n_atoms: bool = True) -> None:
+    def __init__(
+        self,
+        loss_fn: str = "mse",
+        normalize_by_n_atoms: bool = True,
+        error: str = "component",
+        delta: float = 1.0,
+    ) -> None:
         super().__init__()
+        if error not in ("component", "norm"):
+            raise ValueError(f"forces loss error must be 'component' or 'norm', got {error!r}")
         self._loss_fn_name: str = loss_fn
         self.loss_fn: typing.Callable[..., torch.Tensor] = resolve_loss_fn(loss_fn)
         self._normalize_by_n_atoms: bool = bool(normalize_by_n_atoms)
+        self.error: str = error
+        self.delta: float = float(delta)
+        if loss_fn == "huber":
+            self.loss_fn = _huber(self.delta)
 
     def forward(
         self,
@@ -486,6 +552,18 @@ class ForcesLoss(nn.Module):
         if weight is not None and weight.numel() == 0:
             weight = None
 
+        if self.error == "norm":
+            return _force_norm_loss(
+                p,
+                t,
+                self._loss_fn_name,
+                self.delta,
+                batch_index,
+                weight,
+                self._normalize_by_n_atoms,
+            )
+        if self._loss_fn_name == "huber" and self.delta != 1.0:
+            raise ValueError("forces: a huber delta other than 1.0 needs error: norm")
         if self._normalize_by_n_atoms and batch_index is not None:
             return _per_structure_force_loss(p, t, self._loss_fn_name, batch_index, weight)
 

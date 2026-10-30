@@ -898,6 +898,173 @@ class _D3Term(nn.Module):
 
 
 # =============================================================================
+# WP4: optimiser (built by the model; GOALModule calls ``build_optimizer``)
+# =============================================================================
+
+_NS_COEFFICIENTS = (3.4445, -4.7750, 2.0315)
+
+
+def _newton_schulz(g: torch.Tensor, steps: int) -> torch.Tensor:
+    """Approximate orthogonalisation ``U Vᵀ`` of ``g`` (quintic Newton-Schulz, bf16)."""
+    a, b, c = _NS_COEFFICIENTS
+    x = g.to(torch.bfloat16)
+    transpose = x.shape[0] > x.shape[1]
+    if transpose:
+        x = x.T
+    x = x / (x.norm() + 1e-7)
+    for _ in range(steps):
+        xx = x @ x.T
+        x = a * x + (b * xx + c * xx @ xx) @ x
+    return (x.T if transpose else x).to(g.dtype)
+
+
+def _blocks_of(
+    module: nn.Module, name: str
+) -> typing.Callable[[torch.Tensor], list[torch.Tensor]] | None:
+    """2-D channel-mixing blocks of a matrix-like parameter, or ``None``.
+
+    ``o3.Linear``: one ``(mul_in, mul_out)`` block per irrep path;
+    ``_ElementLinear``: one block per element; ``nn.Linear`` with more than
+    one output: the weight itself.
+    """
+    if isinstance(module, o3.Linear) and name == "weight":
+        return lambda t, m=module: [w for w in m.weight_views(weight=t)]
+    if isinstance(module, _ElementLinear):
+        return lambda t: list(t)
+    if isinstance(module, nn.Linear) and name == "weight" and module.out_features > 1:
+        return lambda t: [t]
+    return None
+
+
+class _SimurghOptimizer(torch.optim.Optimizer):
+    """AdamW, Muon or block-RMS Adam per parameter group (``kind``).
+
+    ``adam``: AdamW (AMSGrad optional).  ``muon``: Muon on every 2-D block
+    (Nesterov momentum, Newton-Schulz orthogonalised update scaled by
+    ``sqrt(max(1, rows / cols))``).  ``block_rms``: Adam whose update is
+    rescaled to unit RMS per block.  Weight decay is decoupled throughout.
+    """
+
+    def __init__(self, groups: list[dict], splits: dict[int, typing.Callable], **defaults) -> None:
+        super().__init__(groups, defaults)
+        self._splits = splits
+
+    @torch.no_grad()
+    def step(self, closure: typing.Callable | None = None) -> torch.Tensor | None:
+        """One update of every parameter group."""
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+        for group in self.param_groups:
+            lr, wd = group["lr"], group["weight_decay"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                if wd:
+                    p.mul_(1.0 - lr * wd)
+                if group["kind"] == "muon":
+                    buf = state.setdefault("momentum", torch.zeros_like(p))
+                    buf.mul_(group["momentum"]).add_(p.grad)
+                    g = p.grad.add(buf, alpha=group["momentum"])
+                    split = self._splits[id(p)]
+                    for gv, pv in zip(split(g), split(p)):
+                        scale = max(1.0, gv.shape[0] / gv.shape[1]) ** 0.5
+                        pv.add_(_newton_schulz(gv, group["ns_steps"]), alpha=-lr * scale)
+                    continue
+                beta1, beta2 = group["betas"]
+                if not state:
+                    state["step"] = 0
+                    state["m"], state["v"] = torch.zeros_like(p), torch.zeros_like(p)
+                    if group["amsgrad"]:
+                        state["v_max"] = torch.zeros_like(p)
+                state["step"] += 1
+                state["m"].mul_(beta1).add_(p.grad, alpha=1 - beta1)
+                state["v"].mul_(beta2).addcmul_(p.grad, p.grad, value=1 - beta2)
+                v = state["v"]
+                if group["amsgrad"]:
+                    torch.maximum(state["v_max"], v, out=state["v_max"])
+                    v = state["v_max"]
+                bc1, bc2 = 1 - beta1 ** state["step"], 1 - beta2 ** state["step"]
+                update = (state["m"] / bc1) / ((v / bc2).sqrt() + group["eps"])
+                if group["kind"] == "block_rms":
+                    split = self._splits[id(p)]
+                    for uv in split(update):
+                        uv.div_(uv.square().mean().sqrt().clamp_min(1e-12))
+                p.add_(update, alpha=-lr)
+        return loss
+
+
+def build_simurgh_optimizer(model: nn.Module, opt_cfg: typing.Any) -> _SimurghOptimizer:
+    """Optimiser of the training recipe for ``model`` (a :class:`SimurghDev`).
+
+    ``name: amsgrad`` (default) | ``muon`` | ``block_rms_adam``.  Decoupled
+    weight decay ``weight_decay`` applies to every parameter except the
+    embedding, the pair-line coefficients and scalar gates; with the
+    regularity prior on, the first radial layers, the linear radial maps
+    and the product-basis weights take ``a_basis.prior_weight_decay``.
+    ``muon`` / ``block_rms_adam`` act on the channel-mixing matrices
+    (``o3.Linear`` paths, element-wise self-connections) and the radial
+    MLP matrices; every other parameter stays on AdamW.
+    """
+    cfg = _plain(opt_cfg)
+    name = cfg.get("name", "amsgrad")
+    if name not in ("amsgrad", "adamw", "muon", "block_rms_adam"):
+        raise ValueError(f"optimizer.name must be amsgrad, muon or block_rms_adam, got {name!r}")
+    lr, wd = float(cfg["lr"]), float(cfg.get("weight_decay", 0.0))
+    prior_wd = model.config["a_basis"]["prior_weight_decay"]
+    prior_on = bool(model.config["a_basis"]["regularity_prior_sigma"])
+    no_decay: set[int] = {id(model.atom_line.embedding.weight)}
+    if model.pair_line is not None:
+        no_decay |= {id(p) for p in model.pair_line.parameters()}
+    prior: set[int] = set()
+    if prior_on:
+        for layer in model.atom_line.layers:
+            first = layer.radial if isinstance(layer.radial, nn.Linear) else layer.radial[0]
+            prior.add(id(first.weight))
+            prior |= {id(p) for p in layer.product.parameters()}
+    splits: dict[int, typing.Callable] = {}
+    if name in ("muon", "block_rms_adam"):
+        for module in model.modules():
+            for pname, p in module.named_parameters(recurse=False):
+                fn = _blocks_of(module, pname)
+                if fn is not None and id(p) not in prior and id(p) not in no_decay:
+                    splits[id(p)] = fn
+    matrix_kind = {"muon": "muon", "block_rms_adam": "block_rms"}.get(name, "adam")
+    buckets: dict[tuple[str, float], list[nn.Parameter]] = {}
+    for p in model.parameters():
+        if not p.requires_grad:
+            continue
+        if id(p) in prior:
+            key = ("adam", float(prior_wd))
+        elif id(p) in no_decay or p.dim() == 0:
+            key = ("adam", 0.0)
+        else:
+            key = (matrix_kind if id(p) in splits else "adam", wd)
+        buckets.setdefault(key, []).append(p)
+    betas = (0.98, 0.99) if name == "block_rms_adam" else tuple(cfg.get("betas", (0.9, 0.999)))
+    groups = []
+    for (kind, decay), params in buckets.items():
+        group = {"params": params, "kind": kind, "weight_decay": decay, "lr": lr}
+        if kind == "muon":
+            group["lr"] = float(cfg.get("muon_lr", 0.02))
+        groups.append(group)
+    return _SimurghOptimizer(
+        groups,
+        splits,
+        lr=lr,
+        betas=betas,
+        eps=float(cfg.get("eps", 1e-8)),
+        amsgrad=name in ("amsgrad",) or bool(cfg.get("amsgrad", False)),
+        momentum=float(cfg.get("muon_momentum", 0.99)),
+        ns_steps=int(cfg.get("ns_steps", 5)),
+        weight_decay=0.0,
+        kind="adam",
+    )
+
+
+# =============================================================================
 # WP5: model assembly
 # =============================================================================
 
@@ -983,7 +1150,18 @@ class SimurghDev(nn.Module):
             _PairLine(pl, elements, cfg["embedding_dim"], cfg["cutoff"]) if pl["enabled"] else None
         )
         self.dispersion = _D3Term(cfg["dispersion"]) if cfg["dispersion"]["enabled"] else None
+        if pl["pair_first_epochs"] and not pl["enabled"]:
+            raise ValueError("pair_line.pair_first_epochs needs pair_line.enabled")
+        self.epoch = 0
         self.to(getattr(torch, cfg["dtype"]))
+
+    def set_epoch(self, epoch: int) -> None:
+        """Current training epoch (GOALModule calls this every step)."""
+        self.epoch = int(epoch)
+
+    def build_optimizer(self, opt_cfg: typing.Any) -> torch.optim.Optimizer:
+        """The recipe's optimiser; see :func:`build_simurgh_optimizer`."""
+        return build_simurgh_optimizer(self, opt_cfg)
 
     @property
     def output_keys(self) -> list[str]:
@@ -1025,6 +1203,8 @@ class SimurghDev(nn.Module):
         emb = self.atom_line.embedding.weight
 
         e_atom, _ = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
+        if self.training and self.epoch < self.config["pair_line"]["pair_first_epochs"]:
+            e_atom = 0.0 * e_atom  # pair-first stage: the atom line gets zero gradients
         e_pair = torch.zeros_like(e_atom)
         wall = torch.zeros_like(e_atom)
         if self.pair_line is not None:
