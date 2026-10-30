@@ -654,7 +654,11 @@ class _AtomLine(nn.Module):
         num_layers = cfg["num_interactions"]
         for t in range(num_layers):
             last = t == num_layers - 1
-            irreps_out = scalars if last else hidden
+            irreps_out = hidden
+            if last:
+                irreps_out = scalars
+                if cfg["electrostatics"]["enabled"] and cfg["electrostatics"]["dipoles"]:
+                    irreps_out = o3.Irreps(f"{c}x0e + {c}x1o")  # vectors for the dipole head
             layers.append(
                 _Interaction(
                     t,
@@ -899,6 +903,96 @@ class _D3Term(nn.Module):
 
 
 # =============================================================================
+# WP7: factorised electrostatics (default off)
+# =============================================================================
+
+
+def damped_coulomb(r: torch.Tensor, sigma: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    """``T0 = erf(r / (√2 σ)) / r`` and the radial factors ``B``, ``C`` of its gradients.
+
+    Charge-dipole terms use ``B = -T0'/r``; dipole-dipole terms ``B`` and
+    ``C = (T0'' - T0'/r) / r²``.  For ``σ -> 0`` they become ``1/r``, ``1/r³``
+    and ``3/r⁵``.
+    """
+    a = 1.0 / (math.sqrt(2.0) * sigma)
+    erf = torch.erf(a * r)
+    g = 2.0 * a / math.sqrt(math.pi) * torch.exp(-((a * r) ** 2))
+    t0 = erf / r
+    t1 = g / r - erf / r**2
+    t2 = -2.0 * a**2 * g - 2.0 * g / r**2 + 2.0 * erf / r**3
+    return t0, -t1 / r, (t2 - t1 / r) / r**2
+
+
+class _Electrostatics(nn.Module):
+    """Latent charges (and optional dipoles) from local features; open-boundary energy.
+
+    ``q_i = Linear(h_i[0e])`` shifted so every molecule is neutral,
+    ``μ_i = Linear(h_i[1o])``; both heads start at zero, so a fresh model is
+    unchanged.  Gaussian widths ``σ_ij = √(σ_i² + σ_j²)`` with ``σ`` per
+    element (softplus, starting at 1 Å) or fixed.  The energy is in eV and
+    not scaled by ``s``.  Population charges are never supervised.
+    """
+
+    def __init__(self, cfg: dict, channels: int, num_elements: int) -> None:
+        super().__init__()
+        self.charge_head = nn.Linear(channels, 1, bias=False)
+        nn.init.zeros_(self.charge_head.weight)
+        self.dipole_head = None
+        if cfg["dipoles"]:
+            self.dipole_head = o3.Linear(f"{channels}x1o", "1x1o")
+            with torch.no_grad():
+                self.dipole_head.weight.zero_()
+        self.sigma_raw = None
+        self.fixed_sigma = None
+        if cfg["sigma"] == "learned":
+            init = math.log(math.e - 1.0)  # softplus(init) = 1 Å
+            self.sigma_raw = nn.Parameter(torch.full((num_elements,), init))
+        else:
+            self.fixed_sigma = float(cfg["sigma"])
+        self.channels = channels
+
+    def charges(self, h: torch.Tensor, batch: torch.Tensor, num_graphs: int) -> torch.Tensor:
+        """Neutral latent charges ``(N,)`` (per-molecule uniform shift)."""
+        q = self.charge_head(h[:, : self.channels]).squeeze(-1)
+        total = scatter(q, batch, dim=0, dim_size=num_graphs, reduce="sum")
+        count = scatter(torch.ones_like(q), batch, dim=0, dim_size=num_graphs, reduce="sum")
+        return q - (total / count)[batch]
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        pos: torch.Tensor,
+        elem: torch.Tensor,
+        batch: torch.Tensor,
+        num_graphs: int,
+    ) -> dict[str, torch.Tensor]:
+        """Energy per molecule, charges and the molecular dipole."""
+        q = self.charges(h, batch, num_graphs)
+        mu = None if self.dipole_head is None else self.dipole_head(h[:, self.channels :])
+        pairs, start = [], 0
+        for n in torch.bincount(batch, minlength=num_graphs).tolist():
+            pairs.append(torch.triu_indices(n, n, offset=1, device=pos.device) + start)
+            start += n
+        i, j = torch.cat(pairs, dim=1)
+        rij = pos[j] - pos[i]
+        r = rij.norm(dim=-1)
+        if self.sigma_raw is not None:
+            sig = nn.functional.softplus(self.sigma_raw)
+            sigma = torch.sqrt(sig[elem[i]] ** 2 + sig[elem[j]] ** 2)
+        else:
+            sigma = torch.full_like(r, math.sqrt(2.0) * self.fixed_sigma)
+        t0, b, c = damped_coulomb(r, sigma)
+        e = q[i] * q[j] * t0
+        dipole = scatter(q.unsqueeze(-1) * pos, batch, dim=0, dim_size=num_graphs, reduce="sum")
+        if mu is not None:
+            mi, mj = (mu[i] * rij).sum(-1), (mu[j] * rij).sum(-1)
+            e = e + (q[j] * mi - q[i] * mj) * b + (mu[i] * mu[j]).sum(-1) * b - mi * mj * c
+            dipole = dipole + scatter(mu, batch, dim=0, dim_size=num_graphs, reduce="sum")
+        energy = _COULOMB * scatter(e, batch[i], dim=0, dim_size=num_graphs, reduce="sum")
+        return {"energy": energy, "charges": q, "dipole": dipole}
+
+
+# =============================================================================
 # WP6: multi-scale fragment consistency (MFC)
 # =============================================================================
 #
@@ -1042,7 +1136,7 @@ class _MFC(nn.Module):
         ):
             if on:
                 _not_yet(flag)
-        self.register_buffer("sigma2", torch.zeros(2))  # running scales: energy, force
+        self.register_buffer("sigma2", torch.zeros(3))  # running scales: energy, force, charge
         self.register_buffer("step", torch.zeros((), dtype=torch.long))
         self.rng = np.random.default_rng(0)
         self.principal_prob = 0.5  # half-space direction: principal axis vs uniform
@@ -1101,6 +1195,7 @@ class _MFC(nn.Module):
         elem: torch.Tensor,
         batch: torch.Tensor,
         e_full: torch.Tensor,
+        q_full: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """MFC loss (``mfc``) and logged parts for one training batch."""
         zero = e_full.new_zeros(())
@@ -1137,7 +1232,7 @@ class _MFC(nn.Module):
         parent_grad = self.stop_grad != "parent"
         pos_w = pos_d[src] if child_grad else pos_d[src].detach().requires_grad_(True)
         vec = pos_w[edge_index[1]] - pos_w[edge_index[0]]
-        e_w, _ = model.atom_line(
+        e_w, h_w = model.atom_line(
             elem[src], edge_index, vec, vec.norm(dim=-1), model.avg_num_neighbors
         )
         s = model.scale
@@ -1175,6 +1270,27 @@ class _MFC(nn.Module):
             sigma = self._scale(0, parent_t.detach().square().mean())
             term = (child_t - parent_t).square().sum() / sigma / n_windows
             out["mfc_energy"] = term.detach()
+            loss = loss + self.cfg["weight_energy"] * term
+        if q_full is not None and self.cfg["include_charges"]:
+            owner = torch.repeat_interleave(
+                torch.arange(n_windows, device=device),
+                torch.as_tensor(np.diff(offsets), device=device),
+            )
+            q_w = model.electrostatics.charges(h_w, owner, n_windows)
+            child, parent = [], []
+            for k, (_, w, _) in enumerate(windows):
+                child.append(q_w[rows(k, w.core)])
+                p = w.parent
+                parent.append(
+                    q_full[torch.as_tensor(w.core, device=device)]
+                    if p < 0
+                    else q_w[rows(p, w.core)]
+                )
+            child_t = maybe_detach(torch.cat(child), child_grad)
+            parent_t = maybe_detach(torch.cat(parent), parent_grad)
+            sigma = self._scale(2, parent_t.detach().square().mean())
+            term = (child_t - parent_t).square().sum() / sigma / n_windows
+            out["mfc_charge"] = term.detach()
             loss = loss + self.cfg["weight_energy"] * term
         for name in sorted(self.objectives & {"core_force", "force"}):
             term = zero
@@ -1429,7 +1545,6 @@ class SimurghDev(nn.Module):
             ("readout.pgs_edge", cfg["readout"]["pgs_edge"]),
             ("pair_line.mode: ece", cfg["pair_line"]["mode"] != "phi"),
             ("pair_line.bond_order", cfg["pair_line"]["bond_order"]),
-            ("electrostatics", cfg["electrostatics"]["enabled"]),
             ("diagnostics.calm", cfg["diagnostics"]["calm"]),
         ):
             if on:
@@ -1472,6 +1587,12 @@ class SimurghDev(nn.Module):
             _PairLine(pl, elements, cfg["embedding_dim"], cfg["cutoff"]) if pl["enabled"] else None
         )
         self.dispersion = _D3Term(cfg["dispersion"]) if cfg["dispersion"]["enabled"] else None
+        es = cfg["electrostatics"]
+        if es["sigma"] != "learned" and not isinstance(es["sigma"], (int, float)):
+            raise ValueError("electrostatics.sigma must be 'learned' or a width in Å")
+        self.electrostatics = (
+            _Electrostatics(es, cfg["num_channels"], len(elements)) if es["enabled"] else None
+        )
         if pl["pair_first_epochs"] and not pl["enabled"]:
             raise ValueError("pair_line.pair_first_epochs needs pair_line.enabled")
         self.mfc = _MFC(cfg["mfc"], cfg["cutoff"]) if cfg["mfc"]["enabled"] else None
@@ -1526,7 +1647,7 @@ class SimurghDev(nn.Module):
         edge_index = graph.edge_index
         emb = self.atom_line.embedding.weight
 
-        e_atom, _ = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
+        e_atom, h_last = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
         if self.training and self.epoch < self.config["pair_line"]["pair_first_epochs"]:
             e_atom = 0.0 * e_atom  # pair-first stage: the atom line gets zero gradients
         e_pair = torch.zeros_like(e_atom)
@@ -1550,6 +1671,10 @@ class SimurghDev(nn.Module):
         )
         if e_d3 is not None:
             energy = energy + e_d3
+        elec = None
+        if self.electrostatics is not None:
+            elec = self.electrostatics(h_last, pos_d, elem, batch, num_graphs)
+            energy = energy + elec["energy"]
         forces = -torch.autograd.grad(
             energy.sum(),
             pos,
@@ -1565,9 +1690,11 @@ class SimurghDev(nn.Module):
             "energy_atom_line": per_graph(self.scale * e_atom),
             "energy_pair_line": per_graph(self.scale * e_pair + wall),
             "energy_d3": zeros if e_d3 is None else e_d3,
-            "energy_elec": zeros,
+            "energy_elec": zeros if elec is None else elec["energy"],
             "atomic_energies": atomic,
         }
+        if elec is not None:
+            out["charges"], out["dipole"] = elec["charges"], elec["dipole"]
         fragments = graph.get("fragment_index", None)
         if fragments is not None:
             out.update(
@@ -1576,7 +1703,8 @@ class SimurghDev(nn.Module):
         if self.training:
             aux = self._regularisers(elem, edge_index, e_atom, emb)
             if self.mfc is not None:
-                terms = self.mfc(self, graph, pos, pos_d, elem, batch, e_atom)
+                q_full = None if elec is None else elec["charges"]
+                terms = self.mfc(self, graph, pos, pos_d, elem, batch, e_atom, q_full)
                 aux = aux + terms.pop("mfc")
                 out["aux_terms"] = terms
             out["aux_loss"] = aux
