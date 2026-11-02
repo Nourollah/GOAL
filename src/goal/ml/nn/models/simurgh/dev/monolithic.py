@@ -1908,8 +1908,12 @@ class SimurghDev(nn.Module):
                 _not_yet(flag)
 
         ae = cfg["atomic_energies"]
-        if ae["mode"] != "provided" or not ae["values"]:
-            raise ValueError("SIMURGH needs atomic_energies: {mode: provided, values: {Z: E0}}")
+        _choice(ae, "mode", ("provided", "dataset"), "atomic_energies.")
+        if not ae["values"]:
+            raise ValueError(
+                "SIMURGH needs atomic_energies.values {Z: E0}: given (mode: provided), or "
+                "fitted on the training set by goal-train (mode: dataset)"
+            )
         e0 = {int(z): float(e) for z, e in ae["values"].items()}
         elements = sorted(int(z) for z in (cfg["elements"] or e0))
         missing = [z for z in elements if z not in e0]

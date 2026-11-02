@@ -158,7 +158,8 @@ model:
     diagnostics:
       calm: false
     # Isolated-atom energies (eV) of the GMD labels (PBE D3BJ def2-TZVP).
-    # Only `provided` is accepted; keep in sync with the data.
+    # provided | dataset (least squares on the training set, fitted by
+    # goal-train; for single-composition benchmarks only, never on GMD).
     atomic_energies:
       mode: provided
       values:

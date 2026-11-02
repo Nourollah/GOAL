@@ -19,7 +19,7 @@ $$E = \sum_i E_0(Z_i) + s\Big[\sum_i e_i + \sum_{i<j}\phi_{Z_iZ_j}(r_{ij}) + \su
 
 `core: ece` replaces $\sum_i e_i$ with the edge cluster expansion: bond states in each bond's own frame (O(2) features), updated by line-graph message passing, with energy $\sum_{i\to j}\varepsilon_{ij}$. The ECE modules are generic GOAL code: `nn/primitives/edge_frame.py`, `nn/primitives/o2.py`, `nn/blocks/ece.py` and `nn/heads/edge_energy.py`.
 
-Forces are conservative only, $F = -\partial E/\partial R$. Every map is bias-free and every optional section starts at zero. An isolated atom therefore gives exactly $E_0$, and switching a section on leaves a fresh model unchanged. $E_0$ comes only from `atomic_energies: {mode: provided}` and is kept in float64 whatever the parameter dtype.
+Forces are conservative only, $F = -\partial E/\partial R$. Every map is bias-free and every optional section starts at zero. An isolated atom therefore gives exactly $E_0$, and switching a section on leaves a fresh model unchanged. $E_0$ is kept in float64 whatever the parameter dtype. It comes from `atomic_energies: {mode: provided}`: isolated-atom energies of the labels' level of theory (GMD's in the GMD configs, the atoms that ship with 3BPA in `simurgh_dev_3bpa`). rMD17 and MD22 ship no isolated atoms, so their configs use `mode: dataset` (least squares on the training set, fitted by `goal-train`): each model sees one composition, so this removes only a constant. Never use `mode: dataset` on GMD.
 
 ## Outputs
 

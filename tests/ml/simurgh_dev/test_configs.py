@@ -38,6 +38,8 @@ def test_config_builds_the_model(name: str) -> None:
     backbone.pop("name")
     # what goal-train injects from the training set, at a small width
     backbone.update(avg_num_neighbors=10.0, scale=1.0, num_channels=8)
+    if backbone["atomic_energies"]["mode"] == "dataset":
+        backbone["atomic_energies"]["values"] = {1: -1.0, 6: -2.0, 7: -3.0, 8: -4.0}
     backbone["message_irreps"] = "8x0e + 8x1o + 8x2e"
     SimurghDev(**backbone)
     stages = [s.name for s in cfg.training.stages]
@@ -47,6 +49,53 @@ def test_config_builds_the_model(name: str) -> None:
     assert cfg.checkpoint_manager.top_k.metric.startswith("val_")  # never select on OOD
     # MFC: on in the GMD configs, off on the single-system benchmarks
     assert cfg.model.backbone.mfc.enabled == ("gmd26" in name)
+
+
+GMD_E0 = {1: -13.595298, 6: -1028.481145, 7: -1483.895483, 8: -2041.117735}
+BPA_E0 = {
+    1: -13.587222780835477,
+    6: -1029.4889999855063,
+    7: -1484.9814568572233,
+    8: -2041.9816003861047,
+}
+
+
+@pytest.mark.parametrize("name", TASKS)
+def test_element_references_match_the_labels(name: str) -> None:
+    """GMD's isolated atoms only on GMD; 3BPA's shipped atoms; least squares on rMD17 and MD22."""
+    ae = OmegaConf.to_container(_compose(name).model.backbone.atomic_energies)
+    if "gmd26" in name:
+        assert ae == {"mode": "provided", "values": GMD_E0}
+    elif name == "simurgh_dev_3bpa":
+        assert ae == {"mode": "provided", "values": BPA_E0}
+    else:
+        assert ae == {"mode": "dataset", "values": None}
+
+
+def test_least_squares_references_on_one_composition() -> None:
+    """A single-molecule training set has a rank-1 composition matrix: no warning, no NaN."""
+    import warnings
+
+    import torch
+
+    from goal.ml.data.statistics import compute_atomic_references
+
+    class Frame:
+        def __init__(self, energy: float) -> None:
+            self.atomic_numbers = torch.tensor([6] * 9 + [1] * 8 + [8] * 4)  # aspirin
+            self.energy = torch.tensor(energy, dtype=torch.float64)
+
+    energies = -17630.0 + torch.rand(
+        50, dtype=torch.float64, generator=torch.Generator().manual_seed(0)
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        refs = compute_atomic_references([Frame(float(e)) for e in energies])
+    assert sorted(refs) == [1, 6, 8] and all(torch.isfinite(torch.tensor(list(refs.values()))))
+    # the per-molecule baseline is the mean energy: only a constant is removed
+    assert 9 * refs[6] + 8 * refs[1] + 4 * refs[8] == pytest.approx(
+        float(energies.mean()), abs=1e-8
+    )
 
 
 @pytest.mark.parametrize("name", [t for t in TASKS if "gmd26" in t])

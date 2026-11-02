@@ -6,10 +6,10 @@
 # training size.  The test set is every frame not used for training or
 # validation (cap it with data.test_size, e.g. 200 frames as in the best
 # published MD22 numbers).  MFC is off.
-# E0: the base carries the GMD isolated-atom energies (PBE D3BJ def2-TZVP).
-# MD22 (PBE+MBD) labels use other DFT settings: replace atomic_energies.values with
-# matching isolated-atom energies, otherwise the network has to learn the
-# constant offset.
+# E0: MD22 (PBE+MBD) ships no isolated atoms, and each model sees one
+# composition, so atomic_energies.mode: dataset (least squares on the
+# training set) only removes a constant and changes no metric.  Never reuse
+# GMD's values (PBE D3BJ def2-TZVP) here.
 # Dispersion: MD22 labels contain MBD, not D3; keep dispersion off.
 ########################################################
 
@@ -35,3 +35,9 @@ data:
 
 trainer:
   max_epochs: 1000
+
+model:
+  backbone:
+    atomic_energies:
+      mode: dataset
+      values: null # fitted on the training set by goal-train

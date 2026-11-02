@@ -4,10 +4,8 @@
 # the repository: put the standard files under data/3BPA/ (train_300K.xyz,
 # test_300K.xyz, test_600K.xyz, test_1200K.xyz, test_dih.xyz).  Evaluate
 # each test set with goal-eval '+data.test_paths=[...]'.
-# E0: the base carries the GMD isolated-atom energies (PBE D3BJ def2-TZVP).
-# 3BPA (DFT, not GMD's) labels use other DFT settings: replace atomic_energies.values with
-# matching isolated-atom energies, otherwise the network has to learn the
-# constant offset.
+# E0: the isolated H, C, N and O atoms that ship with 3BPA (iso_atoms.xyz,
+# wB97X/6-31G(d), ORCA), not GMD's values.
 #
 #   goal-train --config-name simurgh_dev_3bpa
 ########################################################
@@ -41,3 +39,13 @@ data:
 
 trainer:
   max_epochs: 2000
+
+model:
+  backbone:
+    atomic_energies:
+      mode: provided
+      values: # eV, 3BPA iso_atoms.xyz (wB97X/6-31G(d))
+        1: -13.587222780835477 # H
+        6: -1029.4889999855063 # C
+        7: -1484.9814568572233 # N
+        8: -2041.9816003861047 # O
