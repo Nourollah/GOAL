@@ -32,6 +32,7 @@ Forces are conservative only, $F = -\partial E/\partial R$. Every map is bias-fr
 - `charges` and `dipole`: with electrostatics;
 - `fragment_energies` and `fragment_pair_energies`: when the graph carries `fragment_index`; this is an exact, parameter-free split;
 - `aux_loss` and `aux_terms`: in training.
+- `calm_basis` and `calm_layer_norms`: with `diagnostics.calm`, the unweighted 0e product basis of every layer (output only; energies and forces are bit-identical with it on or off).
 
 ## Multi-scale fragment consistency (MFC)
 
@@ -79,6 +80,7 @@ The ablation programme is in `src/goal/configs/ml/ablations/simurgh_dev/`, one k
 | `md_stability.py` | survival, instability onset, temperature and NVE drift |
 | `export_pair_potentials.py` | $\phi_{ab}(r)$ and derivatives to CSV and PNG |
 | `benchmark.py` | time and memory per training step |
+| `extrapolation_grade.py` | `build` / `score` the per-atom extrapolation grade γ (arXiv:2609.40060) of a checkpoint; needs `diagnostics.calm`-capable code, writes `extrapolation_grade.pt` next to the checkpoint |
 | `migrate_legacy_checkpoints.py` | rewrite pre-legacy registry keys in saved checkpoints |
 
 ## Physical long-range ablation

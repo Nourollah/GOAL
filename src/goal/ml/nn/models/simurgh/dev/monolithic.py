@@ -432,6 +432,26 @@ class _SymmetricProductBasis(nn.Module):
             outs.append(x)
         return torch.cat(outs, dim=-1)  # channel layout over irreps_out
 
+    def scalar_basis(self, a: torch.Tensor) -> torch.Tensor:
+        """Unweighted 0e product basis ``(N, C · Σ_ν K_ν)``: ``U_ν(A^{⊗ν})`` per channel.
+
+        The same contraction as :meth:`forward` before the element weights,
+        for the scalar output only (the extrapolation grade's feature).
+        """
+        parts = []
+        for nu in range(1, self.correlation + 1):
+            if not hasattr(self, f"u_0_1_{nu}"):
+                continue
+            u = getattr(self, f"u_0_1_{nu}")
+            if u.shape[-1] == 0:
+                continue
+            axes = _LETTERS[:nu]
+            x = torch.einsum(f"M{axes}k,bc{axes[-1]}->bcM{axes[:-1]}k", u, a)
+            for k in range(nu - 1, 0, -1):
+                x = torch.einsum(f"bcM{axes[:k]}K,bc{axes[k - 1]}->bcM{axes[: k - 1]}K", x, a)
+            parts.append(x.reshape(a.shape[0], -1))
+        return torch.cat(parts, dim=-1)
+
 
 class _AttentionGate(nn.Module):
     """Smooth local attention on the messages of one layer (WP8 A).
@@ -946,6 +966,9 @@ class _Interaction(nn.Module):
                 irreps_a, irreps_out, cfg["correlation"], cfg["product_basis"] == "ladder_reduced"
             )
         self.norm = _RMSNorm(irreps_out) if cfg["node_norm"] == "rms" else None
+        #: ``diagnostics.calm``: keep the unweighted 0e product basis of the last pass.
+        self.record_basis = bool(cfg["diagnostics"]["calm"])
+        self.last_basis: torch.Tensor | None = None
         #: Optional per-edge factor on the messages (literature ablations set it).
         self.message_gate: nn.Module | None = None
         self.linear_b = o3.Linear(irreps_out, irreps_out)
@@ -997,9 +1020,10 @@ class _Interaction(nn.Module):
             a = self.attention(messages, h, receiver, rbf, env, n, avg_num_neighbors)
         a = self.linear_a(a)
         if self.symmetric:
-            b = _from_channels(
-                self.product(_to_channels(a, self.irreps_a), elem, emb), self.irreps_out
-            )
+            channels = _to_channels(a, self.irreps_a)
+            if self.record_basis:
+                self.last_basis = self.product.scalar_basis(channels.detach())
+            b = _from_channels(self.product(channels, elem, emb), self.irreps_out)
         else:
             b = self.product(a, elem, emb)
         out = self.linear_b(b)
@@ -2272,13 +2296,16 @@ class SimurghDev(nn.Module):
             )
         _choice(cfg["readout"], "pgs_edge_alpha", ("scalar", "per_channel"), "readout.")
         _choice(cfg["attention"], "pan_gate_descriptors", ("full", "generic"), "attention.")
+        if cfg["diagnostics"]["calm"] and (
+            cfg["core"] != "ace" or cfg["product_basis"] != "symmetric"
+        ):
+            raise ValueError("diagnostics.calm reads the symmetric product basis of core: ace")
         if cfg["core"] == "ece" and cfg["attention"]["pan_gate"]:
             raise ValueError("attention.pan_gate gates the ACE messages: needs core: ace")
         if cfg["core"] == "ece" and cfg["readout"]["pgs_edge"]:
             raise ValueError("readout.pgs_edge acts on the ACE radial weights: needs core: ace")
         for flag, on in (
             ("pair_line.bond_order_body: 4", cfg["pair_line"]["bond_order_body"] == 4),
-            ("diagnostics.calm", cfg["diagnostics"]["calm"]),
         ):
             if on:
                 _not_yet(flag)
@@ -2459,6 +2486,9 @@ class SimurghDev(nn.Module):
         e_atom, h_last = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
         pgs = getattr(self.atom_line, "pgs", None)
         in_support = None if pgs is None else pgs.last_in_support  # before MFC windows reuse it
+        calm = None
+        if self.config["diagnostics"]["calm"]:  # output only: the grade's feature blocks
+            calm = [layer.last_basis for layer in self.atom_line.layers]
         bond = getattr(self.atom_line, "last_bond_energies", None)
         if self.ece_line is not None:
             line = self.ece_line(
@@ -2526,6 +2556,9 @@ class SimurghDev(nn.Module):
             out["charges"], out["dipole"] = elec["charges"], elec["dipole"]
         if bond is not None:
             out["edge_energies"] = self.scale * bond
+        if calm is not None:
+            out["calm_basis"] = torch.cat(calm, dim=-1)
+            out["calm_layer_norms"] = torch.stack([b.norm(dim=-1) for b in calm], dim=-1)
         fragments = graph.get("fragment_index", None)
         if fragments is not None:
             out.update(
