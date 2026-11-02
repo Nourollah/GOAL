@@ -235,6 +235,8 @@ cuda-cudart-dev = "*"
 [tool.pixi.feature.cuda.pypi-dependencies]
 # GPU-accelerated neighbour lists (NVIDIA only)
 nvalchemi-toolkit-ops = { version = "*", extras = ["torch"] }
+# Differentiable D3(BJ) in PyTorch: SIMURGH's default dispersion backend
+tad-dftd3 = ">=0.5"
 
 [tool.pixi.feature.cpu]
 platforms = ["linux-64", "linux-aarch64"]

@@ -15,7 +15,7 @@ $$E = \sum_i E_0(Z_i) + s\Big[\sum_i e_i + \sum_{i<j}\phi_{Z_iZ_j}(r_{ij}) + \su
 | $\phi_{ab}(r)$: pair line per unordered element pair, plus a fixed ZBL wall below `r_min` | WP3 | on |
 | $\varepsilon_{ij}$: ECE bond line (`pair_line.mode: ece \| phi+ece`) | WP11 | off |
 | $E_{\text{elec}}$: latent charges (and dipoles), damped Coulomb | WP7 | off |
-| $E_{\text{D3}}$: closed-form D3(BJ) dispersion (no DFT) | WP1 | off |
+| $E_{\text{D3}}$: closed-form D3(BJ) dispersion (no DFT); `backend: torch` (tad-dftd3, in the `cuda` environments) or `precomputed` (dftd3-python) | WP1 | off |
 
 `core: ece` replaces $\sum_i e_i$ with the edge cluster expansion: bond states in each bond's own frame (O(2) features), updated by line-graph message passing, with energy $\sum_{i\to j}\varepsilon_{ij}$. The ECE modules are generic GOAL code: `nn/primitives/edge_frame.py`, `nn/primitives/o2.py`, `nn/blocks/ece.py` and `nn/heads/edge_energy.py`.
 

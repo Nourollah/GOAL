@@ -426,6 +426,47 @@ def test_d3_torch_backend_needs_its_package() -> None:
         pytest.skip("tad-dftd3 installed: parity is tested in test_d3_backends_agree")
 
 
+def _gmd_parity_structures() -> list[Atoms]:
+    """The last frame of 5 TestOOD trajectories per GMD task (20 structures), else ethanol."""
+    from pathlib import Path
+
+    from ase.io import read
+
+    root = Path(__file__).parents[3] / "data" / "GMD"
+    tasks = (
+        "FragmentChainExtension",
+        "FragmentFusion",
+        "FragmentDuplication",
+        "FragmentCombination",
+    )
+    frames = []
+    for task in tasks:
+        files = sorted((root / task / "TestOOD").glob("*.traj"))
+        frames += [read(f, index=-1) for f in files[:: max(1, len(files) // 5)][:5]]
+    return frames or [molecule("CH3CH2OH"), molecule("CH3CN")]
+
+
+def test_d3_backends_agree() -> None:
+    """tad-dftd3 (torch) against dftd3-python: 1e-6 eV and 1e-5 eV/Å (measured: 5e-11, 3e-11)."""
+    pytest.importorskip("tad_dftd3")
+    structures = _gmd_parity_structures()
+    numbers = torch.cat([torch.tensor(a.numbers) for a in structures])
+    pos = torch.cat([torch.tensor(a.positions) for a in structures]).requires_grad_(True)
+    batch = torch.cat([torch.full((len(a),), g) for g, a in enumerate(structures)])
+    model = build(dispersion={"enabled": True})
+    assert model.dispersion.backend == "torch"  # the default
+    e_torch = model.dispersion._tad(numbers, pos, batch, len(structures))
+    f_torch = -torch.autograd.grad(e_torch.sum(), pos)[0]
+    e_ref, f_ref = model.dispersion._dftd3(numbers, pos.detach(), batch, len(structures))
+    assert float((e_torch - e_ref).abs().max()) < 1e-6
+    assert float((f_torch - f_ref).abs().max()) < 1e-5
+    precomputed = build(dispersion={"enabled": True, "backend": "precomputed"})
+    load_shared(precomputed, model)  # and through the whole model
+    (e1, f1), (e2, f2) = (predict_fn(m)(structures[0]) for m in (model, precomputed))
+    assert e1 == pytest.approx(e2, abs=1e-6)
+    np.testing.assert_allclose(f1, f2, atol=1e-5)
+
+
 # ---------------------------------------------------------------------------
 # Configuration contract
 # ---------------------------------------------------------------------------
