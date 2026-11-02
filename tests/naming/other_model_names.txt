@@ -1,0 +1,57 @@
+# Model names that must not appear inside SIMURGH (see the goal-naming-policy skill).
+# Default: case-insensitive, no letter directly before or after the name.
+# cs:     case-sensitive entry (short acronyms and names that are also English words)
+# prefix: matched only at the start of a word (letters may follow)
+prefix:MACE
+NequIP
+Allegro
+BOTNet
+SchNet
+SchNetPack
+PaiNN
+DimeNet
+GemNet
+Equiformer
+EquiformerV2
+eSCN
+eSEN
+SevenNet
+MatterSim
+CHGNet
+M3GNet
+SO3krates
+SO3LR
+ECENet
+GotenNet
+ViSNet
+TorchMD
+TensorNet
+Nequix
+HotPP
+CACE
+NEMORA
+LOREM
+CarNet
+FlashCart
+AIMNet
+AIMNet2
+TorchANI
+SpookyNet
+PhysNet
+SEGNN
+sGDML
+LiTEN
+TACE
+TECE
+AniDS
+cs:GRACE
+cs:TRACE
+cs:MARA
+cs:MuSE
+cs:UMA
+cs:PET
+cs:UPET
+cs:Orb
+cs:DPA
+cs:MTP
+cs:GAP

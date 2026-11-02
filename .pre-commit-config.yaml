@@ -114,7 +114,8 @@ repos:
     hooks:
       - id: codespell
         args:
-          - --skip=logs/**,data/**,*.ipynb,pixi.lock
+          # tests/naming/: lists of other models' names, spelled as published.
+          - --skip=logs/**,data/**,*.ipynb,pixi.lock,tests/naming/*
           # datas: list of Data objects; equil: equilibration file names;
           # te: train/val/test split; Nd/Te: element symbols;
           # eference: from "**r**eference" in the RESPA acronym.

@@ -1,0 +1,16 @@
+# Packages SIMURGH code must not import (see the goal-naming-policy skill).
+# One top-level package or dotted module per line; submodules are denied too.
+mace
+nequip
+allegro
+fairchem
+schnetpack
+torchmdnet
+sevenn
+mattersim
+orb_models
+upet
+metatrain
+torchani
+goal.ml.nn.models.foundation
+goal.ml.adapters
