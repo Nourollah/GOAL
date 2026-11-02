@@ -9,7 +9,12 @@ Example::
 
     python scripts/simurgh_dev/benchmark.py --config simurgh_dev_gmd26_FD \\
         --variant channels=64 --variant channels=128 \\
-        --variant mfc=energy --variant mfc=energy,core_force
+        --variant mfc=energy --variant mfc=energy,core_force \\
+        --variant "mfc=energy,core_force;mfc_every=2" \\
+        --variant "mfc=energy,core_force;mfc_fraction=0.5"
+
+``--profile`` also splits one step by component (CUDA events around module
+forwards; the forces' autograd pass runs inside the model forward).
 """
 
 from __future__ import annotations
@@ -36,12 +41,86 @@ def build(cfg, overrides: dict, stats: dict, device: str):
     core = overrides.pop("core", None)
     if core:
         backbone["core"] = core
+    kernels = overrides.pop("kernels", None)
+    if kernels:
+        backbone["kernels"] = kernels
     objectives = overrides.pop("mfc", None)
     if objectives is not None:
-        backbone["mfc"].update(
-            enabled=objectives != "off", start_epoch=0, objective=objectives.split(",")
-        )
+        backbone["mfc"].update(enabled=objectives != "off", start_epoch=0)
+        if objectives != "off":
+            backbone["mfc"]["objective"] = objectives.split(",")
+    for key in ("every_n_steps", "fraction"):
+        value = overrides.pop(f"mfc_{key.split('_')[0]}", None)
+        if value is not None:
+            backbone["mfc"][key] = float(value) if key == "fraction" else int(value)
+    if overrides:
+        raise ValueError(f"unknown variant keys {sorted(overrides)}")
     return SimurghDev(**backbone).to(device).train()
+
+
+#: Component of each timed module, by the end of its qualified name.
+COMPONENTS: dict[str, str] = {
+    ".tp": "A-basis and tensor products",
+    ".linear_up": "A-basis and tensor products",
+    ".linear_a": "A-basis and tensor products",
+    ".attention": "A-basis and tensor products",
+    ".product": "product basis",
+    ".linear_b": "product basis",
+    ".radial": "radial network",
+    "atom_line.rbf": "radial network",
+    "atom_line.pair_code": "radial network",
+    "atom_line.readouts": "readout",
+    "atom_line.pgs": "readout",
+    "pair_line": "pair line",
+}
+
+
+def profile(model, batch) -> dict[str, float]:
+    """Milliseconds per component of one training step (CUDA only, MFC off)."""
+    events: list[tuple[str, torch.cuda.Event, torch.cuda.Event]] = []
+    open_calls: list[tuple[str, torch.cuda.Event]] = []
+    handles = []
+    for name, module in model.named_modules():
+        component = next((c for k, c in COMPONENTS.items() if name.endswith(k)), None)
+        if component is None or (component == "pair line" and name != "pair_line"):
+            continue
+
+        def pre(_m, _i, component=component) -> None:
+            start = torch.cuda.Event(enable_timing=True)
+            start.record()
+            open_calls.append((component, start))
+
+        def post(_m, _i, _o) -> None:
+            end = torch.cuda.Event(enable_timing=True)
+            end.record()
+            events.append((*open_calls.pop(), end))
+
+        handles += [module.register_forward_pre_hook(pre), module.register_forward_hook(post)]
+    opt = model.build_optimizer({"name": "amsgrad", "lr": 1e-3})
+    marks = [torch.cuda.Event(enable_timing=True) for _ in range(4)]
+    for warm in (True, False):
+        events.clear()
+        marks[0].record()
+        out = model(batch)
+        loss = (out["energy"] - batch.energy).square().mean() + out["forces"].square().mean()
+        loss = loss + out.get("aux_loss", 0.0)
+        marks[1].record()
+        opt.zero_grad()
+        loss.backward()
+        marks[2].record()
+        opt.step()
+        marks[3].record()
+        torch.cuda.synchronize()
+    for h in handles:
+        h.remove()
+    result: dict[str, float] = {}
+    for component, start, end in events:
+        result[component] = result.get(component, 0.0) + start.elapsed_time(end)
+    forward = marks[0].elapsed_time(marks[1])
+    result["forces (autograd in forward) and the rest"] = forward - sum(result.values())
+    result["loss backward"] = marks[1].elapsed_time(marks[2])
+    result["optimiser step"] = marks[2].elapsed_time(marks[3])
+    return result
 
 
 def time_steps(model, batch, steps: int) -> tuple[float, float]:
@@ -82,6 +161,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--batch-size", type=int, default=48)
     parser.add_argument("--steps", type=int, default=10)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--profile", action="store_true", help="split a step by component")
     args = parser.parse_args(argv)
     with initialize_config_dir(config_dir=CONFIGS_ML_DIR, version_base=None):
         cfg = compose(config_name=args.config, overrides=[f"data.batch_size={args.batch_size}"])
@@ -100,6 +180,9 @@ def main(argv: list[str] | None = None) -> None:
         print(
             f"{variant:32s} params {params:9d}  {1e3 * seconds:8.1f} ms/step  peak {peak:6.2f} GiB"
         )
+        if args.profile and args.device.startswith("cuda") and model.mfc is None:
+            for component, ms in profile(model, batch).items():
+                print(f"    {component:42s} {ms:8.1f} ms")
 
 
 if __name__ == "__main__":

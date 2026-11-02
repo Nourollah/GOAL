@@ -236,6 +236,21 @@ def test_mfc_terms_are_logged_and_added_to_aux_loss() -> None:
     assert float(with_mfc["aux_loss"]) > float(without)
 
 
+def test_fraction_and_every_n_steps_reduce_the_work() -> None:
+    model = mfc_model(fraction=0.5)
+    graphs = model.mfc.structures(np.repeat(np.arange(6), 3))
+    assert len(graphs) == 3 and len(set(graphs)) == 3
+    assert model.mfc.structures(np.zeros(4, dtype=int)).tolist() == [0]  # at least one
+    terms = mfc_terms(model, batch_of(*(alkane(16, seed=k) for k in range(4))))
+    assert float(terms["mfc_energy"]) > 0
+    skipping = mfc_model(every_n_steps=2)
+    batch = batch_of(alkane(16))
+    assert "mfc_energy" not in mfc_terms(skipping, batch)  # step 1 of 2
+    assert "mfc_energy" in mfc_terms(skipping, batch)
+    with pytest.raises(ValueError, match="fraction"):
+        build(mfc={"enabled": True, "fraction": 0.0})
+
+
 @pytest.mark.parametrize(
     "option",
     [{"window_type": "chemical"}, {"parameters": "separate"}, {"tolerance": "calibrated"}],

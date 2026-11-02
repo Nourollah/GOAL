@@ -176,7 +176,8 @@ model:
       radii: [8.0] # sphere only; L - 1 radii; [8.0, 14.0] for levels: 3
       buffer: 5.0 # = atom-line cutoff r_c; values below r_c are ablation only
       windows_per_structure: 1
-      every_n_steps: 1
+      every_n_steps: 1 # MFC on every n-th training step
+      fraction: 1.0 # MFC on this fraction of each batch's structures
       weight: 1.0 # lambda_MFC; stage 0 sweeps 0.1 | 1 | 10
       weight_energy: 1.0
       weight_force: 1.0

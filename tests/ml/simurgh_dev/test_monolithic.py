@@ -500,6 +500,8 @@ def test_registry_and_config_validation() -> None:
         build(not_a_key=1)
     with pytest.raises(ValueError, match="unknown SIMURGH config key"):
         build(pair_line={"typo": 1})
+    with pytest.raises(NotImplementedError, match="cuequivariance"):
+        build(kernels="cuequivariance")  # auto resolves to e3nn
     with pytest.raises(ValueError, match="avg_num_neighbors"):
         build(avg_num_neighbors=None)
     with pytest.raises(ValueError, match="scale"):

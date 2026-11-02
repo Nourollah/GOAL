@@ -126,6 +126,7 @@ DEFAULTS: dict[str, typing.Any] = {
         "buffer": 5.0,
         "windows_per_structure": 1,
         "every_n_steps": 1,
+        "fraction": 1.0,
         "weight": 1.0,
         "weight_energy": 1.0,
         "weight_force": 1.0,
@@ -1487,6 +1488,8 @@ class _MFC(nn.Module):
             )
         if cfg["levels"] not in (2, 3):
             raise ValueError("mfc.levels must be 2 or 3")
+        if not 0.0 < float(cfg["fraction"]) <= 1.0:
+            raise ValueError(f"mfc.fraction must be in (0, 1], got {cfg['fraction']}")
         if self.window_type == "sphere" and len(cfg["radii"]) != cfg["levels"] - 1:
             raise ValueError("mfc.radii needs levels - 1 radii")
         for flag, on in (
@@ -1509,12 +1512,21 @@ class _MFC(nn.Module):
             return 0.0
         return float(self.cfg["weight"]) * min(1.0, (epoch - start + 1) / ramp)
 
+    def structures(self, batch: np.ndarray) -> np.ndarray:
+        """The structures that get windows: all, or a random ``mfc.fraction`` of them."""
+        graphs = np.unique(batch)
+        fraction = float(self.cfg["fraction"])
+        if fraction < 1.0:
+            k = max(1, round(fraction * len(graphs)))
+            graphs = np.sort(self.rng.choice(graphs, size=k, replace=False))
+        return graphs
+
     def windows(
-        self, pos: np.ndarray, numbers: np.ndarray, batch: np.ndarray
+        self, pos: np.ndarray, numbers: np.ndarray, batch: np.ndarray, graphs: np.ndarray
     ) -> list[tuple[int, Window, int]]:
-        """``(structure, window, slot)`` for every window of the batch."""
+        """``(structure, window, slot)`` for every window of the given structures."""
         out = []
-        for g in np.unique(batch):
+        for g in graphs:
             idx = np.flatnonzero(batch == g)
             heavy = numbers[idx] > 1
             for k in range(int(self.cfg["windows_per_structure"])):
@@ -1567,11 +1579,12 @@ class _MFC(nn.Module):
         shifts = graph.get("unit_shifts", None)
         if shifts is not None and bool(shifts.abs().sum() > 0):
             raise ValueError("MFC windows are defined for molecules (non-periodic graphs)")
+        batch_np = batch.cpu().numpy()
+        graphs = self.structures(batch_np)
         windows = self.windows(
-            pos_d.detach().cpu().numpy(), graph.atomic_numbers.cpu().numpy(), batch.cpu().numpy()
+            pos_d.detach().cpu().numpy(), graph.atomic_numbers.cpu().numpy(), batch_np, graphs
         )
-        num_graphs = int(batch.max()) + 1
-        valid = len({g for g, _, _ in windows}) / num_graphs
+        valid = len({g for g, _, _ in windows}) / len(graphs)
         if not windows:
             return {"mfc": zero, "mfc_valid_fraction": zero + valid}
 
@@ -1895,9 +1908,10 @@ class SimurghDev(nn.Module):
         _choice(cfg, "dtype", ("float32", "float64"))
         _choice(cfg["attention"], "mode", ("gate", "softmax_null", "radial", "none"), "attention.")
         _choice(cfg["pair_line"], "mode", ("phi", "ece", "phi+ece"), "pair_line.")
-        if cfg["kernels"] == "cuequivariance":
-            raise ImportError(
-                "kernels: cuequivariance requested but cuequivariance-torch is not installed"
+        if cfg["kernels"] == "cuequivariance":  # auto resolves to e3nn
+            raise NotImplementedError(
+                "kernels: cuequivariance is not implemented: SIMURGH has only the e3nn path "
+                "(cuequivariance-torch is not a GOAL dependency yet)"
             )
         for flag, on in (
             ("readout.pgs_edge", cfg["readout"]["pgs_edge"]),
