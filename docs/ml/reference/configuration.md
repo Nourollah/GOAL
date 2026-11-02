@@ -166,7 +166,7 @@ model:
       element_conditioned: true
     atomic_energies:
       mode: provided              # learned | dataset | provided
-      values:                     # isolated-atom PBE/def2-SVP references (eV)
+      values:                     # isolated-atom PBE D3BJ def2-TZVP references (eV)
         1: -13.595298
         6: -1028.481145
         7: -1483.895483

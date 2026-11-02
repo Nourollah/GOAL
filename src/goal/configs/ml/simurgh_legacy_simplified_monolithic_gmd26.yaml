@@ -6,7 +6,7 @@
 #          processor is ONE monolithic stack of simple equivariant layers:
 #          no artisans, no routing, no experts.
 #          (see goal.ml.nn.models.simurgh.legacy.simurgh_simplified_monolithic)
-# Dataset: GMD-26 FragmentDuplication (O2CnH2n, PBE/def2-SVP DFT)
+# Dataset: GMD-26 FragmentDuplication (O2CnH2n, PBE D3BJ def2-TZVP DFT)
 #
 # Self-contained config. It does NOT inherit from, interpolate into, or
 # share keys with any other config file.

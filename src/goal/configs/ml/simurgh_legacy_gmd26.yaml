@@ -3,7 +3,7 @@
 # Model  : SIMURGH — DEFAULT: ARACE architecture
 #          (ARtisan + Atomic Cluster Expansion, modular)
 #          nodes → [artisan layer → ACE block] × N rounds → E, F
-# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
+# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE D3BJ def2-TZVP DFT)
 #
 # ── SWITCHING BETWEEN THE TWO SIMURGH ARCHITECTURES ──
 # The architecture is selected purely by model.backbone.name:
@@ -429,7 +429,7 @@ model:
     #   "dataset"  — least-squares regression on training set.
     #                Leave values: null; computed automatically.
     #   "provided" — hand-set values from isolated-atom DFT (eV), e.g.
-    #                PBE/def2-SVP for this dataset:
+    #                PBE D3BJ def2-TZVP for this dataset:
     #                  1: -13.595298   # H
     #                  6: -1028.481145 # C
     #                  7: -1483.895483 # N

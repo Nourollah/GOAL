@@ -4,7 +4,7 @@
 #          monolithic variant alternating equivariant pair artisans
 #          with ACE message passing
 #          (see goal.ml.nn.models.simurgh.legacy.arace)
-# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
+# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE D3BJ def2-TZVP DFT)
 #
 # Self-contained config. Every parameter the project supports is
 # listed here — either set to its value for this experiment, or

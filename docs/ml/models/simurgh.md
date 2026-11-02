@@ -73,7 +73,7 @@ pixi run -e cuda goal-train model.backbone.num_rounds=3 model.backbone.artisan.h
 pixi run -e cuda goal-tune --config-dir src/goal/configs/ml --config-name simurgh_legacy_gmd26_hpo   # Ray Tune search, see below
 ```
 
-Both configs target GMD-26 FragmentDuplication (H/C/O carboxylic acids, PBE/def2-SVP). [`simurgh_legacy_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26.yaml) is self-contained: every option the project supports is either set there or documented in a comment.
+Both configs target GMD-26 FragmentDuplication (H/C/O carboxylic acids, PBE D3BJ def2-TZVP). [`simurgh_legacy_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26.yaml) is self-contained: every option the project supports is either set there or documented in a comment.
 
 ## Hyperparameters of the default config
 
@@ -91,7 +91,7 @@ These are the keys under `model.backbone` in `simurgh_legacy_gmd26.yaml`, with c
 | `num_elements` | `9` | `120` | embedding-table size | must be **> max Z** in the data (9 covers H–F) |
 | `avg_num_neighbors` | `null` | `None` | $\bar N$ in the ACE aggregation | leave `null`; `goal-train` injects the training-set mean |
 | `atomic_energies.mode` | `provided` | `learned` | per-element baseline $E_0$: `learned` (zero-init parameter), `dataset` (least squares on the train split), `provided` (fixed values) | `provided` when isolated-atom DFT energies are available, otherwise `dataset` |
-| `atomic_energies.values` | H, C, N, O PBE/def2-SVP | | `{Z: eV}` | required for `provided`; leave null for `dataset` |
+| `atomic_energies.values` | H, C, N, O PBE D3BJ def2-TZVP (GMD) | | `{Z: eV}` | required for `provided`; leave null for `dataset` |
 | `atomic_energies.compute_from_dataset` | `false` | | `true` upgrades `learned` to `dataset` | |
 | `scale` | `null` | `None` (= 1.0) | multiplicative gain on the interaction energy | leave `null`. It is auto-computed for `dataset`/`provided`. |
 | `num_elements_table` | (not set) | `120` | size of the Z-indexed $E_0$ table | |

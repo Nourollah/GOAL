@@ -1,6 +1,6 @@
 # ORCA calculator
 
-The `orca` backend runs [ORCA](https://www.faccts.de/orca/) (DFT, double hybrids, coupled cluster, and ORCA's built-in xTB) as an ASE calculator. It is the natural choice for **Gaussian-basis, all-electron reference labels**, such as the ωB97M-V/def2-TZVPD level used by OMol25 or the PBE/def2-SVP level of GMD. It is also the default *slow* level in the shipped [MTS configs](../mts/overview.md). The builder is [`ORCABuilder`](https://github.com/Nourollah/GOAL/blob/main/src/goal/md/core/calculator_factory.py), selected with `key: orca`. It wraps `ase.calculators.orca.ORCA` with an `OrcaProfile` (current ASE API, ≥ 3.23).
+The `orca` backend runs [ORCA](https://www.faccts.de/orca/) (DFT, double hybrids, coupled cluster, and ORCA's built-in xTB) as an ASE calculator. It is the natural choice for **Gaussian-basis, all-electron reference labels**, such as the ωB97M-V/def2-TZVPD level used by OMol25 or the PBE D3BJ def2-TZVP level of GMD. It is also the default *slow* level in the shipped [MTS configs](../mts/overview.md). The builder is [`ORCABuilder`](https://github.com/Nourollah/GOAL/blob/main/src/goal/md/core/calculator_factory.py), selected with `key: orca`. It wraps `ase.calculators.orca.ORCA` with an `OrcaProfile` (current ASE API, ≥ 3.23).
 
 ## Installing ORCA
 
@@ -137,7 +137,7 @@ multiplicity: 1
 
 ## Practical notes
 
-- **Labels for GMD-style training:** to match a published dataset, reproduce its level of theory exactly: functional, basis, dispersion, grid and RI approximation. For example, GMD uses PBE/def2-SVP, so use `keywords="PBE def2-SVP"`, plus `D3BJ` if the reference includes it.
+- **Labels for GMD-style training:** to match a published dataset, reproduce its level of theory exactly: functional, basis, dispersion, grid and RI approximation. For example, the GMD paper's keyword line is `!EnGrad PBE D3BJ def2-TZVP RI TightSCF` (two-body D3, no `ABC`), so use `keywords="PBE D3BJ def2-TZVP RI TightSCF"`.
 - **Comparing with plane-wave codes:** ORCA energies are all-electron. Do not compare absolute energies with CP2K-SIRIUS, QE or VASP; compare forces and relative energies. See [CP2K](cp2k.md#dispersion-dft-d3bj-dispersiond3bj) for a PBE-D3BJ setup whose D3 parameters match ORCA's.
 - **Cost:** each MD step is a fresh ORCA run. ORCA reuses the previous orbitals (`orca.gbw`) as its initial guess when it finds them in the same directory, so keep `directory` fixed across a trajectory, and use a different `directory` for each concurrent calculator.
 - **Charge and spin:** `MoleculeFactory.create("from_smiles", ...)` does not carry formal charges into `ase.Atoms`, so set `charge` and `multiplicity` explicitly for ions and radicals.

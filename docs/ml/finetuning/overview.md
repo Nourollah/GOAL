@@ -108,7 +108,7 @@ your data contains but the model's z-table does not are skipped with a
 warning. Note that MACE cannot represent such elements at all (see
 [MACE](mace.md)).
 
-Zero-shot MACE-MP-0 on GMD carboxylic acids (PBE/def2-SVP) shows how large
+Zero-shot MACE-MP-0 on GMD carboxylic acids (PBE D3BJ def2-TZVP) shows how large
 the offset is. Raw energies were off by roughly 600 eV/atom, against MPTrj's
 PBE/PAW references. After a per-element linear correction, the residual fell
 to 2 to 5 meV/atom.

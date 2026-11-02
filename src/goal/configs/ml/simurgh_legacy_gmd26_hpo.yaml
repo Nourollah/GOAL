@@ -1,7 +1,7 @@
 ########################################################
 # GOAL ML Hyperparameter-Optimisation Configuration
 # Model  : SIMURGH ARACE (simurgh_legacy_arace) — default architecture
-# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
+# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE D3BJ def2-TZVP DFT)
 #
 # Composes the base experiment config (simurgh_legacy_gmd26.yaml) and adds a
 # Ray Tune search space over the ARACE hyperparameters.  Uses the

@@ -3,7 +3,7 @@
 # Model  : SIMURGH ACE-FIRST (legacy) — E(3)-equivariant
 #          artisan-bank force field with ACE environment dressing
 #          FIRST and the artisan bank as the FINAL readout.
-# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE/def2-SVP DFT)
+# Dataset: GMD-26 FragmentDuplication (O₂CₙH₂ₙ, PBE D3BJ def2-TZVP DFT)
 #
 # NOTE — this is the LEGACY SIMURGH architecture.  The project
 # default is now the ARACE architecture (artisans primary at every
@@ -235,7 +235,7 @@ model:
     #                value here or training will raise an error with
     #                instructions on how to fix it.
     #
-    # For "provided" mode, values in eV (PBE/def2-SVP example):
+    # For "provided" mode, values in eV (PBE D3BJ def2-TZVP, GMD):
     atomic_energies:
       mode: provided
       values:

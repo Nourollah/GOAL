@@ -144,7 +144,7 @@ calc = CalculatorFactory.create(
 For `PBE`, `PBE0`, `BLYP`, `B3LYP`, and `TPSS`, the builder uses explicit canonical 2-body parameters (Grimme et al., *J. Comput. Chem.* **32**, 1456 (2011)). For PBE these are `s6=1.0, s8=0.7875, a1=0.4289, a2=4.4407`, the same values ORCA uses, so a CP2K PBE-D3BJ number is directly comparable to an ORCA `PBE D3BJ` reference. Other functionals fall back to `simple-dftd3`'s built-in method lookup. If `dftd3-python` is missing, you get a `GOALCalculatorNotFound`.
 
 > [!IMPORTANT]
-> **Comparing to Gaussian references.** Absolute energies from a pseudopotential plane-wave run are *not* comparable to an all-electron Gaussian reference (for example, the PBE/def2-SVP GMD labels), because the energy zeros differ by thousands of eV. Compare **forces** and **relative** energies.
+> **Comparing to Gaussian references.** Absolute energies from a pseudopotential plane-wave run are *not* comparable to an all-electron Gaussian reference (for example, the PBE D3BJ def2-TZVP GMD labels), because the energy zeros differ by thousands of eV. Compare **forces** and **relative** energies.
 
 > [!WARNING]
 > **Varying cells and plane-wave energies.** At a fixed cutoff, the number of plane waves depends on the cell. If every frame of a trajectory carries a slightly different box, which is common in GMD-style datasets, the recomputed *energy differences* pick up a spurious basis-set-variation term. One example was a ~6 eV spread where the reference varied by < 1 eV. **Forces are unaffected.** For comparable relative energies, put every frame in one common box. That is also faster, because SIRIUS can reuse one FFT grid.
@@ -250,7 +250,7 @@ e, f = atoms.get_potential_energy(), atoms.get_forces()
 calc.close()
 ```
 
-Expect about 1–2.5 min per frame at `pw/gk = 18/9` for a ~14-atom molecule in a ~15 Å box. Against the all-electron PBE/def2-SVP labels, the force-direction cosine is ≈ 0.99 at 18/9. At 12/6 it drops to ~0.91 and force magnitudes come out about 2× too large, which is plane-wave under-convergence rather than a pipeline problem.
+Expect about 1–2.5 min per frame at `pw/gk = 18/9` for a ~14-atom molecule in a ~15 Å box. Against the all-electron GMD labels (PBE D3BJ def2-TZVP), the force-direction cosine is ≈ 0.99 at 18/9. At 12/6 it drops to ~0.91 and force magnitudes come out about 2× too large, which is plane-wave under-convergence rather than a pipeline problem.
 
 > [!NOTE]
 > The notebook hands the full trajectory off to a batch script, `dump/recompute_gmd_cp2k_pw.py`, which offers resume, `--stride`, `--stop`, and `--fixed-cell`. That script lives in the author's local `dump/` scratch directory and is **not tracked in the repository**. Outside that checkout, loop over frames yourself with the snippet above and write results incrementally (e.g. with `ase.io.write(..., append=True)`).

@@ -82,7 +82,7 @@ This page lists the Jupyter notebooks in [`notebooks/`](https://github.com/Nouro
 
 ### `upet_petmad_gmd_gallery.ipynb`: PET-MAD zero-shot on GMD-26
 
-[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/upet_petmad_gmd_gallery.ipynb). This is the third gallery in the series, with PET-MAD loaded through `CalculatorFactory.create("upet", ...)` (UPET is the renamed `pet-mad` package). PET-MAD is trained at r2SCAN while GMD uses PBE/def2-SVP, so the notebook measures cross-functional transferability: forces are the meaningful comparison, and energies only after a per-element baseline fit. It also tests PET-SPICE, the molecule-trained member of the family, and pins the model `version` so that results do not change when upstream publishes new weights. Runs in the MACE venv with `upet` installed. Companion page: [UPET / PET-MAD](../md/calculators/upet.md).
+[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/upet_petmad_gmd_gallery.ipynb). This is the third gallery in the series, with PET-MAD loaded through `CalculatorFactory.create("upet", ...)` (UPET is the renamed `pet-mad` package). PET-MAD is trained at r2SCAN while GMD uses PBE D3BJ def2-TZVP, so the notebook measures cross-functional transferability: forces are the meaningful comparison, and energies only after a per-element baseline fit. It also tests PET-SPICE, the molecule-trained member of the family, and pins the model `version` so that results do not change when upstream publishes new weights. Runs in the MACE venv with `upet` installed. Companion page: [UPET / PET-MAD](../md/calculators/upet.md).
 
 ## Case studies
 

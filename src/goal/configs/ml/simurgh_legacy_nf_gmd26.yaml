@@ -4,7 +4,7 @@
 #          rounds whose per-atom energies are pooled onto FRAGMENT
 #          VIRTUAL NODES, which then interact pairwise
 #          (see goal.ml.nn.models.simurgh.legacy.nf_simurgh)
-# Dataset: GMD-26 FragmentDuplication (O2CnH2n, PBE/def2-SVP DFT)
+# Dataset: GMD-26 FragmentDuplication (O2CnH2n, PBE D3BJ def2-TZVP DFT)
 #
 # Self-contained config. Every parameter the project supports is
 # listed here — either set to its value for this experiment, or
