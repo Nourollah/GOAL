@@ -108,7 +108,12 @@ DEFAULTS: dict[str, typing.Any] = {
         "energy_mlp": [256, 256],
         "film": {"element_dim": 4, "mlp": [64, 128]},
     },
-    "electrostatics": {"enabled": False, "dipoles": False, "sigma": "learned"},
+    "electrostatics": {
+        "enabled": False,
+        "dipoles": False,
+        "sigma": "learned",
+        "charge_constraint": "uniform",
+    },
     "dispersion": {
         "enabled": False,
         "backend": "torch",
@@ -1429,6 +1434,75 @@ def damped_coulomb(r: torch.Tensor, sigma: torch.Tensor) -> tuple[torch.Tensor, 
     return t0, -t1 / r, (t2 - t1 / r) / r**2
 
 
+class _ChargeHead(nn.Module):
+    """Latent charges from final 0e features that sum exactly to each molecule's charge Q.
+
+    ``uniform`` (DOI 10.1021/jacs.5c09558, SI Eq. S12): ``q_i = q̂_i + (Q - Σ_j q̂_j)/N``
+    with ``q̂_i = q_Z + MLP(s_i)``, a per-molecule mean.  ``pair_transfer``
+    (local): ``q_i = Q/N + Σ_j t_ij`` over pairs within ``cutoff``, with
+    ``t_ij = [φ(s_i, s_j, r) - φ(s_j, s_i, r)] u(r) = -t_ji``.  ``q_Z`` and the
+    last layers start at zero, so a fresh head gives ``q_i = Q/N``.
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        num_elements: int,
+        constraint: str,
+        cutoff: float,
+        p: int,
+        num_rbf: int,
+    ) -> None:
+        super().__init__()
+        self.constraint, self.channels, self.cutoff, self.p = constraint, channels, cutoff, p
+        if constraint == "uniform":
+            self.q_z = nn.Parameter(torch.zeros(num_elements))
+            self.mlp = _MLP([channels, 64, 1], zero_last=True)
+        else:
+            self.rbf = _BesselBasis(cutoff, num_rbf)
+            self.phi = _MLP([2 * channels + num_rbf, 64, 1], zero_last=True)
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        elem: torch.Tensor,
+        batch: torch.Tensor,
+        num_graphs: int,
+        pairs: torch.Tensor,
+        lengths: torch.Tensor,
+        total: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Charges ``(N,)``; ``pairs`` ``(2, P)`` with ``lengths`` feed ``pair_transfer``."""
+        s = h[:, : self.channels]
+        count = scatter(torch.ones_like(s[:, 0]), batch, dim=0, dim_size=num_graphs, reduce="sum")
+        total = s.new_zeros(num_graphs) if total is None else total.to(s.dtype).reshape(-1)
+        if self.constraint == "uniform":
+            raw = self.q_z[elem] + self.mlp(s).squeeze(-1)
+            excess = total - scatter(raw, batch, dim=0, dim_size=num_graphs, reduce="sum")
+            return raw + (excess / count)[batch]
+        i, j = pairs
+        keep = lengths < self.cutoff
+        i, j, r = i[keep], j[keep], lengths[keep]
+        rbf = self.rbf(r)
+        forward = self.phi(torch.cat([s[i], s[j], rbf], dim=-1))
+        backward = self.phi(torch.cat([s[j], s[i], rbf], dim=-1))
+        t = (forward - backward).squeeze(-1) * polynomial_envelope(r / self.cutoff, self.p)
+        n = s.shape[0]
+        moved = scatter(t, i, dim=0, dim_size=n, reduce="sum") - scatter(
+            t, j, dim=0, dim_size=n, reduce="sum"
+        )
+        return (total / count)[batch] + moved
+
+
+def _intramolecular_pairs(batch: torch.Tensor, num_graphs: int) -> torch.Tensor:
+    """Every pair ``i < j`` inside each molecule, ``(2, P)``."""
+    pairs, start = [], 0
+    for n in torch.bincount(batch, minlength=num_graphs).tolist():
+        pairs.append(torch.triu_indices(n, n, offset=1, device=batch.device) + start)
+        start += n
+    return torch.cat(pairs, dim=1)
+
+
 class _Electrostatics(nn.Module):
     """Latent charges (and optional dipoles) from local features; open-boundary energy.
 
@@ -1439,10 +1513,16 @@ class _Electrostatics(nn.Module):
     not scaled by ``s``.  Population charges are never supervised.
     """
 
-    def __init__(self, cfg: dict, channels: int, num_elements: int) -> None:
+    def __init__(self, cfg: dict, channels: int, num_elements: int, model_cfg: dict) -> None:
         super().__init__()
-        self.charge_head = nn.Linear(channels, 1, bias=False)
-        nn.init.zeros_(self.charge_head.weight)
+        self.charge = _ChargeHead(
+            channels,
+            num_elements,
+            cfg["charge_constraint"],
+            model_cfg["cutoff"],
+            model_cfg["envelope_p"],
+            model_cfg["num_rbf"],
+        )
         self.dipole_head = None
         if cfg["dipoles"]:
             self.dipole_head = o3.Linear(f"{channels}x1o", "1x1o")
@@ -1456,13 +1536,21 @@ class _Electrostatics(nn.Module):
         else:
             self.fixed_sigma = float(cfg["sigma"])
         self.channels = channels
+        _choice(cfg, "charge_constraint", ("uniform", "pair_transfer"), "electrostatics.")
 
-    def charges(self, h: torch.Tensor, batch: torch.Tensor, num_graphs: int) -> torch.Tensor:
-        """Neutral latent charges ``(N,)`` (per-molecule uniform shift)."""
-        q = self.charge_head(h[:, : self.channels]).squeeze(-1)
-        total = scatter(q, batch, dim=0, dim_size=num_graphs, reduce="sum")
-        count = scatter(torch.ones_like(q), batch, dim=0, dim_size=num_graphs, reduce="sum")
-        return q - (total / count)[batch]
+    def charges(
+        self,
+        h: torch.Tensor,
+        elem: torch.Tensor,
+        pos: torch.Tensor,
+        batch: torch.Tensor,
+        num_graphs: int,
+        total: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Latent charges ``(N,)`` summing to each molecule's ``total`` (0 when absent)."""
+        i, j = _intramolecular_pairs(batch, num_graphs)
+        r = (pos[j] - pos[i]).norm(dim=-1)
+        return self.charge(h, elem, batch, num_graphs, torch.stack([i, j]), r, total)
 
     def forward(
         self,
@@ -1471,15 +1559,12 @@ class _Electrostatics(nn.Module):
         elem: torch.Tensor,
         batch: torch.Tensor,
         num_graphs: int,
+        total: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """Energy per molecule, charges and the molecular dipole."""
-        q = self.charges(h, batch, num_graphs)
+        q = self.charges(h, elem, pos, batch, num_graphs, total)
         mu = None if self.dipole_head is None else self.dipole_head(h[:, self.channels :])
-        pairs, start = [], 0
-        for n in torch.bincount(batch, minlength=num_graphs).tolist():
-            pairs.append(torch.triu_indices(n, n, offset=1, device=pos.device) + start)
-            start += n
-        i, j = torch.cat(pairs, dim=1)
+        i, j = _intramolecular_pairs(batch, num_graphs)
         rij = pos[j] - pos[i]
         r = rij.norm(dim=-1)
         if self.sigma_raw is not None:
@@ -1794,7 +1879,7 @@ class _MFC(nn.Module):
                 torch.arange(n_windows, device=device),
                 torch.as_tensor(np.diff(offsets), device=device),
             )
-            q_w = model.electrostatics.charges(h_w, owner, n_windows)
+            q_w = model.electrostatics.charges(h_w, elem[src], pos_w, owner, n_windows)
             child, parent = [], []
             for k, (_, w, _) in enumerate(windows):
                 child.append(q_w[rows(k, w.core)])
@@ -2132,7 +2217,9 @@ class SimurghDev(nn.Module):
         if es["sigma"] != "learned" and not isinstance(es["sigma"], (int, float)):
             raise ValueError("electrostatics.sigma must be 'learned' or a width in Å")
         self.electrostatics = (
-            _Electrostatics(es, self.atom_line.channels, len(elements)) if es["enabled"] else None
+            _Electrostatics(es, self.atom_line.channels, len(elements), cfg)
+            if es["enabled"]
+            else None
         )
         if pl["pair_first_epochs"] and not pl["enabled"]:
             raise ValueError("pair_line.pair_first_epochs needs pair_line.enabled")
@@ -2270,7 +2357,8 @@ class SimurghDev(nn.Module):
             energy = energy + e_d3
         elec = None
         if self.electrostatics is not None:
-            elec = self.electrostatics(h_last, pos_d, elem, batch, num_graphs)
+            total = graph.get("total_charge", None)
+            elec = self.electrostatics(h_last, pos_d, elem, batch, num_graphs, total)
             energy = energy + elec["energy"]
         extra = self.extra_energy(h_last, pos_d, elem, batch, num_graphs)
         if extra is not None:

@@ -75,7 +75,7 @@ def test_physical_long_range_refuses_stacking_with_d3() -> None:
 def test_physical_long_range_dispersion_is_attractive_and_smooth() -> None:
     model = ablation("simurgh_dev_abl_physical_long_range")
     with torch.no_grad():
-        model.dispersion_amplitude.fill_(1.0)
+        model.a_disp.fill_(1.0)
     p = predict_fn(model)
     from ase import Atoms
 

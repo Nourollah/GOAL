@@ -16,7 +16,7 @@ $$E = \sum_i E_0(Z_i) + s\Big[\sum_i e_i + \sum_{i<j}\phi_{Z_iZ_j}(r_{ij}) + \su
 | PAN gate (`attention.pan_gate`, arXiv:2606.15892, Eqs. S14-S15): $a_{ij} = 2\sigma(f([e_{ij}, Z_i, Z_j, \tilde\rho_i, \tilde\eta_i]))$ on the 0e slots of each message, from the coordination $\rho$ and angular variance $\eta$ of the receiving atom, standardised with training-split statistics that `goal-train` computes; `pan_gate_descriptors: generic` drops $\rho, \eta$ | C3 | off |
 | $\phi_{ab}(r)$: pair line per unordered element pair, plus a fixed ZBL wall below `r_min` | WP3 | on |
 | $\varepsilon_{ij}$: ECE bond line (`pair_line.mode: ece \| phi+ece`) | WP11 | off |
-| $E_{\text{elec}}$: latent charges (and dipoles), damped Coulomb | WP7 | off |
+| $E_{\text{elec}}$: latent charges (and dipoles), damped Coulomb; `electrostatics.charge_constraint: uniform \| pair_transfer` conserves each molecule's total charge (`total_charge` on the graph, else 0) | WP7, C4 | off |
 | $E_{\text{D3}}$: closed-form D3(BJ) dispersion (no DFT); `backend: torch` (tad-dftd3, in the `cuda` environments) or `precomputed` (dftd3-python) | WP1 | off |
 
 `core: ece` replaces $\sum_i e_i$ with the edge cluster expansion: bond states in each bond's own frame (O(2) features), updated by line-graph message passing, with energy $\sum_{i\to j}\varepsilon_{ij}$. The ECE modules are generic GOAL code: `nn/primitives/edge_frame.py`, `nn/primitives/o2.py`, `nn/blocks/ece.py` and `nn/heads/edge_energy.py`.
@@ -79,3 +79,7 @@ The ablation programme is in `src/goal/configs/ml/ablations/simurgh_dev/`, one k
 | `export_pair_potentials.py` | $\phi_{ab}(r)$ and derivatives to CSV and PNG |
 | `benchmark.py` | time and memory per training step |
 | `migrate_legacy_checkpoints.py` | rewrite pre-legacy registry keys in saved checkpoints |
+
+## Physical long-range ablation
+
+`simurgh_dev_abl_physical_long_range` adds learned dispersion and erf-damped electrostatics, each behind an amplitude that starts at zero (DOI 10.1021/jacs.5c09558; C8 and C10 from the oscillator relations of DOI 10.1021/acs.jctc.3c00797). Volume ratios $h_i = \mathrm{softplus}(b_Z + \mathrm{MLP}(s_i))$ start at 0.8 and scale free-atom $\alpha_0$ and $C_6$ (H, C, N and O only; provisional values from the source's released code). The `long_range:` section sets `electrostatics_kernel` (`erf_fixed`, σ = 4 Å, or `gaussian_pair` for the WP7 module), `charge_constraint`, `exact_prefactor`, `disp_damping_gamma` (1.2) and an optional `cutoff`. Never stack it with the D3 term; `tests/ml/simurgh_dev/fixtures/longrange_dispersion_reference.csv` holds the reference pair energies the tests reproduce.
