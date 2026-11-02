@@ -130,6 +130,18 @@ DEFAULTS: dict[str, typing.Any] = {
         "atm": False,
     },
     "diagnostics": {"calm": False},
+    # training.aux (goal-train copies it here): training-only auxiliary objectives
+    "aux": {
+        "denoise": False,
+        "denoise_rung": "D1",  # D1 (fixed isotropic noise); D2, D1-R: planned
+        "denoise_sigma": 0.05,  # Å
+        "denoise_p": 0.25,  # probability that a structure gets a corrupted copy
+        "denoise_r": 0.25,  # probability that an atom of a copy is corrupted
+        "denoise_force_weight": 100.0,  # λ_F of the force loss
+        "denoise_scale": 1.0,  # λ_dn = scale · 0.0625 λ_F σ_F²; sweep 0.25 | 1 | 4
+        "denoise_epochs": None,  # linear decay of λ_dn to 0 (goal-train: max_epochs)
+        "hessian_distill": False,
+    },
     "atomic_energies": {"mode": "provided", "values": None},
     "scale": None,
     # training-split mean and s.d. of per-atom descriptors (goal-train sets it)
@@ -989,6 +1001,7 @@ class _Interaction(nn.Module):
         avg_num_neighbors: float,
         lengths: torch.Tensor | None = None,
         pan: torch.Tensor | None = None,
+        a_shift: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """One layer: messages, A-basis, product basis and update."""
         sender, receiver = edge_index
@@ -1019,6 +1032,8 @@ class _Interaction(nn.Module):
         else:
             a = self.attention(messages, h, receiver, rbf, env, n, avg_num_neighbors)
         a = self.linear_a(a)
+        if a_shift is not None:
+            a = a + a_shift
         if self.symmetric:
             channels = _to_channels(a, self.irreps_a)
             if self.record_basis:
@@ -1182,8 +1197,12 @@ class _AtomLine(nn.Module):
         vectors: torch.Tensor,
         lengths: torch.Tensor,
         avg_num_neighbors: float,
+        a_shift: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Atomic energies ``e_i`` (unscaled) and the final invariant features."""
+        """Atomic energies ``e_i`` (unscaled) and the final invariant features.
+
+        ``a_shift`` (denoising copies only) is added to the first layer's A-basis.
+        """
         emb = self.embedding.weight
         h = self.embed_to_h(emb[elem])
         sh = o3.spherical_harmonics(
@@ -1203,7 +1222,18 @@ class _AtomLine(nn.Module):
         energy = h.new_zeros(h.shape[0])
         for t, (layer, readout) in enumerate(zip(self.layers, self.readouts)):
             h = layer(
-                h, elem, emb, edge_index, sh, rbf, pair_code, env, avg_num_neighbors, lengths, pan
+                h,
+                elem,
+                emb,
+                edge_index,
+                sh,
+                rbf,
+                pair_code,
+                env,
+                avg_num_neighbors,
+                lengths,
+                pan,
+                a_shift if t == 0 else None,
             )
             scalars = h[:, : self.channels]
             if t == len(self.layers) - 1 and self.pgs is not None:
@@ -2265,6 +2295,123 @@ def build_simurgh_optimizer(model: nn.Module, opt_cfg: typing.Any) -> _SimurghOp
 # =============================================================================
 
 
+# =============================================================================
+# C7: auxiliary denoising (training only)
+# =============================================================================
+
+
+class _Denoise(nn.Module):
+    """Denoising of partially corrupted copies (arXiv:2510.22123; arXiv:2403.09549), rung D1.
+
+    Each training structure gets, with probability ``p``, a copy whose atoms
+    are each displaced with probability ``r`` by ``σ ε``, ``ε ~ N(0, I)``; the
+    neighbour list is rebuilt on the copy.  The clean forces of the
+    corrupted atoms, over the training force scale ``σ_F``, are encoded as
+    ``|f| Y_l(f̂)`` (l ≤ 2) and added through a zero-initialised linear map
+    to the first layer's A-basis (SIMURGH's initial features are scalars).
+    A head (one extra interaction step, then a zero-initialised map to 1o)
+    predicts ``ε`` of the corrupted atoms: ``L = (1/N) Σ_i m_i |o_i - ε_i|²``
+    per copy.  The copy carries only this loss: no energy or force loss, no
+    autograd forces.  The structure keeps its normal losses.
+    """
+
+    def __init__(self, cfg: dict, atom_line: nn.Module, num_elements: int) -> None:
+        super().__init__()
+        aux = cfg["aux"]
+        self.sigma, self.p, self.r = aux["denoise_sigma"], aux["denoise_p"], aux["denoise_r"]
+        self.cutoff, self.envelope_p = cfg["cutoff"], cfg["envelope_p"]
+        self.factor = aux["denoise_scale"] * 0.0625 * aux["denoise_force_weight"]
+        self.epochs = aux["denoise_epochs"]
+        self.irreps_code = o3.Irreps.spherical_harmonics(2)
+        irreps_a = atom_line.layers[0].irreps_a
+        self.encode = o3.Linear(self.irreps_code, irreps_a)
+        last = atom_line.layers[-1]
+        pair_dim = cfg["embedding_dim"] if atom_line.pair_code is not None else 0
+        self.head = _Interaction(
+            1,
+            last.irreps_out,
+            atom_line.irreps_sh,
+            irreps_a,
+            irreps_a,
+            cfg,
+            num_elements,
+            pair_dim,
+        )
+        self.out = o3.Linear(irreps_a, "1x1o")
+        with torch.no_grad():
+            self.encode.weight.zero_()
+            self.out.weight.zero_()
+        self.last_copies = 0
+
+    def weight(self, epoch: int, force_scale: float) -> float:
+        """``λ_dn = scale · 0.0625 λ_F σ_F²``, decaying linearly to 0 over ``denoise_epochs``."""
+        decay = 1.0 if not self.epochs else max(0.0, 1.0 - epoch / float(self.epochs))
+        return self.factor * force_scale**2 * decay
+
+    def corrupt(self, pos, batch, num_graphs):
+        """``(atoms, positions x̃, mask, ε, structure index, edges of x̃)`` of the copies."""
+        device = pos.device
+        pick = torch.rand(num_graphs, device=device) < self.p
+        atoms = torch.nonzero(pick[batch]).squeeze(-1)
+        x = pos[atoms].detach()
+        mask = torch.rand(atoms.numel(), device=device) < self.r
+        eps = torch.randn_like(x)
+        x_t = x + self.sigma * eps * mask.unsqueeze(-1)
+        owner = torch.unique(batch[atoms], return_inverse=True)[1]
+        d = torch.cdist(x_t, x_t)
+        adj = (owner[:, None] == owner[None, :]) & (d < self.cutoff)
+        adj.fill_diagonal_(False)
+        return atoms, x_t, mask, eps, owner, adj.nonzero().T
+
+    def predict(self, model, elem, x_t, edges, f) -> torch.Tensor:
+        """Head output ``o`` (1o, e3nn basis) on positions ``x_t`` with encoded forces ``f``."""
+        line = model.atom_line
+        size = f.norm(dim=-1, keepdim=True)
+        code = size * o3.spherical_harmonics(
+            self.irreps_code, f / size.clamp_min(1e-12), normalize=False, normalization="component"
+        )
+        vec = x_t[edges[1]] - x_t[edges[0]]
+        lengths = vec.norm(dim=-1)
+        _, h = line(elem, edges, vec, lengths, model.avg_num_neighbors, self.encode(code))
+        emb = line.embedding.weight
+        sh = o3.spherical_harmonics(line.irreps_sh, vec, normalize=True, normalization="component")
+        pair_code = None
+        if line.pair_code is not None:
+            ei, ej = emb[elem[edges[0]]], emb[elem[edges[1]]]
+            pair_code = line.pair_code(torch.cat([ei + ej, ei * ej], dim=-1))
+        env = polynomial_envelope(lengths / self.cutoff, self.envelope_p)
+        h = self.head(
+            h,
+            elem,
+            emb,
+            edges,
+            sh * line.sh_factor,
+            line.rbf(lengths),
+            pair_code,
+            env,
+            model.avg_num_neighbors,
+            lengths,
+        )
+        return self.out(h)
+
+    def forward(self, model, graph, pos, elem, batch, num_graphs) -> torch.Tensor:
+        """Mean denoising loss over the batch's copies (0, still on the graph, without any)."""
+        forces = graph.get("forces", None)
+        zero = sum(p.sum() for p in self.parameters()) * 0.0
+        if forces is None:
+            return zero
+        atoms, x_t, mask, eps, owner, edges = self.corrupt(pos, batch, num_graphs)
+        self.last_copies = int(owner.max()) + 1 if owner.numel() else 0
+        if not self.last_copies or edges.numel() == 0:
+            return zero
+        f = forces[atoms].to(x_t.dtype) * mask.unsqueeze(-1) / float(model.scale)
+        o = self.predict(model, elem[atoms], x_t, edges, f)
+        target = o3.spherical_harmonics(1, eps, normalize=False, normalization="component")
+        err = (o - target / math.sqrt(3.0)).square().sum(-1) * mask
+        per_copy = scatter(err, owner, dim=0, dim_size=self.last_copies, reduce="mean")
+        return per_copy.mean() + zero
+
+
 @MODEL_REGISTRY.register("simurgh_dev")
 @BACKBONE_REGISTRY.register("simurgh_dev")
 class SimurghDev(nn.Module):
@@ -2380,6 +2527,13 @@ class SimurghDev(nn.Module):
         _choice(pl, "bond_order_eta_map", ("power", "smooth"), "pair_line.")
         if pl["bond_order_body"] not in (3, 4):
             raise ValueError("pair_line.bond_order_body must be 3 or 4")
+        aux = cfg["aux"]
+        _choice(aux, "denoise_rung", ("D1", "D2", "D1-R"), "aux.")
+        if aux["denoise"] and aux["denoise_rung"] != "D1":
+            _not_yet(f"aux.denoise_rung: {aux['denoise_rung']}")
+        if aux["denoise"] and cfg["core"] != "ace":
+            raise ValueError("aux.denoise encodes forces into the ACE A-basis: needs core: ace")
+        self.denoise = _Denoise(cfg, self.atom_line, len(elements)) if aux["denoise"] else None
         self.bond_order = (
             _BondOrder(
                 cfg, len(elements), min(pl["pair_cutoff"] or cfg["cutoff"], 5.5), cfg["envelope_p"]
@@ -2573,6 +2727,10 @@ class SimurghDev(nn.Module):
                 q_full = None if elec is None else elec["charges"]
                 terms.update(self.mfc(self, graph, pos, pos_d, elem, batch, e_atom, q_full))
                 aux = aux + terms.pop("mfc")
+            if self.denoise is not None:
+                dn = self.denoise(self, graph, pos_d, elem, batch, num_graphs)
+                aux = aux + self.denoise.weight(self.epoch, float(self.scale)) * dn
+                terms["denoise"] = dn.detach()
             if terms:
                 out["aux_terms"] = terms
             out["aux_loss"] = aux

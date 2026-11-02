@@ -34,6 +34,10 @@ Forces are conservative only, $F = -\partial E/\partial R$. Every map is bias-fr
 - `aux_loss` and `aux_terms`: in training.
 - `calm_basis` and `calm_layer_norms`: with `diagnostics.calm`, the unweighted 0e product basis of every layer (output only; energies and forces are bit-identical with it on or off).
 
+## Auxiliary denoising (`training.aux.denoise`)
+
+Training only (arXiv:2510.22123; arXiv:2403.09549), rung D1: with probability `denoise_p` (0.25) a structure gets a copy whose atoms are each displaced with probability `denoise_r` (0.25) by Gaussian noise of `denoise_sigma` (0.05 Å). The clean forces of the corrupted atoms are encoded through a zero-initialised map into the first layer's A-basis; an extra interaction step and a zero-initialised 1o map predict the unit noise. The copy carries only this loss; the structure keeps its energy and force losses. Weight $\lambda_{dn} = 0.0625\,\lambda_F\,\sigma_F^2$ times `denoise_scale`, decaying linearly to zero over training. Eval-mode outputs are unchanged. The learned-noise rung D2 and the source's replacement scheme D1-R are planned.
+
 ## Multi-scale fragment consistency (MFC)
 
 The same network is evaluated on windows of a structure: half-space cuts or spheres, nested for three levels. On the window's core atoms (at least `mfc.buffer` from every removed atom) it must reproduce what it predicts inside the larger context:

@@ -117,6 +117,7 @@ _DERIVED_BACKBONE_KEYS: tuple[str, ...] = (
     "avg_num_neighbors",
     "dressing_kwargs",
     "atom_statistics",
+    "aux",
 )
 
 
@@ -376,6 +377,16 @@ def _run_training(cfg: DictConfig) -> None:
         if backbone_kwargs.get("scale") == "force_rms":
             backbone_kwargs["scale"] = _force_rms(datamodule.data_train)
             print(f"[stats] scale (training force RMS)={backbone_kwargs['scale']:.6f}")
+        # training.aux: training-only objectives that live in the model
+        aux_cfg: typing.Any = cfg.training.get("aux", None)
+        if aux_cfg:
+            from omegaconf import OmegaConf
+
+            merged = {**dict(backbone_kwargs.get("aux") or {})}
+            merged.update(OmegaConf.to_container(aux_cfg, resolve=True))
+            if merged.get("denoise") and merged.get("denoise_epochs") is None:
+                merged["denoise_epochs"] = cfg.trainer.get("max_epochs", None)
+            backbone_kwargs["aux"] = merged
 
     # Generic hook: a backbone may request the training-split mean and s.d.
     # of per-atom descriptors through ``atom_statistics(config)``.

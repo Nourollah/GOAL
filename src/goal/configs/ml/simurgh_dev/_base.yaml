@@ -258,6 +258,9 @@ training:
     enabled: true
     decay: 0.99
   position_noise_std: 0.0
+  aux: # training-only objectives; goal-train copies them to model.backbone.aux
+    denoise: false # corrupted copies + noise head (rung D1; arXiv:2510.22123)
+    hessian_distill: false # teacher Hessian rows (loss and label format only)
   # warmup_huber: 5 energy-only epochs, then E:F = 1:100.  The separate arm
   # warmup_huber_switch adds a last stage (final 20% of epochs) with the
   # energy weight raised 400x and lr 2.5e-4, e.g.
