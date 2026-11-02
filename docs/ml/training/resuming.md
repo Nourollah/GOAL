@@ -160,6 +160,7 @@ Before building the model, `goal-train` derives several backbone arguments from 
 | `scale` | `scale` | Gain on the learned interaction energy |
 | `avg_num_neighbors` | `avg_num_neighbors` or `dressing_kwargs.avg_num_neighbors` | Normaliser of the neighbour sums |
 | `pair_counts` | `artisan.pair_counts` / `artisan_config.pair_counts` | Which element pairs get a dedicated artisan (rare-pair routing) |
+| `atom_statistics` | `atom_statistics` | Training-split mean and s.d. of per-atom descriptors that a backbone requests through its `atom_statistics(config)` method (SIMURGH's PAN gate). Held in checkpoint buffers, so the checkpoint's values are restored on resume |
 
 A checkpoint only means something together with the values it was trained with. So every run records them, with the data they came from, in the `dataset_stats` block of its `checkpoints/config.yaml` (and in every `.ckpt`'s hyper-parameters):
 

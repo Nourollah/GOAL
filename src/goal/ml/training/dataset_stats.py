@@ -11,6 +11,7 @@ statistic             backbone argument(s)
 ``scale``             ``scale``
 ``avg_num_neighbors`` ``avg_num_neighbors`` or ``dressing_kwargs.avg_num_neighbors``
 ``pair_counts``       ``artisan.pair_counts`` or ``artisan_config.pair_counts``
+``atom_statistics``   ``atom_statistics`` (requested by the backbone's ``atom_statistics``)
 ===================== ==============================================================
 
 They shape the model (element tables, artisan routing) and fix its
@@ -56,6 +57,7 @@ STAT_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
     "scale": (("scale",),),
     "avg_num_neighbors": (("avg_num_neighbors",), ("dressing_kwargs", "avg_num_neighbors")),
     "pair_counts": (("artisan", "pair_counts"), ("artisan_config", "pair_counts")),
+    "atom_statistics": (("atom_statistics",),),
 }
 
 #: ``data:`` keys that only affect how batches are loaded, not which

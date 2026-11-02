@@ -266,6 +266,37 @@ def compute_pair_counts(
     return counts
 
 
+def compute_atom_statistics(
+    dataset: typing.Iterable[typing.Any],
+    descriptors: typing.Mapping[str, typing.Callable[[typing.Any], torch.Tensor]],
+) -> dict[str, dict[str, float]]:
+    """Mean and standard deviation of per-atom descriptors over every atom of ``dataset``.
+
+    ``descriptors`` maps a name to a function of one graph returning one
+    value per atom ``(N,)``.  Accumulated in float64 as sums and counts, so
+    the result does not depend on how the dataset is split into graphs.
+
+    Returns
+    -------
+    dict
+        ``{name: {"mean": m, "std": s}}`` (population s.d.).
+    """
+    sums = {name: torch.zeros(3, dtype=torch.float64) for name in descriptors}
+    for graph in dataset:
+        for name, fn in descriptors.items():
+            with torch.no_grad():
+                values = fn(graph).detach().to(torch.float64).flatten()
+            sums[name] += torch.stack(
+                [values.new_tensor(values.numel()), values.sum(), values.square().sum()]
+            )
+    out: dict[str, dict[str, float]] = {}
+    for name, (count, total, squares) in sums.items():
+        n = max(float(count), 1.0)
+        mean = float(total) / n
+        out[name] = {"mean": mean, "std": max(float(squares) / n - mean * mean, 0.0) ** 0.5}
+    return out
+
+
 def compute_avg_num_neighbors(
     dataset: typing.Iterable[typing.Any],
 ) -> float:

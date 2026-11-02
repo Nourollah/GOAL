@@ -71,7 +71,7 @@ DEFAULTS: dict[str, typing.Any] = {
     "dtype": "float32",
     "radial": {"low_rank": None, "per_layer": None, "env_conditioned": False},
     "a_basis": {"regularity_prior_sigma": None, "prior_weight_decay": None},
-    "attention": {"mode": "gate", "pan_gate": False},
+    "attention": {"mode": "gate", "pan_gate": False, "pan_gate_descriptors": "full"},
     "readout": {
         "pgs": True,
         "pgs_edge": False,
@@ -119,6 +119,8 @@ DEFAULTS: dict[str, typing.Any] = {
     "diagnostics": {"calm": False},
     "atomic_energies": {"mode": "provided", "values": None},
     "scale": None,
+    # training-split mean and s.d. of per-atom descriptors (goal-train sets it)
+    "atom_statistics": None,
     "mfc": {
         "enabled": False,
         "objective": ["energy", "core_force"],
@@ -582,40 +584,98 @@ class _RMSNorm(nn.Module):
         return torch.cat(parts, dim=-1)
 
 
-class _PANGate(nn.Module):
-    """Coordination and angular-variance gate on the scalar messages.
+def pan_descriptors(
+    vectors: torch.Tensor,
+    lengths: torch.Tensor,
+    receiver: torch.Tensor,
+    num_atoms: int,
+    cutoff: float,
+    p: int,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Coordination ``ρ`` and angular variance ``η`` of every atom, ``(N, 2)``.
 
-    shortcut: reconstructed from the brief's one-line description (the
-    paper was not available): ``g_i = 2σ(w_n n_i/⟨N⟩ + w_v v_i)`` with the
-    enveloped coordination ``n_i = Σ_j u(r_ij)`` and the angular variance
-    ``v_i = 1 - |Σ_j u r̂_ij|² / n_i²`` (from the l = 1 moment), applied to
-    the 0e blocks of A; ``w`` start at zero, so ``g = 1``.  Check against
-    the paper before reporting the rung.
+    arXiv:2606.15892, Eqs. S4-S7: ``ρ_i = Σ_j u(r_ij)``; ``η_i`` is the
+    ``u``-weighted variance of ``c_jk = r̂_ij · r̂_ik`` over ordered pairs
+    ``j ≠ k``, evaluated in O(N_nb) from the moments ``m1 = Σ_j u r̂`` and
+    ``M2 = Σ_j u r̂ r̂ᵀ``: with ``W2 = ρ² - Σu²``, ``S1 = |m1|² - Σu²``,
+    ``S2 = ‖M2‖² - Σu²`` and ``c̄ = S1 / (ε + W2)``,
+    ``η = (S2 - 2 c̄ S1 + c̄² W2) / (ε + W2)``.  ``η = 0`` with fewer than
+    three neighbours; both are C2 as a neighbour crosses ``r_c``.
+    """
+    w = polynomial_envelope(lengths / cutoff, p)
+    unit = vectors / lengths.unsqueeze(-1)
+    outer = (unit.unsqueeze(-1) * unit.unsqueeze(-2)).reshape(-1, 9)
+    sums = scatter(
+        torch.cat(
+            [
+                w.unsqueeze(-1),
+                (w * w).unsqueeze(-1),
+                w.unsqueeze(-1) * unit,
+                w.unsqueeze(-1) * outer,
+            ],
+            dim=-1,
+        ),
+        receiver,
+        dim=0,
+        dim_size=num_atoms,
+        reduce="sum",
+    )
+    rho, w2, m1, m2 = sums[:, 0], sums[:, 1], sums[:, 2:5], sums[:, 5:]
+    pairs = rho * rho - w2
+    s1 = m1.square().sum(-1) - w2
+    s2 = m2.square().sum(-1) - w2
+    mean = s1 / (eps + pairs)
+    eta = (s2 - 2.0 * mean * s1 + mean * mean * pairs) / (eps + pairs)
+    return torch.stack([rho, eta], dim=-1)
+
+
+#: Per-atom descriptors the PAN gate standardises with training-split statistics.
+PAN_STATISTICS: tuple[str, ...] = ("pan_rho", "pan_eta")
+
+
+class _PANGate(nn.Module):
+    """PAN gate on the scalar messages (arXiv:2606.15892, Eqs. S14-S15, Algorithm S1).
+
+    ``a_ij = 2σ(f([e_ij, onehot(Z_i), onehot(Z_j), ρ̃_i, η̃_i]))`` with ``i`` the
+    receiving atom, ``e_ij`` the radial network's input and ``ρ̃``, ``η̃``
+    standardised with training-split statistics.  ``a_ij`` multiplies the 0e
+    slots of each per-edge message before the neighbour sum; the l > 0 slots
+    are untouched.  The last layer of ``f`` starts at zero, so ``a = 1``.
+    ``descriptors=False`` is the paper's generic-gate control (no ``ρ, η``).
     """
 
-    def __init__(self, irreps_mid: o3.Irreps) -> None:
+    def __init__(
+        self, irreps_mid: o3.Irreps, in_dim: int, num_elements: int, descriptors: bool
+    ) -> None:
         super().__init__()
-        self.weights = nn.Parameter(torch.zeros(2))
-        self.scalar = torch.cat(
+        self.num_elements = num_elements
+        width = in_dim + 2 * num_elements + (2 if descriptors else 0)
+        self.f = _MLP([width, 64, 1], zero_last=True)
+        scalar = torch.cat(
             [
                 torch.full((mul * ir.dim,), ir == o3.Irrep("0e"), dtype=torch.bool)
                 for mul, ir in irreps_mid
             ]
         )
+        self.register_buffer("scalar", scalar, persistent=False)
 
-    def forward(self, a, sh, env, receiver, avg_num_neighbors: float) -> torch.Tensor:
-        """Gate the scalar channels of the aggregated messages ``a``."""
-        n = scatter(env, receiver, dim=0, dim_size=a.shape[0], reduce="sum")
-        unit = sh[:, 1:4] / math.sqrt(3.0)  # component-normalised l = 1 block
-        moment = scatter(
-            env.unsqueeze(-1) * unit, receiver, dim=0, dim_size=a.shape[0], reduce="sum"
-        )
-        variance = 1.0 - moment.square().sum(-1) / (n.square() + 1e-12)
-        g = 2.0 * torch.sigmoid(
-            self.weights[0] * n / avg_num_neighbors + self.weights[1] * variance
-        )
-        mask = self.scalar.to(a.device)
-        return torch.where(mask, a * g.unsqueeze(-1), a)
+    def forward(
+        self,
+        messages: torch.Tensor,
+        e: torch.Tensor,
+        elem: torch.Tensor,
+        edge_index: torch.Tensor,
+        descriptors: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Messages ``(E, dim)`` with their 0e slots scaled by ``a_ij``."""
+        sender, receiver = edge_index
+        onehot = nn.functional.one_hot(elem, self.num_elements).to(e.dtype)
+        psi = [e, onehot[receiver], onehot[sender]]
+        if descriptors is not None:
+            psi.append(descriptors[receiver])
+        a = 2.0 * torch.sigmoid(self.f(torch.cat(psi, dim=-1)))
+        return torch.where(self.scalar, messages * a, messages)
 
 
 class _PGSEdge(nn.Module):
@@ -727,7 +787,16 @@ class _Interaction(nn.Module):
             if mode != "none"
             else None
         )
-        self.pan_gate = _PANGate(irreps_mid_sorted) if cfg["attention"]["pan_gate"] else None
+        self.pan_gate = (
+            _PANGate(
+                irreps_mid_sorted,
+                in_dim,
+                num_elements,
+                cfg["attention"]["pan_gate_descriptors"] == "full",
+            )
+            if cfg["attention"]["pan_gate"]
+            else None
+        )
         self.linear_a = o3.Linear(irreps_mid_sorted, irreps_a)
         self.symmetric = cfg["product_basis"] == "symmetric"
         if self.symmetric:
@@ -763,6 +832,7 @@ class _Interaction(nn.Module):
         env: torch.Tensor,
         avg_num_neighbors: float,
         lengths: torch.Tensor | None = None,
+        pan: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """One layer: messages, A-basis, product basis and update."""
         sender, receiver = edge_index
@@ -785,13 +855,13 @@ class _Interaction(nn.Module):
         messages = self.tp(self.linear_up(h)[sender], sh, weights)
         if self.message_gate is not None:
             messages = messages * self.message_gate(h, edge_index, sh, env).unsqueeze(-1)
+        if self.pan_gate is not None:
+            messages = self.pan_gate(messages, radial_in, elem, edge_index, pan)
         n = h.shape[0]
         if self.attention is None:
             a = scatter(messages, receiver, dim=0, dim_size=n, reduce="sum") / avg_num_neighbors
         else:
             a = self.attention(messages, h, receiver, rbf, env, n, avg_num_neighbors)
-        if self.pan_gate is not None:
-            a = self.pan_gate(a, sh, env, receiver, avg_num_neighbors)
         a = self.linear_a(a)
         if self.symmetric:
             b = _from_channels(
@@ -932,6 +1002,21 @@ class _AtomLine(nn.Module):
         self.layers, self.readouts = nn.ModuleList(layers), nn.ModuleList(readouts)
         self.pgs = _pgs(cfg["readout"], c)
         self.channels = c
+        att = cfg["attention"]
+        stats = None
+        if att["pan_gate"] and att["pan_gate_descriptors"] == "full":
+            given = cfg["atom_statistics"] or {}
+            missing = [k for k in PAN_STATISTICS if k not in given]
+            if missing:
+                raise ValueError(
+                    f"attention.pan_gate needs atom_statistics {missing}: the training-split "
+                    "mean and s.d. of the PAN descriptors (goal-train sets them)"
+                )
+            stats = torch.tensor(
+                [[given[k]["mean"], max(given[k]["std"], 1e-6)] for k in PAN_STATISTICS],
+                dtype=torch.float64,
+            )
+        self.register_buffer("pan_stats", stats)  # (2, [mean, s.d.]), frozen
 
     def forward(
         self,
@@ -954,10 +1039,14 @@ class _AtomLine(nn.Module):
         if self.pair_code is not None:
             ei, ej = emb[elem[edge_index[0]]], emb[elem[edge_index[1]]]
             pair_code = self.pair_code(torch.cat([ei + ej, ei * ej], dim=-1))
+        pan = None
+        if self.pan_stats is not None:
+            raw = pan_descriptors(vectors, lengths, edge_index[1], h.shape[0], self.cutoff, self.p)
+            pan = (raw - self.pan_stats[:, 0].to(raw.dtype)) / self.pan_stats[:, 1].to(raw.dtype)
         energy = h.new_zeros(h.shape[0])
         for t, (layer, readout) in enumerate(zip(self.layers, self.readouts)):
             h = layer(
-                h, elem, emb, edge_index, sh, rbf, pair_code, env, avg_num_neighbors, lengths
+                h, elem, emb, edge_index, sh, rbf, pair_code, env, avg_num_neighbors, lengths, pan
             )
             scalars = h[:, : self.channels]
             if t == len(self.layers) - 1 and self.pgs is not None:
@@ -1969,6 +2058,9 @@ class SimurghDev(nn.Module):
                 "(cuequivariance-torch is not a GOAL dependency yet)"
             )
         _choice(cfg["readout"], "pgs_edge_alpha", ("scalar", "per_channel"), "readout.")
+        _choice(cfg["attention"], "pan_gate_descriptors", ("full", "generic"), "attention.")
+        if cfg["core"] == "ece" and cfg["attention"]["pan_gate"]:
+            raise ValueError("attention.pan_gate gates the ACE messages: needs core: ace")
         if cfg["core"] == "ece" and cfg["readout"]["pgs_edge"]:
             raise ValueError("readout.pgs_edge acts on the ACE radial weights: needs core: ace")
         for flag, on in (
@@ -2066,6 +2158,37 @@ class SimurghDev(nn.Module):
     def build_optimizer(self, opt_cfg: typing.Any) -> torch.optim.Optimizer:
         """The recipe's optimiser; see :func:`build_simurgh_optimizer`."""
         return build_simurgh_optimizer(self, opt_cfg)
+
+    @classmethod
+    def atom_statistics(
+        cls, config: typing.Mapping[str, typing.Any]
+    ) -> dict[str, typing.Callable[[AtomicGraph], torch.Tensor]]:
+        """Per-atom descriptors whose training-split mean and s.d. the model needs.
+
+        ``goal-train`` evaluates each function on every training graph and
+        passes ``{name: {mean, std}}`` back as ``atom_statistics``.  Empty
+        unless the PAN gate uses its descriptors.
+        """
+        cfg = _merge(DEFAULTS, dict(config))
+        att = cfg["attention"]
+        if not att["pan_gate"] or att["pan_gate_descriptors"] != "full":
+            return {}
+        cutoff, p = float(cfg["cutoff"]), int(cfg["envelope_p"])
+
+        def column(k: int) -> typing.Callable[[AtomicGraph], torch.Tensor]:
+            def descriptor(graph: AtomicGraph) -> torch.Tensor:
+                pos = graph.pos.detach().double()
+                vectors, lengths = differentiable_edges(graph, pos)
+                inside = lengths < cutoff
+                receiver = graph.edge_index[1][inside]
+                n = pos.shape[0]
+                return pan_descriptors(vectors[inside], lengths[inside], receiver, n, cutoff, p)[
+                    :, k
+                ]
+
+            return descriptor
+
+        return {name: column(k) for k, name in enumerate(PAN_STATISTICS)}
 
     @property
     def output_keys(self) -> list[str]:

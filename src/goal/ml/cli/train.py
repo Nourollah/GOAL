@@ -32,6 +32,7 @@ from goal.ml.cli.builders import instantiate_loggers as _instantiate_loggers
 from goal.ml.data.datamodule import GOALDataModule
 from goal.ml.data.statistics import (
     ATOMIC_SYMBOLS,
+    compute_atom_statistics,
     compute_atomic_references,
     compute_avg_num_neighbors,
     compute_energy_scale,
@@ -115,6 +116,7 @@ _DERIVED_BACKBONE_KEYS: tuple[str, ...] = (
     "scale",
     "avg_num_neighbors",
     "dressing_kwargs",
+    "atom_statistics",
 )
 
 
@@ -375,6 +377,16 @@ def _run_training(cfg: DictConfig) -> None:
             backbone_kwargs["scale"] = _force_rms(datamodule.data_train)
             print(f"[stats] scale (training force RMS)={backbone_kwargs['scale']:.6f}")
 
+    # Generic hook: a backbone may request the training-split mean and s.d.
+    # of per-atom descriptors through ``atom_statistics(config)``.
+    request: typing.Any = getattr(backbone_cls, "atom_statistics", None)
+    if callable(request) and backbone_kwargs.get("atom_statistics") is None:
+        descriptors = request(backbone_kwargs)
+        if descriptors:
+            stats = compute_atom_statistics(datamodule.data_train, descriptors)
+            backbone_kwargs["atom_statistics"] = stats
+            print(f"[stats] atom_statistics={stats}")
+
     # pair_counts — for data-driven expert routing.
     # Injected when a backbone declares rare_artisan.enabled=true.  The
     # two model families spell the artisan sub-config differently —
@@ -492,8 +504,7 @@ def _run_training(cfg: DictConfig) -> None:
         if resume.is_resume and resume.source_dir is not None:
             GOALCheckpointManager.restore_pools_from_dir(ckpt_manager, str(resume.source_dir))
             print(
-                f"[ckpt/resume] Pool state restored from "
-                f"{resume.source_dir}/checkpoint_state.json"
+                f"[ckpt/resume] Pool state restored from {resume.source_dir}/checkpoint_state.json"
             )
             if resume.is_extension:
                 ckpt_manager.record_extension(

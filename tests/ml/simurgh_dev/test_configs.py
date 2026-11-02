@@ -15,6 +15,10 @@ from goal.ml.nn.models.simurgh.dev import SimurghDev
 TASKS = sorted(os.path.basename(p)[:-5] for p in glob.glob(f"{CONFIGS_ML_DIR}/simurgh_dev_*.yaml"))
 
 
+#: What goal-train injects for models that request per-atom statistics.
+STATS = {"pan_rho": {"mean": 3.0, "std": 1.5}, "pan_eta": {"mean": 0.2, "std": 0.1}}
+
+
 def _compose(name: str):
     with initialize_config_dir(config_dir=CONFIGS_ML_DIR, version_base=None):
         return compose(config_name=name, overrides=["paths.root_dir=/root"])
@@ -37,7 +41,7 @@ def test_config_builds_the_model(name: str) -> None:
     backbone = OmegaConf.to_container(cfg.model.backbone, resolve=True)
     backbone.pop("name")
     # what goal-train injects from the training set, at a small width
-    backbone.update(avg_num_neighbors=10.0, scale=1.0, num_channels=8)
+    backbone.update(avg_num_neighbors=10.0, scale=1.0, num_channels=8, atom_statistics=STATS)
     if backbone["atomic_energies"]["mode"] == "dataset":
         backbone["atomic_energies"]["values"] = {1: -1.0, 6: -2.0, 7: -3.0, 8: -4.0}
     backbone["message_irreps"] = "8x0e + 8x1o + 8x2e"
@@ -124,7 +128,9 @@ def test_ablation_arm_builds_its_model(name: str) -> None:
     backbone = OmegaConf.to_container(cfg.model.backbone, resolve=True)
     name_key = backbone.pop("name")
     channels = 8
-    backbone.update(avg_num_neighbors=10.0, scale=1.0, num_channels=channels)
+    backbone.update(
+        avg_num_neighbors=10.0, scale=1.0, num_channels=channels, atom_statistics=STATS
+    )
     backbone["message_irreps"] = backbone["message_irreps"].replace("128x", f"{channels}x")
     MODEL_REGISTRY.get(name_key)(**backbone)
 

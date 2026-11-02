@@ -45,6 +45,10 @@ SMALL: dict = {
     "radial_mlp": [16, 16],
     "avg_num_neighbors": 6.0,
     "scale": 0.7,
+    "atom_statistics": {
+        "pan_rho": {"mean": 3.0, "std": 1.5},
+        "pan_eta": {"mean": 0.2, "std": 0.1},
+    },
     "dtype": "float64",
     "atomic_energies": {"mode": "provided", "values": E0},
 }
