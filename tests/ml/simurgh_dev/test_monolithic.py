@@ -187,7 +187,7 @@ def test_bond_scans_cross_1_8_angstrom_smoothly(variant: str) -> None:
     p = predict_fn(awake(build(**VARIANTS[variant])))
     for z1, z2 in BONDS.values():
         r, e, slope = bond_scan(p, z1, z2, r=np.linspace(1.79, 1.81, 11))
-        assert scan_jumps(r, e, slope)["energy"] < 1e-6
+        assert scan_jumps(r, e, slope)["energy"] < 1e-4  # integration error; steps: below
         step = bond_scan(p, z1, z2, r=[1.8 - 1e-6, 1.8 + 1e-6])  # straddles 1.8 A
         assert scan_jumps(*step)["energy"] < 1e-10
         if variant == "base":

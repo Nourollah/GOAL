@@ -38,6 +38,10 @@ Forces are conservative only, $F = -\partial E/\partial R$. Every map is bias-fr
 
 Training only (arXiv:2510.22123; arXiv:2403.09549), rung D1: with probability `denoise_p` (0.25) a structure gets a copy whose atoms are each displaced with probability `denoise_r` (0.25) by Gaussian noise of `denoise_sigma` (0.05 Å). The clean forces of the corrupted atoms are encoded through a zero-initialised map into the first layer's A-basis; an extra interaction step and a zero-initialised 1o map predict the unit noise. The copy carries only this loss; the structure keeps its energy and force losses. Weight $\lambda_{dn} = 0.0625\,\lambda_F\,\sigma_F^2$ times `denoise_scale`, decaying linearly to zero over training. Eval-mode outputs are unchanged. The learned-noise rung D2 and the source's replacement scheme D1-R are planned.
 
+## Hessian distillation (`training.aux.hessian_distill`)
+
+Loss and label format only (arXiv:2501.09009, Eq. 3); no teacher has been chosen, so no labels exist yet. A dataset file carries the per-atom array `hessian` (N, 9N): each atom's three rows of the teacher Hessian in eV/Å², float32, with `hessian_teacher`, `hessian_level_of_theory`, `hessian_dtype` and `hessian_units` in the frame info. `scripts/labels/hessian_labels.py` writes them from any GOAL checkpoint (offline, outside SIMURGH). The data layer samples one row per structure per step (`hessian_row` (N, 1, 3), `hessian_row_number`). The loss $\lambda_{KD}\,\lVert H_T^{(j)} - H_\theta^{(j)}\rVert^2/N$ uses one vector-Jacobian product per batch (`hessian_mode: autograd`, a double backward of the force graph; `finite_difference` is the fallback); $\lambda_{KD} = 4\lambda_F$ by default. Halving $\lambda_{KD}$ against the teacher's validation loss is not wired yet.
+
 ## Multi-scale fragment consistency (MFC)
 
 The same network is evaluated on windows of a structure: half-space cuts or spheres, nested for three levels. On the window's core atoms (at least `mfc.buffer` from every removed atom) it must reproduce what it predicts inside the larger context:

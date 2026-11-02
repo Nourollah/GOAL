@@ -284,7 +284,7 @@ class AtomicGraph(Data):
                 keep_groups=fragment_keep_groups,
             )
 
-        return cls(
+        graph = cls(
             positions=positions,
             atomic_numbers=atomic_numbers,
             cell=cell,
@@ -298,6 +298,13 @@ class AtomicGraph(Data):
             weight=torch.tensor([weight], dtype=dtype),
             head=head,
         )
+        # Hessian label (eV/Å²): a per-atom array (N, 9N) of each atom's three
+        # rows.  Kept whole here; HessianRows samples rows for batching.
+        hessian = getattr(atoms, "arrays", {}).get("hessian")
+        if hessian is not None:
+            n = len(atoms)
+            graph.hessian = torch.as_tensor(hessian, dtype=dtype).reshape(3 * n, 3 * n)
+        return graph
 
     @classmethod
     def from_dict(

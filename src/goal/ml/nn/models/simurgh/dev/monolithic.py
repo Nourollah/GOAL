@@ -137,10 +137,13 @@ DEFAULTS: dict[str, typing.Any] = {
         "denoise_sigma": 0.05,  # Å
         "denoise_p": 0.25,  # probability that a structure gets a corrupted copy
         "denoise_r": 0.25,  # probability that an atom of a copy is corrupted
-        "denoise_force_weight": 100.0,  # λ_F of the force loss
+        "force_weight": 100.0,  # λ_F of the force loss
         "denoise_scale": 1.0,  # λ_dn = scale · 0.0625 λ_F σ_F²; sweep 0.25 | 1 | 4
         "denoise_epochs": None,  # linear decay of λ_dn to 0 (goal-train: max_epochs)
         "hessian_distill": False,
+        "hessian_weight": None,  # λ_KD; None = 4 λ_F (force_weight)
+        "hessian_mode": "autograd",  # autograd (double backward) | finite_difference
+        "hessian_teacher_val_loss": None,  # halve λ_KD once below it (not wired yet)
     },
     "atomic_energies": {"mode": "provided", "values": None},
     "scale": None,
@@ -2320,7 +2323,7 @@ class _Denoise(nn.Module):
         aux = cfg["aux"]
         self.sigma, self.p, self.r = aux["denoise_sigma"], aux["denoise_p"], aux["denoise_r"]
         self.cutoff, self.envelope_p = cfg["cutoff"], cfg["envelope_p"]
-        self.factor = aux["denoise_scale"] * 0.0625 * aux["denoise_force_weight"]
+        self.factor = aux["denoise_scale"] * 0.0625 * aux["force_weight"]
         self.epochs = aux["denoise_epochs"]
         self.irreps_code = o3.Irreps.spherical_harmonics(2)
         irreps_a = atom_line.layers[0].irreps_a
@@ -2529,6 +2532,7 @@ class SimurghDev(nn.Module):
             raise ValueError("pair_line.bond_order_body must be 3 or 4")
         aux = cfg["aux"]
         _choice(aux, "denoise_rung", ("D1", "D2", "D1-R"), "aux.")
+        _choice(aux, "hessian_mode", ("autograd", "finite_difference"), "aux.")
         if aux["denoise"] and aux["denoise_rung"] != "D1":
             _not_yet(f"aux.denoise_rung: {aux['denoise_rung']}")
         if aux["denoise"] and cfg["core"] != "ace":
@@ -2561,6 +2565,57 @@ class SimurghDev(nn.Module):
     ) -> torch.Tensor | None:
         """Additional energy per molecule (eV); ``None`` here, set by ablation models."""
         return None
+
+    def hessian_rows(
+        self,
+        graph: AtomicGraph,
+        pos: torch.Tensor,
+        forces: torch.Tensor,
+        batch: torch.Tensor,
+        num_graphs: int,
+    ) -> torch.Tensor:
+        """Student Hessian rows ``H_θ^(j)`` ``(N, s, 3)`` at the sampled ``hessian_row_number``.
+
+        ``autograd``: per slot one vector-Jacobian product of the forces with a
+        vector holding one 1 per structure (block-diagonal: all structures at
+        once), ``H^(j) = -∂F_j/∂x``; needs a double backward of the force graph.
+        ``finite_difference``: ``-[F(x + h e_j) - F(x)]/h`` with h = 1e-3 Å
+        (float64) or 5e-3 Å (float32), all structures shifted at once.
+        """
+        index = graph.hessian_row_number.reshape(num_graphs, -1)
+        start = torch.cumsum(torch.bincount(batch, minlength=num_graphs), 0)
+        start = start - torch.bincount(batch, minlength=num_graphs)
+        atom = start[:, None] + torch.div(index, 3, rounding_mode="floor")
+        axis = index % 3
+        rows = []
+        for k in range(index.shape[1]):
+            v = torch.zeros_like(forces)
+            v[atom[:, k], axis[:, k]] = 1.0
+            if self.config["aux"]["hessian_mode"] == "autograd":
+                (g,) = torch.autograd.grad(forces, pos, grad_outputs=v, create_graph=True)
+                rows.append(-g.to(forces.dtype))
+            else:
+                h = 1e-3 if forces.dtype == torch.float64 else 5e-3
+                shifted = graph.clone()
+                shifted.pos = pos + h * v.to(pos.dtype)
+                shifted.hessian_row = None
+                inner = self.config["aux"]
+                self.config["aux"] = {**inner, "hessian_distill": False}
+                try:
+                    plus = self.forward(shifted)["forces"]
+                finally:
+                    self.config["aux"] = inner
+                rows.append(-(plus - forces) / h)
+        return torch.stack(rows, dim=1)
+
+    def hessian_loss(self, graph, pos, forces, batch, num_graphs) -> torch.Tensor:
+        """``(1/s) Σ_j ‖H_T^(j) - H_θ^(j)‖² / N`` per structure, averaged (arXiv:2501.09009, Eq. 3)."""
+        rows = self.hessian_rows(graph, pos, forces, batch, num_graphs)
+        teacher = graph.hessian_row.to(rows.dtype)
+        err = (teacher - rows).square().sum(dim=(1, 2)) / rows.shape[1]  # (N,)
+        count = torch.bincount(batch, minlength=num_graphs).to(err.dtype)
+        per_structure = scatter(err, batch, dim=0, dim_size=num_graphs, reduce="sum") / count
+        return per_structure.mean()
 
     def build_optimizer(self, opt_cfg: typing.Any) -> torch.optim.Optimizer:
         """The recipe's optimiser; see :func:`build_simurgh_optimizer`."""
@@ -2731,6 +2786,13 @@ class SimurghDev(nn.Module):
                 dn = self.denoise(self, graph, pos_d, elem, batch, num_graphs)
                 aux = aux + self.denoise.weight(self.epoch, float(self.scale)) * dn
                 terms["denoise"] = dn.detach()
+            cfg_aux = self.config["aux"]
+            if cfg_aux["hessian_distill"] and graph.get("hessian_row", None) is not None:
+                kd = self.hessian_loss(graph, pos, forces, batch, num_graphs)
+                weight = cfg_aux["hessian_weight"]
+                weight = 4.0 * cfg_aux["force_weight"] if weight is None else weight
+                aux = aux + weight * kd
+                terms["hessian"] = kd.detach()
             if terms:
                 out["aux_terms"] = terms
             out["aux_loss"] = aux

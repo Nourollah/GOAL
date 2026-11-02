@@ -25,6 +25,7 @@ from torch_geometric.loader import DataLoader as PyGDataLoader
 
 from goal.ml.data.datasets.base import BaseAtomicDataset
 from goal.ml.data.datasets.concat import ConcatAtomicDataset
+from goal.ml.data.hessian_rows import with_hessian_rows
 from goal.ml.registry import DATASET_REGISTRY
 
 # File extensions recognised when scanning directories
@@ -617,7 +618,7 @@ class GOALDataModule(L.LightningDataModule):
         :meth:`_loader_kwargs`.
         """
         return PyGDataLoader(
-            self.data_train,
+            with_hessian_rows(self.data_train),
             batch_size=self.cfg.data.batch_size,
             shuffle=True,
             **self._loader_kwargs(),
@@ -626,7 +627,7 @@ class GOALDataModule(L.LightningDataModule):
     def _eval_loader(self, dataset: Dataset) -> DataLoader:
         """An unshuffled loader over *dataset* (val / test)."""
         return PyGDataLoader(
-            dataset,
+            with_hessian_rows(dataset),
             batch_size=self.cfg.data.batch_size,
             shuffle=False,
             **self._loader_kwargs(),
