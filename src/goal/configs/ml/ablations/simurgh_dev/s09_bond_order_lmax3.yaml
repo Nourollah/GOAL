@@ -1,0 +1,25 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 9: bond-order pair line, l_max 3
+# Base: simurgh_dev_gmd26_FD.  Screen with seed 42; seeds 43
+# and 44 only if the change exceeds 2x the base seed s.d.
+#
+#   goal-train --config-name ablations/simurgh_dev/s09_bond_order_lmax3 seed=42
+# Another task: replace the first default (e.g. /simurgh_dev_gmd26_FF).
+########################################################
+
+defaults:
+  - /simurgh_dev_gmd26_FD
+  - _self_
+
+task_name: "simurgh_dev_abl_s09_bond_order_lmax3"
+experiment:
+  name: "simurgh_dev_abl_s09_bond_order_lmax3"
+  description: "SIMURGH ablation: bond-order pair line, l_max 3"
+
+model:
+  backbone:
+    pair_line:
+      bond_order: true
+      bond_order_lmax: 3

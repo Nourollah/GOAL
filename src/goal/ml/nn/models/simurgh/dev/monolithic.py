@@ -94,6 +94,14 @@ DEFAULTS: dict[str, typing.Any] = {
         "many_body_penalty": 0.0,
         "pair_first_epochs": 0,
         "bond_order": False,
+        "bond_order_body": 3,  # 3 | 4 (four-body: planned)
+        "bond_order_lmax": 4,
+        "bond_order_nmax": 6,
+        "bond_order_cmax": 8,
+        "bond_order_q3": 36,
+        "bond_order_pmax": 32,
+        "bond_order_cutoff_fn": "tanh3",  # tanh3 | envelope
+        "bond_order_eta_map": "power",  # power | smooth
     },
     "ece": {
         "lmax": 2,
@@ -707,6 +715,126 @@ class _PGSEdge(nn.Module):
         env = polynomial_envelope(lengths / self.cutoff, self.p).unsqueeze(-1)
         s = (self.basis(lengths) * env) @ self.alpha
         return 2.0 * torch.sigmoid(self.gate(e)) * s
+
+
+def _triplets(center: torch.Tensor, num_atoms: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Pairs of distinct directed edges ``(e1, e2)`` that share their centre atom."""
+    degree = torch.bincount(center, minlength=num_atoms)
+    order = torch.argsort(center, stable=True)
+    start = torch.cumsum(degree, 0) - degree
+    counts = degree[center]
+    e1 = torch.repeat_interleave(torch.arange(center.numel(), device=center.device), counts)
+    offset = torch.arange(e1.numel(), device=center.device) - torch.repeat_interleave(
+        torch.cumsum(counts, 0) - counts, counts
+    )
+    e2 = order[start[center[e1]] + offset]
+    keep = e1 != e2
+    return e1[keep], e2[keep]
+
+
+class _BondOrder(nn.Module):
+    """Saturating bond-order pair term (arXiv:2608.22933, Eqs. 11-35), three-body features.
+
+    ``E_bo = α_bo Σ_{i<j} f(r) [V_R(r) - ½(b_ij + b_ji) V_A(r)]`` with
+    ``V_R = (1 + Q/r) D_R e^(-a r)`` and ``V_A = D_A e^(-b r)`` per unordered
+    element pair; only the attraction is scaled by ``b``, so compressed
+    configurations stay repulsive.  ``b_ij`` saturates the bond's three-body
+    descriptor ``ζ_ij`` (Eqs. 33-35): ``b = (1+n)^(-σ) + Σ_p v_p ẑ_p (1+n)^(-σ-1)``,
+    ``n`` the smoothed norm of ``ẑ``, so ``b = 1`` when ``i`` has no other
+    neighbour.  ``Bt3[ij,n,l] = Σ_k χ[n,Z_i,Z_k] f(r_ik) e^(λ_n (r_ij - r_ik)) S_l
+    P_l(cos θ_ijk)`` (Legendre form of Eq. 23, ``S_l = 2l + 1``) uses its
+    own exponential basis.  ``α_bo`` starts at zero.
+    """
+
+    def __init__(self, cfg: dict, num_elements: int, cutoff: float, p: int) -> None:
+        super().__init__()
+        pl = cfg["pair_line"]
+        self.cutoff, self.p = cutoff, p
+        self.lmax, self.nmax = pl["bond_order_lmax"], pl["bond_order_nmax"]
+        self.cutoff_fn, self.eta_map = pl["bond_order_cutoff_fn"], pl["bond_order_eta_map"]
+        self.num_elements = num_elements
+        a, b = torch.triu_indices(num_elements, num_elements)
+        pair_id = torch.zeros(num_elements, num_elements, dtype=torch.long)
+        pair_id[a, b] = pair_id[b, a] = torch.arange(a.numel())
+        self.register_buffer("pair_id", pair_id, persistent=False)
+        self.pair_raw = nn.Parameter(torch.rand(a.numel(), 5))  # D_R, D_A, a, b, Q
+        lam0 = torch.linspace(10.0 / cutoff / self.nmax, 10.0 / cutoff, self.nmax)
+        self.lambda_raw = nn.Parameter(torch.log(torch.expm1(lam0)))
+        self.chi = nn.Parameter(torch.rand(num_elements, num_elements, self.nmax) - 0.5)
+        cmax, q3, pmax = pl["bond_order_cmax"], pl["bond_order_q3"], pl["bond_order_pmax"]
+        self.pair_code = nn.Embedding(num_elements * num_elements, cmax, max_norm=1.0)
+        self.w = nn.Parameter(torch.rand(cmax, self.nmax, q3) - 0.5)
+        self.u = nn.Parameter(torch.rand(q3, self.lmax + 1, pmax) - 0.5)
+        self.eta_raw = nn.Parameter(torch.randn(pmax))
+        self.sigma_raw = nn.Parameter(torch.zeros(()))
+        self.v = nn.Linear(pmax, 1, bias=False)
+        nn.init.xavier_uniform_(self.v.weight, gain=0.01)
+        self.amplitude = nn.Parameter(torch.zeros(()))  # α_bo
+
+    def envelope(self, r: torch.Tensor) -> torch.Tensor:
+        """``f(r)``: ``[tanh(1 - r/R)/tanh(1)]³`` (B_cut = 1, frozen) or the model's ``u``."""
+        if self.cutoff_fn == "envelope":
+            return polynomial_envelope(r / self.cutoff, self.p)
+        x = (1.0 - r / self.cutoff).clamp_min(0.0)
+        return (torch.tanh(x) / math.tanh(1.0)) ** 3
+
+    def bond_orders(self, vectors, lengths, edge_index, elem) -> torch.Tensor:
+        """``b`` of every directed edge ``i -> j`` (``i = edge_index[0]``), ``(E,)``."""
+        center, other = edge_index
+        f = self.envelope(lengths)
+        lam = nn.functional.softplus(self.lambda_raw).clamp_max(20.0 / self.cutoff)
+        e1, e2 = _triplets(center, elem.shape[0])
+        unit = vectors / lengths.unsqueeze(-1)
+        cos = (unit[e1] * unit[e2]).sum(-1)
+        legendre = [torch.ones_like(cos), cos]
+        for ell in range(1, self.lmax):
+            legendre.append(
+                ((2 * ell + 1) * cos * legendre[ell] - ell * legendre[ell - 1]) / (ell + 1)
+            )
+        scale = torch.arange(self.lmax + 1, dtype=cos.dtype, device=cos.device) * 2 + 1
+        angular = torch.stack(legendre[: self.lmax + 1], -1) * scale  # (T, L+1)
+        radial = (
+            self.chi[elem[center[e1]], elem[other[e2]]]
+            * f[e2].unsqueeze(-1)
+            * torch.exp(lam * (lengths[e1] - lengths[e2]).unsqueeze(-1))
+        )  # (T, n)
+        bt3 = scatter(
+            radial.unsqueeze(-1) * angular.unsqueeze(1),
+            e1,
+            dim=0,
+            dim_size=lengths.shape[0],
+            reduce="sum",
+        )  # (E, n, L+1)
+        code = self.pair_code(elem[center] * self.num_elements + elem[other])  # (E, c)
+        zeta = torch.einsum(
+            "eql,qlp->ep", torch.einsum("enl,cnq,ec->eql", bt3, self.w, code), self.u
+        )
+        eta = 1.0 + 4.0 * torch.sigmoid(self.eta_raw)  # η_max = 5
+        eps = 1e-3
+        if self.eta_map == "smooth":
+            zh = zeta * (zeta * zeta + eps * eps) ** ((eta - 1.0) / 2.0)
+        else:
+            zh = torch.sign(zeta) * ((zeta.abs() + eps) ** eta - eps**eta)
+        n = torch.sqrt(zh.square().sum(-1) + 1e-4) - 1e-2
+        sigma = 1.0 + nn.functional.softplus(self.sigma_raw)
+        return (1.0 + n) ** (-sigma) + self.v(zh).squeeze(-1) * (1.0 + n) ** (-sigma - 1.0)
+
+    def forward(self, vectors, lengths, edge_index, elem) -> torch.Tensor:
+        """Per-atom energy ``(N,)`` (eV): half of each pair term to each atom."""
+        a, b = elem[edge_index[0]], elem[edge_index[1]]
+        d_r, d_a, k_r, k_a, q = nn.functional.softplus(
+            self.pair_raw[self.pair_id[a, b]], beta=math.log(2.0)
+        ).unbind(-1)
+        f = self.envelope(lengths)
+        repulsion = (1.0 + q / lengths) * d_r * torch.exp(-k_r * lengths)
+        attraction = d_a * torch.exp(-k_a * lengths)
+        b_ij = self.bond_orders(vectors, lengths, edge_index, elem)
+        directed = 0.5 * self.amplitude * f * (repulsion - b_ij * attraction)  # Σ = E_bo
+        n = elem.shape[0]
+        return 0.5 * (
+            scatter(directed, edge_index[0], dim=0, dim_size=n, reduce="sum")
+            + scatter(directed, edge_index[1], dim=0, dim_size=n, reduce="sum")
+        )
 
 
 class _Interaction(nn.Module):
@@ -2149,7 +2277,7 @@ class SimurghDev(nn.Module):
         if cfg["core"] == "ece" and cfg["readout"]["pgs_edge"]:
             raise ValueError("readout.pgs_edge acts on the ACE radial weights: needs core: ace")
         for flag, on in (
-            ("pair_line.bond_order", cfg["pair_line"]["bond_order"]),
+            ("pair_line.bond_order_body: 4", cfg["pair_line"]["bond_order_body"] == 4),
             ("diagnostics.calm", cfg["diagnostics"]["calm"]),
         ):
             if on:
@@ -2219,6 +2347,17 @@ class SimurghDev(nn.Module):
         self.electrostatics = (
             _Electrostatics(es, self.atom_line.channels, len(elements), cfg)
             if es["enabled"]
+            else None
+        )
+        _choice(pl, "bond_order_cutoff_fn", ("tanh3", "envelope"), "pair_line.")
+        _choice(pl, "bond_order_eta_map", ("power", "smooth"), "pair_line.")
+        if pl["bond_order_body"] not in (3, 4):
+            raise ValueError("pair_line.bond_order_body must be 3 or 4")
+        self.bond_order = (
+            _BondOrder(
+                cfg, len(elements), min(pl["pair_cutoff"] or cfg["cutoff"], 5.5), cfg["envelope_p"]
+            )
+            if pl["bond_order"]
             else None
         )
         if pl["pair_first_epochs"] and not pl["enabled"]:
@@ -2342,6 +2481,8 @@ class SimurghDev(nn.Module):
             e_pair = scatter(half, edge_index[1], dim=0, dim_size=n, reduce="sum")
             half_wall = 0.5 * self.pair_line.wall_energy(lengths, a, b)
             wall = scatter(half_wall, edge_index[1], dim=0, dim_size=n, reduce="sum")
+        if self.bond_order is not None:  # eV, half of each pair term on each atom
+            wall = wall + self.bond_order(vectors, lengths, edge_index, elem)
         atomic = self._e0_on(pos.device)[elem] + (self.scale * (e_atom + e_pair) + wall).double()
 
         def per_graph(x: torch.Tensor) -> torch.Tensor:

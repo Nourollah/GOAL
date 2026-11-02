@@ -134,7 +134,15 @@ model:
       curvature_penalty: 1.0e-4
       many_body_penalty: 0.0
       pair_first_epochs: 0
-      bond_order: false
+      bond_order: false # saturating bond-order pair term (arXiv:2608.22933)
+      bond_order_body: 3 # 3 | 4 (four-body: planned)
+      bond_order_lmax: 4
+      bond_order_nmax: 6
+      bond_order_cmax: 8
+      bond_order_q3: 36
+      bond_order_pmax: 32
+      bond_order_cutoff_fn: tanh3 # tanh3 (source) | envelope (the model's u)
+      bond_order_eta_map: power # power (source) | smooth (C-infinity)
     ece: # used when core: ece, or pair_line.mode contains ece
       lmax: 2
       mmax: 2

@@ -15,6 +15,7 @@ $$E = \sum_i E_0(Z_i) + s\Big[\sum_i e_i + \sum_{i<j}\phi_{Z_iZ_j}(r_{ij}) + \su
 | PGS edge (`readout.pgs_edge`, arXiv:2606.15892, Eq. S9): $w'_{ij} = w_{ij} + g(e_{ij}) \odot \sum_m \alpha_m B_m(r_{ij})$ on the per-edge tensor-product weights, 16 enveloped Fourier–Bessel functions | C2 | off |
 | PAN gate (`attention.pan_gate`, arXiv:2606.15892, Eqs. S14-S15): $a_{ij} = 2\sigma(f([e_{ij}, Z_i, Z_j, \tilde\rho_i, \tilde\eta_i]))$ on the 0e slots of each message, from the coordination $\rho$ and angular variance $\eta$ of the receiving atom, standardised with training-split statistics that `goal-train` computes; `pan_gate_descriptors: generic` drops $\rho, \eta$ | C3 | off |
 | $\phi_{ab}(r)$: pair line per unordered element pair, plus a fixed ZBL wall below `r_min` | WP3 | on |
+| bond-order pair term (`pair_line.bond_order`, arXiv:2608.22933): $\alpha_{bo}\sum_{i<j} f(r)[V_R - \tfrac12(b_{ij}+b_{ji})V_A]$; only the attraction is scaled by a saturating three-body bond order, so compression stays repulsive; $\alpha_{bo}$ starts at zero | C5 | off |
 | $\varepsilon_{ij}$: ECE bond line (`pair_line.mode: ece \| phi+ece`) | WP11 | off |
 | $E_{\text{elec}}$: latent charges (and dipoles), damped Coulomb; `electrostatics.charge_constraint: uniform \| pair_transfer` conserves each molecule's total charge (`total_charge` on the graph, else 0) | WP7, C4 | off |
 | $E_{\text{D3}}$: closed-form D3(BJ) dispersion (no DFT); `backend: torch` (tad-dftd3, in the `cuda` environments) or `precomputed` (dftd3-python) | WP1 | off |

@@ -75,6 +75,7 @@ VARIANTS: dict[str, dict] = {
     "l3_messages": {"message_irreps": "8x0e + 8x1o + 8x2e + 8x3o"},
     "pgs_edge": {"readout": {"pgs_edge": True}},
     "pgs_edge_per_channel": {"readout": {"pgs_edge": True, "pgs_edge_alpha": "per_channel"}},
+    "bond_order": {"pair_line": {"bond_order": True}},
 }
 
 
