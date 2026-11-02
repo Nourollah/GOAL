@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+import math
 
 import numpy as np
 import pytest
@@ -323,21 +324,47 @@ def test_regularity_prior_factors_and_weight_decay_requirement() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_es_kernel_vanishes_with_two_continuous_derivatives() -> None:
-    z = torch.tensor([1.0 - 1e-4, 1.0, 1.0 + 1e-4], dtype=torch.float64, requires_grad=True)
-    k = _es_kernel(z, 4.0)
+@pytest.mark.parametrize("beta", [18.4, 9.2])
+def test_es_kernel_is_c2_and_finite(beta: float) -> None:
+    """K, K' and K'' vanish at abs(z) -> 1; K'' is continuous at 0; K(0) = 1 - exp(-beta)."""
+    z = torch.tensor(
+        [-1.5, -1.0, -1 + 1e-5, -1e-7, 0.0, 1e-7, 1 - 1e-5, 1.0, 1.5],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    k = _es_kernel(z, beta)
     (d1,) = torch.autograd.grad(k.sum(), z, create_graph=True)
     (d2,) = torch.autograd.grad(d1.sum(), z)
-    assert k.abs().max() < 1e-7 and d1.abs().max() < 1e-4 and d2.abs().max() < 1e-1
-    assert torch.isfinite(d2).all()
+    assert torch.isfinite(d1).all() and torch.isfinite(d2).all()
+    edge = [0, 1, 2, 6, 7, 8]
+    assert k[edge].abs().max() < 1e-12 and d1[edge].abs().max() < 1e-8
+    assert d2[edge].abs().max() < 1e-3
+    assert float(k[4]) == pytest.approx(1 - math.exp(-beta), rel=1e-14)
+    assert float(d2[3]) == pytest.approx(float(d2[5]), rel=1e-5)
 
 
-def test_pgs_sets_its_width_on_the_first_training_batch(ethanol: Atoms) -> None:
+def test_pgs_readout_lifts_the_final_invariants(ethanol: Atoms) -> None:
     model = build()
-    assert not bool(model.atom_line.pgs.initialised)
-    model.train()(_graph(ethanol))
-    assert bool(model.atom_line.pgs.initialised)
-    assert (model.atom_line.pgs.width != 1).any()
+    pgs = model.atom_line.pgs
+    c = model.atom_line.channels
+    assert pgs.directions.shape == pgs.alpha.shape == (16, c)
+    assert pgs.width == pytest.approx(4 * 6 / 15) and pgs.beta == 18.4
+    assert sum(p.numel() for p in pgs.low.parameters()) == 2 * c * c
+    out = model.train()(_graph(ethanol))
+    assert 0.0 <= float(out["aux_terms"]["pgs_in_support"]) <= 1.0
+    out["energy"].sum().backward()
+    torch.optim.SGD(model.parameters(), lr=0.1).step()
+    assert pgs.alpha.abs().sum() > 0  # alpha leaves zero after one step
+
+
+def test_pgs_float32_matches_float64(ethanol: Atoms) -> None:
+    double = awake(build())
+    single = awake(build(dtype="float32"))
+    single.load_state_dict(double.state_dict())
+    e64, f64 = predict_fn(double)(ethanol)
+    e32, f32 = predict_fn(single)(ethanol)
+    assert e32 == pytest.approx(e64, rel=1e-6)
+    np.testing.assert_allclose(f32, f64, atol=2e-4)
 
 
 # ---------------------------------------------------------------------------

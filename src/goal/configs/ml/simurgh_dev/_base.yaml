@@ -117,8 +117,9 @@ model:
     readout:
       pgs: true
       pgs_edge: false
-      pgs_beta: 4.0
-      pgs_directions: 16
+      pgs_components: 16 # kernel centres on [-pgs_t_max, pgs_t_max] (arXiv:2606.15892, App. F)
+      pgs_t_max: 3.0
+      pgs_beta: 18.4 # kernel shape; the arm is 9.2
       mlp_hidden: 16 # last-layer readout width (raise it for the equal-parameter no-PGS control)
     pair_line:
       enabled: true

@@ -75,8 +75,9 @@ DEFAULTS: dict[str, typing.Any] = {
     "readout": {
         "pgs": True,
         "pgs_edge": False,
-        "pgs_beta": 4.0,
-        "pgs_directions": 16,
+        "pgs_components": 16,
+        "pgs_t_max": 3.0,
+        "pgs_beta": 18.4,
         "mlp_hidden": 16,
     },
     "pair_line": {
@@ -762,47 +763,66 @@ class _Interaction(nn.Module):
 
 
 def _es_kernel(z: torch.Tensor, beta: float) -> torch.Tensor:
-    """Compact exponential-of-semicircle bump with a (1 - z²)² taper.
+    """Compact exponential-of-semicircle kernel, C2 on the real line.
 
-    ``(1-z²)² [exp(β(√(1-z²) - 1)) - e^{-β}]`` for ``|z| < 1``, else 0.  The
-    taper makes it vanish with two continuous derivatives at ``|z| = 1``;
-    the double ``where`` keeps autograd finite at the edge.
+    ``τ(|z|) [exp(β(√(1-z²) - 1)) - e^{-β}]`` for ``|z| < 1``, else 0, with the
+    quintic taper ``τ(z) = 1 - 10z³ + 15z⁴ - 6z⁵`` (arXiv:2606.15892, App. F;
+    the exponential-of-semicircle form of arXiv:1808.06736, Eq. 1.8).  The
+    double ``where`` keeps autograd finite at and beyond ``|z| = 1``.
     """
-    s = 1.0 - z * z
-    inside = s > 0
-    safe = torch.where(inside, s, torch.ones_like(s))
-    value = safe.square() * (torch.exp(beta * (torch.sqrt(safe) - 1.0)) - math.exp(-beta))
+    inside = (1.0 - z * z) > 0
+    zs = torch.where(inside, z, torch.zeros_like(z))
+    a = zs.abs()
+    taper = 1.0 - a**3 * (10.0 - a * (15.0 - 6.0 * a))
+    root = torch.sqrt((1.0 - zs * zs).clamp_min(torch.finfo(z.dtype).tiny))
+    value = taper * (torch.exp(beta * (root - 1.0)) - math.exp(-beta))
     return torch.where(inside, value, torch.zeros_like(value))
 
 
 class _PGSReadout(nn.Module):
-    """PGS spectral readout branch (WP8 A): ``Σ_m α_m [K(u_mᵀx / σ_m) - K(0)]``.
+    """PGS spectral readout (arXiv:2606.15892, Eq. S10): lifts the final invariants.
 
-    ``u_m`` start orthonormal; ``σ_m`` (a buffer, set on the first training
-    batch) gives ``u_mᵀx`` unit RMS; ``α`` is zero-initialised, so the
-    branch starts as the identity.  Subtracting ``K(0)`` keeps the readout
-    bias-free (an isolated atom, ``x = 0``, contributes nothing).
+    ``y = x + D(x) + Σ_m α_m [K((t_m(x) - c_m)/w) - K(-c_m/w)]`` with
+    ``t_m = u_mᵀ x̂``, ``x̂ = x / sqrt(mean(x²) + 1e-6)``, ``u_m = v_m/‖v_m‖``,
+    ``M`` centres ``c_m`` uniform on ``[-t_max, t_max]`` and ``w`` four
+    spacings.  ``α ∈ R^(M×C)`` and the last layer of ``D`` start at zero, so
+    ``y = x``.  Subtracting the ``x = 0`` value keeps ``y(0) = 0`` (the
+    energy MLP is bias-free, so an isolated atom still gives exactly E0).
     """
 
-    def __init__(self, channels: int, directions: int, beta: float) -> None:
+    def __init__(self, channels: int, components: int, t_max: float, beta: float) -> None:
         super().__init__()
         self.beta = beta
-        u = torch.empty(directions, channels)
-        nn.init.orthogonal_(u)
-        self.directions = nn.Parameter(u)
-        self.alpha = nn.Parameter(torch.zeros(directions))
-        self.register_buffer("width", torch.ones(directions))
-        self.register_buffer("initialised", torch.zeros((), dtype=torch.bool))
+        v = torch.empty(components, channels)
+        nn.init.orthogonal_(v)  # QR of a Gaussian draw from the run's seed
+        self.directions = nn.Parameter(v)
+        self.alpha = nn.Parameter(torch.zeros(components, channels))
+        self.low = _MLP([channels, channels, channels], zero_last=True)
+        centres = torch.linspace(-t_max, t_max, components, dtype=torch.float64)
+        self.register_buffer("centres", centres)
+        self.width = 4.0 * 2.0 * t_max / (components - 1)
+        self.reach = t_max + self.width  # beyond it every kernel is zero
+        self.last_in_support: torch.Tensor | None = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Per-atom readout contribution ``(N,)`` from invariant features ``x``."""
-        z = x @ self.directions.T
-        if self.training and not bool(self.initialised):
-            with torch.no_grad():
-                self.width.copy_(z.square().mean(dim=0).sqrt().clamp_min(1e-6))
-                self.initialised.fill_(True)
-        k0 = _es_kernel(z.new_zeros(()), self.beta)
-        return ((_es_kernel(z / self.width, self.beta) - k0) * self.alpha).sum(-1)
+        """Lifted invariants ``y`` ``(N, C)`` from the final invariants ``x``."""
+        unit = self.directions / self.directions.norm(dim=-1, keepdim=True)
+        xhat = x / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + 1e-6)
+        t = xhat @ unit.T  # (N, M)
+        centres = self.centres.to(x.dtype)
+        k = _es_kernel((t - centres) / self.width, self.beta)
+        k0 = _es_kernel(-centres / self.width, self.beta)
+        self.last_in_support = (t.detach().abs() < self.reach).any(-1).to(x.dtype).mean()
+        return x + self.low(x) + (k - k0) @ self.alpha
+
+
+def _pgs(readout: dict, channels: int) -> _PGSReadout | None:
+    """The PGS readout configured from the ``readout:`` section (``None`` when off)."""
+    if not readout["pgs"]:
+        return None
+    return _PGSReadout(
+        channels, readout["pgs_components"], readout["pgs_t_max"], readout["pgs_beta"]
+    )
 
 
 class _AtomLine(nn.Module):
@@ -867,8 +887,7 @@ class _AtomLine(nn.Module):
             readouts.append(_MLP([c, hidden_width, 1]) if last else nn.Linear(c, 1, bias=False))
             irreps_h = irreps_out
         self.layers, self.readouts = nn.ModuleList(layers), nn.ModuleList(readouts)
-        rd = cfg["readout"]
-        self.pgs = _PGSReadout(c, rd["pgs_directions"], rd["pgs_beta"]) if rd["pgs"] else None
+        self.pgs = _pgs(cfg["readout"], c)
         self.channels = c
 
     def forward(
@@ -896,9 +915,9 @@ class _AtomLine(nn.Module):
         for t, (layer, readout) in enumerate(zip(self.layers, self.readouts)):
             h = layer(h, elem, emb, edge_index, sh, rbf, pair_code, env, avg_num_neighbors)
             scalars = h[:, : self.channels]
-            energy = energy + readout(scalars).squeeze(-1)
             if t == len(self.layers) - 1 and self.pgs is not None:
-                energy = energy + self.pgs(scalars)
+                scalars = self.pgs(scalars)  # the energy MLP reads the lifted invariants
+            energy = energy + readout(scalars).squeeze(-1)
         return energy, h
 
 
@@ -983,12 +1002,7 @@ class _ECECore(nn.Module):
         self.frames = EdgeFrames(lmax)
         self.block = _ece_block(ece, cfg["num_rbf"], c)
         self.head = EdgeEnergyHead(self.block.state, list(ece["energy_mlp"]))
-        rd = cfg["readout"]
-        self.pgs = (
-            _PGSReadout(self.block.state, rd["pgs_directions"], rd["pgs_beta"])
-            if rd["pgs"]
-            else None
-        )
+        self.pgs = _pgs(cfg["readout"], self.block.state)
         self.channels = self.block.state  # width of the per-atom invariants
         self.last_bond_energies: torch.Tensor | None = None
 
@@ -1020,13 +1034,9 @@ class _ECECore(nn.Module):
             avg_num_neighbors,
         )
         inv = state[..., self.mmax]
-        out = self.head(inv, env, edge_index, n)
+        out = self.head(inv if self.pgs is None else self.pgs(inv), env, edge_index, n)
         atomic = out["atomic_energies"]
         bond = out["bond_energies"]
-        if self.pgs is not None:
-            extra = 0.5 * self.pgs(inv) * env
-            atomic = atomic + scatter(extra, sender, dim=0, dim_size=n, reduce="sum")
-            atomic = atomic + scatter(extra, receiver, dim=0, dim_size=n, reduce="sum")
         self.last_bond_energies = bond
         h = scatter(inv * env.unsqueeze(-1), receiver, dim=0, dim_size=n, reduce="sum")
         return atomic, h / avg_num_neighbors
@@ -2051,6 +2061,8 @@ class SimurghDev(nn.Module):
         emb = self.atom_line.embedding.weight
 
         e_atom, h_last = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
+        pgs = getattr(self.atom_line, "pgs", None)
+        in_support = None if pgs is None else pgs.last_in_support  # before MFC windows reuse it
         bond = getattr(self.atom_line, "last_bond_energies", None)
         if self.ece_line is not None:
             line = self.ece_line(
@@ -2122,10 +2134,14 @@ class SimurghDev(nn.Module):
             )
         if self.training:
             aux = self._regularisers(elem, edge_index, e_atom, emb)
+            terms: dict[str, torch.Tensor] = {}
+            if in_support is not None:
+                terms["pgs_in_support"] = in_support  # atoms inside some kernel's support
             if self.mfc is not None:
                 q_full = None if elec is None else elec["charges"]
-                terms = self.mfc(self, graph, pos, pos_d, elem, batch, e_atom, q_full)
+                terms.update(self.mfc(self, graph, pos, pos_d, elem, batch, e_atom, q_full))
                 aux = aux + terms.pop("mfc")
+            if terms:
                 out["aux_terms"] = terms
             out["aux_loss"] = aux
         return out
