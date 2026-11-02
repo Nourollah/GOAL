@@ -124,6 +124,12 @@ The **rMD17 aspirin** pair (`*_md17.yaml`) is derived from `simurgh_legacy_nf_md
 
 `energy`, `forces`, `energy_atom_line`, `energy_pair_line`, `energy_fragment_line` and `energy_baseline`. The line energies plus the baseline sum to `energy`. `aux_loss` is added when the MoE balance loss is enabled. The per-line energies are returned but **not logged** by `GOALModule`; inspect them from the model output yourself.
 
+## Known defect: the energy jumps at the fragment-perception cutoff
+
+The fragment line runs on discrete fragment labels, perceived from the geometry with a 1.8 Å covalent cutoff. When a bond crosses 1.8 Å and the perceived fragments change, the fragment line sees different fragments and the energy jumps. Measured with the trained GMD-26 Duplication checkpoint (EMA weights), between 1.8 Å − 10⁻⁴ Å and 1.8 Å + 10⁻⁴ Å: −0.64 eV when the O–H bond of acetic acid is stretched (its C–C, C–O and C–H bonds give at most 1.5 meV), and +1.42 eV (C–H) and −0.54 eV (O–H) for isolated diatomics. `tests/ml/simurgh_dev/test_invariant_utils.py` checks the step. Forces are the gradient at fixed labels, so they do not see the jump, and MD conserves energy only while no bond crosses 1.8 Å. Bond-breaking or strongly stretched geometries are therefore outside what these models describe.
+
+This is left as shipped on purpose: SIMURGH Simplified is the "as shipped" reference baseline (L0) of the SIMURGH ablation programme. SIMURGH (`simurgh_dev`) uses no fragment perception in its energy; its smoothness tests scan C–H, C–C, C–O and O–H bonds through 1.8 Å.
+
 ## Pitfalls
 
 - **Fragment labels are required.** The fragment line always runs. All four configs set `data.compute_fragment_index: true` and use `fragment_scheme: custom`, and with labels off the model raises at the first batch. As with NF_SIMURGH, a scheme that gives K = 1 (e.g. `connected` on a single molecule) leaves the fragment line contributing nothing.

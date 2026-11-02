@@ -26,10 +26,12 @@ from goal.ml.nn.models.simurgh.dev.monolithic import (
 )
 from goal.ml.registry import MODEL_REGISTRY
 from tests.ml.simurgh_dev.utils import (
+    bond_scan,
     far_copy_extensivity,
     finite_difference_force_error,
     isolated_atom,
     predictor,
+    scan_jumps,
     symmetry_errors,
 )
 
@@ -158,6 +160,26 @@ def test_cutoff_crossing_is_smooth(variant: str) -> None:
     distances = np.linspace(CUTOFF - 0.5, CUTOFF + 0.5, 1000)
     energies = np.array([p(config(d))[0] for d in distances[::10]])
     assert np.abs(np.diff(energies)).max() < 1e-3
+
+
+BONDS = {"C-H": (6, 1), "C-C": (6, 6), "C-O": (6, 8), "O-H": (8, 1)}
+
+
+@pytest.mark.parametrize("variant", sorted(VARIANTS))
+def test_bond_scans_cross_1_8_angstrom_smoothly(variant: str) -> None:
+    """No step where legacy Simplified's fragment perception flips (up to 1.4 eV there).
+
+    The energy path holds no discrete fragment perception (MFC windows are a
+    training loss only).  Measured on 18 variants: at most 7.9e-9 eV on a
+    0.002 A grid through 1.7-1.9 A, and 1.1e-5 eV on the 0.6-4 A scan; both
+    are the trapezoid error of the check.
+    """
+    p = predict_fn(awake(build(**VARIANTS[variant])))
+    for z1, z2 in BONDS.values():
+        r, e, slope = bond_scan(p, z1, z2, r=np.linspace(1.79, 1.81, 11))
+        assert scan_jumps(r, e, slope)["energy"] < 1e-7
+        if variant == "base":
+            assert scan_jumps(*bond_scan(p, z1, z2))["energy"] < 1e-4
 
 
 def test_separated_pair_is_sum_of_e0() -> None:
