@@ -54,10 +54,11 @@ $\mathcal{L}_\text{aux}$ is a model-supplied regulariser that is not part of `tr
 | `dipole` | `DipoleLoss` | `dipole` | Needs a head that predicts `dipole`. |
 | `charge` | `ChargeLoss` | `total_charge` | Reference defaults to 0 if the batch has no `total_charge`. |
 | `gate_reg` | `GateRegLoss` | — | $\sum g^2$ over SIMURGH artisan gate scalars (see [below](#gate_reg-what-it-regularises)). Returns `0` for models without artisans, so the same config works everywhere. `fn` is accepted and ignored (the penalty is always L2). |
+| `newton` | `NewtonLoss` | `forces` (N × 3) | Net force per structure, $\sum_i F_i$, against zero. Autograd forces of an isolated structure already sum to zero, so it only acts on direct-force models. |
 | `scalar_property` | `ScalarPropertyLoss` | any key `property_name` | For HOMO/LUMO, gaps and other scalar targets. Options: `property_name` (required), `per_atom` (divide by atom count). |
 
 > [!NOTE]
-> The comments in the shipped experiment files list a `newton` loss and show a commented-out `- name: newton` entry. **No `newton` loss is registered**, so uncommenting it raises a registry `KeyError`. The Newton violation is still computed as a *diagnostic metric* (`{split}_forces/newton_violation`) for every run. Referring to `newton` inside `training.stages` is harmless: unknown stage labels only trigger a warning.
+> The shipped experiment files show a commented-out `- name: newton` entry and name `newton` in `training.stages`. Until the entry is uncommented, that stage weight matches no loss and is ignored with a warning (the shipped behaviour). Uncommenting it opts in to `NewtonLoss`. The Newton violation is computed as a *diagnostic metric* (`{split}_forces/newton_violation`) for every run either way.
 
 ### Per-structure force normalisation
 

@@ -69,7 +69,10 @@ from torch_geometric.utils import scatter
 
 from goal.ml.data.graph import AtomicGraph
 from goal.ml.nn.blocks.ace_block import normalise_addon_config
-from goal.ml.nn.blocks.artisans import build_artisan_edge_irreps
+from goal.ml.nn.blocks.artisans import (
+    build_artisan_edge_irreps,
+    require_declared_elements,
+)
 from goal.ml.nn.blocks.fragment_interaction import build_fragment_geometry
 from goal.ml.nn.models.simurgh.geometry import differentiable_edges
 from goal.ml.nn.models.simurgh.legacy.arace import AraceBackbone
@@ -319,6 +322,26 @@ def _segment_softmax(
     return weights / total[segment].clamp_min(_EPS)
 
 
+def _segment_softmax_null(
+    logits: torch.Tensor,
+    envelope: torch.Tensor,
+    segment: torch.Tensor,
+    num_segments: int,
+) -> torch.Tensor:
+    """``env·exp(logit) / (1 + Σ env·exp(logit))`` per segment: envelope inside, null sink.
+
+    A row with ``env = 0`` drops out of its segment's denominator, so
+    partners beyond the cutoff (a far copy of the structure) change nothing.
+    """
+    if logits.shape[0] == 0:
+        return logits
+    peak: torch.Tensor = scatter(logits, segment, dim=0, dim_size=num_segments, reduce="max")
+    peak = peak.clamp_min(0.0)  # the null logit is 0
+    weights: torch.Tensor = envelope * torch.exp(logits - peak[segment])
+    total: torch.Tensor = scatter(weights, segment, dim=0, dim_size=num_segments, reduce="sum")
+    return weights / (torch.exp(-peak) + total)[segment]
+
+
 # ---------------------------------------------------------------------------
 # Stage 1 — invariant virtual-node interaction
 # ---------------------------------------------------------------------------
@@ -402,6 +425,10 @@ class NFSimurghVirtualNodeInteraction(nn.Module):
         artisans.
     n_elements : int
         Element-embedding table size (must exceed the largest Z).
+    envelope_in_softmax : bool
+        Opt-in fix: ``w_kl = env_kl·exp(logit_kl) / (1 + Σ_l env_kl·exp(logit_kl))``.
+        The shipped form normalises over every partner before the envelope,
+        so far fragments dilute near ones and the energy is not extensive.
     """
 
     def __init__(
@@ -420,6 +447,7 @@ class NFSimurghVirtualNodeInteraction(nn.Module):
         l1l2_invariants: typing.Sequence[str] = ("norm", "axial", "mutual", "quad"),
         vnode_type_conditioned: bool = False,
         n_elements: int = 120,
+        envelope_in_softmax: bool = False,
     ) -> None:
         super().__init__()
         if pooling not in ("mean", "sum", "attention"):
@@ -438,6 +466,7 @@ class NFSimurghVirtualNodeInteraction(nn.Module):
         self._pool_l1l2: bool = bool(pool_l1l2)
         self._n_elements: int = int(n_elements)
         self._num_rbf: int = int(vnode_num_rbf)
+        self._envelope_in_softmax: bool = bool(envelope_in_softmax)
 
         self._l0_slices, n_l0 = _blocks_with_l(self.irreps_node, 0)
         if n_l0 == 0:
@@ -702,8 +731,11 @@ class NFSimurghVirtualNodeInteraction(nn.Module):
             logit_input.append(self._pair_invariants(h, geometry))
         logits: torch.Tensor = self.attn_mlp(torch.cat(logit_input, dim=-1))  # (P, H)
 
-        # Normalised attention shape, then distance-modulated magnitude.
-        attention: torch.Tensor = _segment_softmax(logits, k, n_fragments) * envelope
+        if self._envelope_in_softmax:
+            attention: torch.Tensor = _segment_softmax_null(logits, envelope, k, n_fragments)
+        else:
+            # Shipped: normalised attention shape, then distance-modulated magnitude.
+            attention = _segment_softmax(logits, k, n_fragments) * envelope
 
         messages: torch.Tensor = attention.unsqueeze(-1) * scalars[l_idx].unsqueeze(
             1
@@ -1070,6 +1102,7 @@ class NFSimurghBackbone(nn.Module):
             l1l2_invariants=tuple(vn.get("l1l2_invariants", ("norm", "axial", "mutual", "quad"))),
             vnode_type_conditioned=bool(vn.get("vnode_type_conditioned", False)),
             n_elements=int(num_elements),
+            envelope_in_softmax=bool(vn.get("envelope_in_softmax", False)),
         )
 
         # STAGING: remove once Stage 2 is validated.
@@ -1221,6 +1254,7 @@ class NFSimurghBackbone(nn.Module):
         tuple
             ``(node_energies (N,), layer_energies (L, N), h (N, irreps))``.
         """
+        require_declared_elements(atomic_numbers, self.arace.elements, "simurgh_legacy_nf")
         h: torch.Tensor = self.arace.input_linear(self.arace.embedding(atomic_numbers))
 
         # Edge SH — geometry only, computed once and shared by every round.

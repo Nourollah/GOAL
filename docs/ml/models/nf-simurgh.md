@@ -115,6 +115,7 @@ Measured decompositions recorded in the shipped configs:
 | `vnode_max_fragments` | `512` | cap on K (pair enumeration is $O(K^2)$) |
 | `pool_l1l2`, `l1l2_invariants` | `false`, `[norm, axial, mutual, quad]` | feed pooled $l=1$/$l=2$ invariants (‖μ‖, μ·r̂, μ_k·μ_l, r̂ᵀQr̂) to the logit MLP. Staging. |
 | `vnode_equivariant`, `vnode_irreps`, `vnode_sh_lmax` | `false`, node irreps, `2` | Stage 2 equivariant virtual nodes. Staging. |
+| `envelope_in_softmax` | `false` | opt-in fix for the shipped attention, which normalises over every partner before the envelope, so far fragments dilute near ones and the energy is not size-extensive. `true` uses $w_{kl} = \mathrm{env}_{kl} e^{a_{kl}} / (1 + \sum_l \mathrm{env}_{kl} e^{a_{kl}})$: partners beyond `vnode_cutoff` drop out exactly. Changes trained numbers, so it stays off for existing baselines. |
 | `vnode_type_conditioned` | `false` | condition $s_k$ on a pooled learned element embedding, a continuous, DDP-safe alternative to routing fragments to separate experts |
 
 ### Shipped configs
@@ -177,7 +178,7 @@ Two things double the figure: `precision: "64"`, as in `simurgh_legacy_nf_md17`,
 
 ## Pitfalls
 
-- **Set `elements` yourself, and set it correctly.** A missing element's edges contribute exactly zero, with no warning.
+- **Set `elements` yourself, and set it correctly.** A structure with an element outside `elements` raises `ValueError` (before October 2026 its edges silently contributed zero).
 - **Fragment labels are mandatory**, including at inference: graphs built for an ASE calculator must also carry `fragment_index`.
 - **Check K before trusting a result.** Watch `vnode_interaction_energies`: if it stays at zero, either K = 1 everywhere or the channel is not learning.
 - **Keep the A/B fair.** `simurgh_legacy_nf_gmd26` and `simurgh_legacy_monolithic_arace_gmd26` share the atomic-energy baseline and leave `avg_num_neighbors: null`. Change both, or neither.

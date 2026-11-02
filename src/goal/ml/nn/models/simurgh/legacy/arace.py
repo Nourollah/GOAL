@@ -67,6 +67,7 @@ from goal.ml.nn.blocks.artisans import (
     log_pair_routing,
     pair_label,
     parse_pair_counts,
+    require_declared_elements,
     resolve_n_elements,
     route_element_pairs,
 )
@@ -345,11 +346,9 @@ class AraceBlock(nn.Module):
         """
         if self.symmetric_contraction is None:
             return agg
-        # Clamped for the same reason ``_AracePairArtisan`` clamps its
-        # element conditioning: with rare-pair routing on, an atom whose
-        # element is outside the declared list can reach this block, and
-        # the coupling table has no row for it.  It borrows the last
-        # row rather than raising from inside a tensor gather.
+        # Clamped as ``_AracePairArtisan`` clamps its element conditioning.
+        # Undeclared elements now raise before the first round
+        # (``require_declared_elements``), so the clamp is only a guard.
         return self.symmetric_contraction(
             agg, atomic_numbers.clamp(0, self._contraction_elements - 1)
         )
@@ -458,9 +457,8 @@ class AraceBlock(nn.Module):
         if self.rare_artisan is not None:
             # Every edge matches exactly one pair and the dedicated masks
             # are disjoint, so "claimed by nobody" IS the rare set — one
-            # test instead of one per rare pair.  It also catches pairs
-            # outside `elements` entirely, which previously contributed a
-            # silent zero.
+            # test instead of one per rare pair.  Pairs outside `elements`
+            # never get here: the backbone raises on them.
             rare_mask: torch.Tensor = (1.0 - claimed).clamp_min(0.0)
             rare_col: torch.Tensor = rare_mask.unsqueeze(-1)
             h_p, e_p = self.rare_artisan(
@@ -766,6 +764,7 @@ class AraceBackbone(nn.Module):
             (0-d, zero when the gate is disabled) and one gate-score
             tensor ``(N,)`` per round (``None`` entries when disabled).
         """
+        require_declared_elements(atomic_numbers, self._elements, "AraceBackbone")
         h: torch.Tensor = self.input_linear(self.embedding(atomic_numbers))
 
         # Edge SH — geometry only, computed once and shared by every round.

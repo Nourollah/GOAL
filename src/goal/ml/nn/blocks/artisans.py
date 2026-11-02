@@ -137,6 +137,26 @@ def resolve_n_elements(value: typing.Any, elements: typing.Sequence[int]) -> int
     return n
 
 
+def require_declared_elements(
+    atomic_numbers: torch.Tensor, elements: typing.Sequence[int], model: str
+) -> None:
+    """Raise when a structure holds an element outside the declared ``elements``.
+
+    Edges of such an element match no artisan, so without this check they
+    would contribute a silent zero (or fall to the rare artisan by accident).
+    """
+    declared: torch.Tensor = torch.tensor(
+        sorted(int(z) for z in elements), device=atomic_numbers.device
+    )
+    unknown: torch.Tensor = atomic_numbers[~torch.isin(atomic_numbers, declared)]
+    if unknown.numel():
+        raise ValueError(
+            f"{model}: atomic number(s) {sorted(set(unknown.tolist()))} are not in "
+            f"elements={declared.tolist()}.  Add them to the model's `elements` "
+            f"(goal-train extracts them from the training set) and retrain."
+        )
+
+
 def pair_label(a: int, b: int, symbols: typing.Mapping[int, str] | None = None) -> str:
     """Pretty label for a pair, e.g. ``"H-C"`` (used in logging)."""
     sym: typing.Mapping[int, str] = symbols or _DEFAULT_SYMBOLS
@@ -1266,6 +1286,7 @@ class SimurghArtisanBank(nn.Module):
             Per-atom scalar energy ``(N,)``, optionally followed by a
             dict of detached per-pair total contributions.
         """
+        require_declared_elements(atomic_numbers, self.elements, "SimurghArtisanBank")
         num_atoms: int = atom_features.shape[0]
         device: torch.device = atom_features.device
         dtype: torch.dtype = atom_features.dtype
@@ -1716,13 +1737,10 @@ class _AraceRarePairArtisan(_AracePairArtisan):
     and ``pair_code`` modulates the tensor-product weights exactly as
     ``element_linear`` does for the destination element.  Indexing by
     element rather than by pair means the module is defined for any pair,
-    including one it never saw — so while it exists it also absorbs edges
-    whose elements are outside the model's declared ``elements`` list.
-    That is a side effect, not the contract: this module is built only
-    when the frequency threshold actually routes pairs to it, and a
-    structure outside the declared chemistry is outside what the bank
-    covers either way.  The sum is symmetric, so ``E(A, B) = E(B, A)``
-    survives.
+    including one it never saw.  It never sees elements outside the
+    model's declared ``elements`` list: the backbone raises on those
+    (``require_declared_elements``).  The sum is symmetric, so
+    ``E(A, B) = E(B, A)`` survives.
 
     Parameters
     ----------
@@ -1896,10 +1914,9 @@ def log_pair_routing(
     would be thousands of rows.
 
     The first line is the model's **contract** — the elements it was
-    built for.  A structure containing anything else is outside what the
-    bank covers: those edges match no artisan and contribute nothing.
-    Printing the supported set at construction is how that boundary stays
-    visible instead of being discovered from a suspiciously low energy.
+    built for.  A structure containing anything else raises in the
+    forward pass (``require_declared_elements``); printing the supported
+    set at construction makes the boundary visible up front.
     """
     from ase.data import chemical_symbols
 
@@ -2181,8 +2198,8 @@ class ArtisanLayer(nn.Module):
             # Every edge matches exactly one pair, and the dedicated masks
             # are disjoint — so "not claimed by anyone" is precisely the
             # rare set, computed in one step instead of re-testing every
-            # rare pair.  It also catches pairs outside `elements`
-            # altogether, which used to contribute a silent zero.
+            # rare pair.  Pairs outside `elements` never get here: the
+            # forward pass raises on them.
             h_pair_total, e_atom = self._apply_rare(
                 h=h,
                 row=row,

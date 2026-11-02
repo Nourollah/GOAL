@@ -155,6 +155,7 @@ The correction is equivariant at every $l$. Within a structure, pairs are limite
 | `num_layers` | `1` | `>1` adds residual EquivLinear+RMSNorm refinements |
 | `init_zero` | `true` | zero-init output projection: the module starts as an exact no-op. Strongly recommended. |
 | `max_fragments` | `512` | guard on the $O(K^2)$ pair enumeration; exceeding it raises |
+| `smooth_normalisation` | `false` | opt-in fix: the shipped aggregate is divided by the number of fragments inside `cutoff`, which jumps (×2 for one remaining neighbour) when a fragment crosses it. `true` divides by $1 + \sum \mathrm{env}$, which is smooth. Changes trained numbers. |
 | `cutoff` | `12.0` | maximum centroid separation (Å); omit to inherit the backbone cutoff. The mechanism only reaches further than message passing when this exceeds `data.cutoff`. |
 
 **`adaptive_gate`**: a per-atom, per-irrep-block invariant gate, $h_\text{next} = g\, h_\text{new} + (1-g)\, h$. It is soft during training and a hard threshold at inference. A sparsity penalty $\lambda\,\text{mean}(g)$ is added to the total loss automatically through `last_aux_loss`, so it needs no `training.losses` entry. Diagnostics are logged under `train_gate/` / `val_gate/`.
@@ -250,7 +251,7 @@ The "mixture of experts" vocabulary was replaced by "artisan bank / potential ar
 
 These are collected from code comments, config comments and the ablation study.
 
-1. **Elements outside the bank contribute exactly zero, without warning.** An edge whose element pair has no artisan is zero-masked. `goal-train` always injects `elements` from the training set for `simurgh_legacy_arace`, so this only bites at inference on new chemistry, or for models that need `elements` set by hand (see [NF_SIMURGH](nf-simurgh.md)). Rare-pair routing turns such edges into rare-artisan edges instead.
+1. **Elements outside the bank raise.** A structure with an element outside `elements` raises `ValueError` in every artisan-based legacy model, with or without rare-pair routing. Before October 2026 such edges were silently zero-masked (or absorbed by the rare artisan). `goal-train` injects `elements` from the training set for `simurgh_legacy_arace`, so this bites at inference on new chemistry, or for models that need `elements` set by hand (see [NF_SIMURGH](nf-simurgh.md)).
 2. **`num_elements` must exceed the largest Z.** It sizes the embedding table only. The default config uses `9` (H–F).
 3. **`element_conditioned` dominated the parameter count** while the conditioning tables had 120 rows (about 5.2 M parameters for the shipped GMD-26 model, ~70 % of them dead). The shipped configs now set `artisan.n_elements: auto` (about 1.45–1.65 M); see [Choosing `n_elements`](#choosing-n_elements). Checkpoints trained before October 2026 keep 120 rows, because their saved config has no `n_elements`.
 4. **Keep `0e` as the leading irreps block.** The fragment interaction and the adaptive gate slice the leading scalar block, and their constructors raise if `l = 0` does not come first.

@@ -14,7 +14,7 @@ What these tests pin down:
 * a rare pair still reaches the energy, through the shared artisan;
 * the bank is exactly the pre-routing bank when nothing falls below the
   threshold — no idle shared artisan;
-* while a rare artisan exists it also absorbs pairs outside ``elements``;
+* an element outside ``elements`` raises, rare artisan or not;
 * the DDP contract: every parameter gets a gradient every step, even
   with no rare edges in the batch;
 * permutation symmetry survives the shared artisan.
@@ -305,15 +305,12 @@ class TestRoutedForward:
                 block.rare_artisan.gate.zero_()
         assert _energy(model, batch) != pytest.approx(before)
 
-    def test_unseen_pair_is_absorbed_while_a_rare_artisan_exists(self):
-        """An element outside ``elements`` reaches the rare artisan — if there is one.
+    def test_undeclared_element_raises_with_or_without_a_rare_artisan(self):
+        """An element outside ``elements`` is an error, not a silent zero.
 
-        ``elements`` is the model's declared chemistry, and an edge
-        outside it matches no dedicated artisan. When the threshold has
-        produced a shared rare artisan, that edge lands there rather than
-        contributing nothing; when it has not (see
-        :class:`TestNoRarePairs`), the edge contributes zero, which is
-        the declared boundary rather than a surprise.
+        ``elements`` is the model's declared chemistry.  Before the legacy
+        fixes such an edge contributed nothing without a rare artisan, and
+        landed on the rare artisan by accident with one.
         """
         batch: Batch = _molecule([1, 8])  # oxygen is not in `elements`
 
@@ -321,8 +318,9 @@ class TestRoutedForward:
         routed = _build(elements=(1, 6), routing=True, min_pair_frequency=0.5)
         assert routed.backbone.rare_pairs, "fixture must actually route something"
 
-        assert _energy(plain, batch) == pytest.approx(0.0, abs=1e-12)
-        assert _energy(routed, batch) != pytest.approx(0.0, abs=1e-12)
+        for model in (plain, routed):
+            with pytest.raises(ValueError, match=r"atomic number\(s\) \[8\] are not in elements"):
+                _energy(model, batch)
 
     def test_energy_is_permutation_symmetric(self):
         """E(A, B) = E(B, A) must survive the shared artisan."""

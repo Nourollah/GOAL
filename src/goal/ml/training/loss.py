@@ -731,6 +731,35 @@ class GateRegLoss(nn.Module):
         return (gate_values**2).sum()
 
 
+@LOSS_REGISTRY.register("newton")
+class NewtonLoss(nn.Module):
+    """Net-force penalty: ``loss_fn`` of each structure's ``Σ_i F_i`` against zero.
+
+    Opt-in by listing ``- name: newton`` under ``training.losses``; until
+    then a stage weight named ``newton`` matches no loss and is ignored with
+    a warning (the shipped behaviour).  Autograd forces of an isolated
+    structure already sum to zero, so the term acts only on direct forces.
+    """
+
+    def __init__(self, loss_fn: str = "mse", **_kwargs: typing.Any) -> None:
+        super().__init__()
+        self.loss_fn: typing.Callable[..., torch.Tensor] = resolve_loss_fn(loss_fn)
+
+    def forward(
+        self,
+        pred: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """``loss_fn(net force (G, 3), 0)``, using ``target.batch`` when present."""
+        forces: torch.Tensor = pred["forces"]
+        batch: torch.Tensor | None = getattr(target, "batch", None)
+        if batch is None:
+            batch = torch.zeros(forces.shape[0], dtype=torch.long, device=forces.device)
+        n_graphs: int = int(batch.max().item()) + 1 if batch.numel() else 0
+        net: torch.Tensor = forces.new_zeros(n_graphs, 3).index_add(0, batch, forces)
+        return self.loss_fn(net, torch.zeros_like(net))
+
+
 @LOSS_REGISTRY.register("scalar_property")
 class ScalarPropertyLoss(nn.Module):
     """Generic loss on any named scalar property.

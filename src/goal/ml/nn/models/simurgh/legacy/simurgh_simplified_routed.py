@@ -477,7 +477,7 @@ class RoutedSimurghSimplified(SimurghSimplifiedModel):
     ----------
     cutoff, embedding_dim, num_elements, num_rbf, radial_hidden, sh_lmax,
     avg_num_neighbors, combination, atom_line, pair_line, fragment_line,
-    readout, atomic_energies, scale, num_elements_table :
+    readout, atomic_energies, scale, num_elements_table, isolated_atom_reference :
         Exactly as :class:`~goal.ml.nn.models.simurgh.legacy.simurgh_simplified_monolithic.MonolithicSimurghSimplified`.
     artisan : dict
         ``rare_artisan: {enabled, min_element_frequency, min_pair_frequency,
@@ -508,6 +508,7 @@ class RoutedSimurghSimplified(SimurghSimplifiedModel):
         atomic_energies: dict[str, typing.Any] | None = None,
         scale: float | None = None,
         num_elements_table: int = 120,
+        isolated_atom_reference: bool = False,
     ) -> None:
         settings: SimplifiedSettings = SimplifiedSettings.build(
             cutoff=cutoff,
@@ -522,6 +523,7 @@ class RoutedSimurghSimplified(SimurghSimplifiedModel):
             pair_line=pair_line,
             fragment_line=fragment_line,
             readout=readout,
+            isolated_atom_reference=isolated_atom_reference,
         )
 
         # ----- Routing configuration and training-split statistics.

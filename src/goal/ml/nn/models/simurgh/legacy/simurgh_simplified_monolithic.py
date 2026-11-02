@@ -214,6 +214,9 @@ class MonolithicSimurghSimplified(SimurghSimplifiedModel):
         ``n_scalar`` / ``hidden`` of every line readout.
     atomic_energies, scale, num_elements_table :
         Baseline and gain, three-mode contract as ``MonolithicArace``.
+    isolated_atom_reference : bool
+        Opt-in: subtract each atom's vacuum line energy so an isolated atom
+        gives exactly ``E0``.  Off by default (the shipped behaviour).
     """
 
     def __init__(
@@ -233,6 +236,7 @@ class MonolithicSimurghSimplified(SimurghSimplifiedModel):
         atomic_energies: dict[str, typing.Any] | None = None,
         scale: float | None = None,
         num_elements_table: int = 120,
+        isolated_atom_reference: bool = False,
     ) -> None:
         settings: SimplifiedSettings = SimplifiedSettings.build(
             cutoff=cutoff,
@@ -247,6 +251,7 @@ class MonolithicSimurghSimplified(SimurghSimplifiedModel):
             pair_line=pair_line,
             fragment_line=fragment_line,
             readout=readout,
+            isolated_atom_reference=isolated_atom_reference,
         )
         super().__init__(
             settings=settings,

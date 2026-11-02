@@ -298,6 +298,10 @@ class EquivariantFragmentInteraction(nn.Module):
         at step 0.
     max_fragments : int, optional
         Safety cap on K (pair enumeration is O(K²)).
+    smooth_normalisation : bool
+        Opt-in fix: divide the aggregate by ``1 + Σ env`` instead of the
+        neighbour count inside the cutoff, which jumps (×2 for a lone
+        neighbour) when a fragment crosses it.  Off by default (shipped).
     """
 
     def __init__(
@@ -310,6 +314,7 @@ class EquivariantFragmentInteraction(nn.Module):
         num_layers: int = 1,
         init_zero: bool = True,
         max_fragments: int | None = 512,
+        smooth_normalisation: bool = False,
     ) -> None:
         super().__init__()
         if int(num_layers) < 1:
@@ -321,6 +326,7 @@ class EquivariantFragmentInteraction(nn.Module):
         )
         self._cutoff: float = float(cutoff)
         self.max_fragments: int | None = int(max_fragments) if max_fragments else None
+        self.smooth_normalisation: bool = bool(smooth_normalisation)
 
         lmax: int = max((ir.l for _, ir in self.irreps_hidden), default=0)
         self.irreps_sh: Irreps = build_artisan_edge_irreps(lmax)
@@ -455,12 +461,22 @@ class EquivariantFragmentInteraction(nn.Module):
         messages: torch.Tensor = self.tp(
             self.fragment_embed(pooled)[src], geometry.pair_sh.to(dtype), weights
         )
-        neighbour_counts: torch.Tensor = torch.zeros(
-            n_fragments, 1, device=device, dtype=dtype
-        ).index_add(0, dst, torch.ones(n_pairs, 1, device=device, dtype=dtype))
-        aggregated: torch.Tensor = torch.zeros(
-            n_fragments, self.irreps_hidden.dim, device=device, dtype=dtype
-        ).index_add(0, dst, messages) / neighbour_counts.clamp(min=1.0)
+        if self.smooth_normalisation:
+            norm: torch.Tensor = 1.0 + torch.zeros(
+                n_fragments, 1, device=device, dtype=dtype
+            ).index_add(0, dst, env)
+        else:
+            norm = (
+                torch.zeros(n_fragments, 1, device=device, dtype=dtype)
+                .index_add(0, dst, torch.ones(n_pairs, 1, device=device, dtype=dtype))
+                .clamp(min=1.0)
+            )
+        aggregated: torch.Tensor = (
+            torch.zeros(n_fragments, self.irreps_hidden.dim, device=device, dtype=dtype).index_add(
+                0, dst, messages
+            )
+            / norm
+        )
 
         for lin, norm in zip(self.layers, self.norms):
             aggregated = norm(lin(aggregated) + aggregated)

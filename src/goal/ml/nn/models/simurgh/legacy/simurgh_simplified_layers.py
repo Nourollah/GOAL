@@ -1268,6 +1268,7 @@ class SimplifiedSettings:
     max_fragments: int | None
     readout_scalars: int
     readout_hidden: int
+    isolated_atom_reference: bool = False
 
     @property
     def irreps_sh(self) -> Irreps:
@@ -1296,6 +1297,7 @@ class SimplifiedSettings:
         pair_line: typing.Mapping[str, typing.Any] | None,
         fragment_line: typing.Mapping[str, typing.Any] | None,
         readout: typing.Mapping[str, typing.Any] | None,
+        isolated_atom_reference: bool = False,
     ) -> SimplifiedSettings:
         """Validate raw config values and merge in the per-section defaults.
 
@@ -1310,6 +1312,9 @@ class SimplifiedSettings:
         atom_line, pair_line, fragment_line, readout : mapping, optional
             Per-section overrides; unknown keys raise, missing keys take the
             defaults.
+        isolated_atom_reference : bool
+            Subtract each atom's own line energy in vacuum, so an isolated
+            atom gives exactly ``E0``.  Off (the shipped behaviour) by default.
 
         Returns
         -------
@@ -1367,6 +1372,7 @@ class SimplifiedSettings:
             max_fragments=int(frag["max_fragments"]) if frag["max_fragments"] else None,
             readout_scalars=int(head["n_scalar"]),
             readout_hidden=int(head["hidden"]),
+            isolated_atom_reference=bool(isolated_atom_reference),
         )
 
 
@@ -1549,10 +1555,11 @@ class SimurghSimplifiedModel(nn.Module):
             pbc=graph.get("pbc", None),
         )
 
-    def _run(
-        self, graph: AtomicGraph
-    ) -> tuple[dict[str, torch.Tensor], dict[str, list[FeatureRecord]]]:
-        inputs: SharedInputs = self.shared_inputs(graph)
+    def _lines(
+        self, inputs: SharedInputs
+    ) -> tuple[torch.Tensor, FragmentLineOutputs, dict[str, list[FeatureRecord]]]:
+        """Per-structure line energies ``(B, 3)`` before ``scale``, the fragment outputs
+        and every intermediate feature."""
         batch: torch.Tensor = inputs.batch
         n_graphs: int = inputs.num_graphs
         row: torch.Tensor = inputs.edge_index[0]
@@ -1561,7 +1568,6 @@ class SimurghSimplifiedModel(nn.Module):
         e_atom, h_atom, atom_features = self.atom_line(inputs)
         e_pair, pair_features = self.pair_line(inputs)
         frag: FragmentLineOutputs = self.fragment_line(inputs)
-        dtype: torch.dtype = e_atom.dtype
 
         # ----- Readout / combination.
         if self.combination is None:
@@ -1587,9 +1593,53 @@ class SimurghSimplifiedModel(nn.Module):
             line_totals = scatter(
                 per_atom * self.combination(h_atom), batch, dim=0, dim_size=n_graphs, reduce="sum"
             )
+        features: dict[str, list[FeatureRecord]] = {
+            "atom": atom_features,
+            "pair": pair_features,
+            "fragment": frag.features,
+        }
+        return line_totals, frag, features
+
+    def _isolated_atom_energies(self, inputs: SharedInputs) -> torch.Tensor:
+        """Line energy ``(N,)`` (before ``scale``) of each atom alone in vacuum.
+
+        Evaluated once per distinct element of the batch: one atom per
+        structure, no edges, each its own fragment.
+        """
+        species, where = torch.unique(inputs.atomic_numbers, return_inverse=True)
+        n: int = int(species.shape[0])
+        device: torch.device = species.device
+        index: torch.Tensor = torch.arange(n, device=device)
+        origin: torch.Tensor = inputs.positions.new_zeros(n, 3)
+        lone: SharedInputs = self.shared_input(
+            atomic_numbers=species,
+            edge_index=torch.zeros(2, 0, dtype=torch.long, device=device),
+            edge_vectors=origin[:0],
+            edge_lengths=origin[:0, 0],
+            positions=origin,
+            fragment_index=index,
+            batch=index,
+            num_graphs=n,
+            cell=None,
+            pbc=None,
+        )
+        return self._lines(lone)[0].sum(dim=-1)[where]
+
+    def _run(
+        self, graph: AtomicGraph
+    ) -> tuple[dict[str, torch.Tensor], dict[str, list[FeatureRecord]]]:
+        inputs: SharedInputs = self.shared_inputs(graph)
+        batch: torch.Tensor = inputs.batch
+        n_graphs: int = inputs.num_graphs
+        line_totals, frag, features = self._lines(inputs)
+        dtype: torch.dtype = line_totals.dtype
 
         scale_v: torch.Tensor = self.scale.to(dtype)
         baseline_atoms: torch.Tensor = self.atomic_energies[inputs.atomic_numbers].to(dtype)
+        if self.settings.isolated_atom_reference:
+            # Opt-in fix: without it an isolated atom's energy is E0 plus an
+            # untrained self-energy of the atom and fragment lines.
+            baseline_atoms = baseline_atoms - scale_v * self._isolated_atom_energies(inputs)
         baseline: torch.Tensor = scatter(
             baseline_atoms, batch, dim=0, dim_size=n_graphs, reduce="sum"
         )
@@ -1617,11 +1667,6 @@ class SimurghSimplifiedModel(nn.Module):
         aux: torch.Tensor | None = self.fragment_line.processor.aux_loss(frag.state)
         if aux is not None:
             out["aux_loss"] = aux
-        features: dict[str, list[FeatureRecord]] = {
-            "atom": atom_features,
-            "pair": pair_features,
-            "fragment": frag.features,
-        }
         return out, features
 
     def forward(self, graph: AtomicGraph) -> dict[str, torch.Tensor]:

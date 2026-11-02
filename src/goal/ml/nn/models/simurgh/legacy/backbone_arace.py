@@ -53,6 +53,7 @@ from goal.ml.nn.blocks.artisans import (
     log_pair_routing,
     pair_label,
     parse_pair_counts,
+    require_declared_elements,
     resolve_n_elements,
     route_element_pairs,
 )
@@ -523,6 +524,7 @@ class SimurghAraceBackbone(nn.Module):
         edge_vectors, edge_lengths = differentiable_edges(graph, positions)
         edge_index: torch.Tensor = typing.cast(torch.Tensor, graph.edge_index)
 
+        require_declared_elements(graph.atomic_numbers, self._elements, "simurgh_legacy_arace")
         h: torch.Tensor = self.input_linear(self.embedding(graph.atomic_numbers))
 
         # Edge SH — geometry only, computed ONCE and shared by every round.

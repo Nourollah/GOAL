@@ -98,6 +98,7 @@ Shared keys (shipped GMD-26 values, code defaults in brackets):
 | `fragment_line` | `hidden_irreps: "16x0e + 16x1o + 16x2e"`, `num_layers: 2`, `vnode_cutoff: 15.0`, `fragment_radius: 3.0`, `avg_num_fragment_neighbors: null`, `max_fragments: 512` | `vnode_cutoff` is far above the 8 Å atom cutoff on purpose |
 | `readout` | `n_scalar: 16`, `hidden: 16` | line readouts, the only irreps → $0e$ collapses |
 | `atomic_energies`, `scale` | `provided` H/C/N/O, `null` | same contract as the other SIMURGH models |
+| `isolated_atom_reference` | absent [false] | opt-in fix: subtract each atom's own line energy in vacuum, so an isolated atom gives exactly $E_0$. As shipped, an isolated atom gets $E_0$ plus an untrained self-energy of the atom and fragment lines. Changes trained numbers. |
 
 Unknown keys in any section raise `ValueError`. Routed-only sections:
 
