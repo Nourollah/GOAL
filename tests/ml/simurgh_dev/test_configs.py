@@ -46,7 +46,8 @@ def test_config_builds_the_model(name: str) -> None:
     assert stages == ["energy_only", "main"] and cfg.training.stages[0].epochs == 5
     losses = {loss.name: loss for loss in cfg.training.losses}
     assert losses["forces"].error == "norm" and losses["forces"].fn == "huber"
-    assert cfg.checkpoint_manager.top_k.metric.startswith("val_")  # never select on OOD
+    # exact dataset-level MAE, and never on OOD
+    assert cfg.checkpoint_manager.top_k.metric == "val_forces/forces_mae_atomw"
     # MFC: on in the GMD configs, off on the single-system benchmarks
     assert cfg.model.backbone.mfc.enabled == ("gmd26" in name)
 

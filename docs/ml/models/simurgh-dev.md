@@ -59,6 +59,8 @@ The training recipe:
 - five energy-only epochs, then E:F = 1:100;
 - AMSGrad with EMA.
 
+Checkpoints are selected on `val_forces/forces_mae_atomw`, the exact atom-weighted force MAE on the validation set (TestID on GMD).
+
 `training.optimizer.name` selects `amsgrad`, `muon` (per irrep block) or `block_rms_adam`. The model builds its own optimiser through `build_optimizer`.
 
 The ablation programme is in `src/goal/configs/ml/ablations/simurgh_dev/`, one key per arm, with stage numbers in the file names.

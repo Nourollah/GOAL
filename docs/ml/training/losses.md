@@ -279,10 +279,11 @@ Loss values are weighted sums and change when the weights change. `mlip_metrics(
 | `forces_magnitude_mae` | mean $\lvert\,\lVert F^\text{pred}_i\rVert - \lVert F^\text{ref}_i\rVert\,\rvert$ | `{split}_forces/` |
 | `newton_violation_{x,y,z}` | $\langle \lvert \sum_{i\in m} F^\text{pred}_{i,d}\rvert \rangle_m$ per axis | `{split}_forces/` |
 | `newton_violation` | sum of the three axes | `{split}_forces/` |
+| `forces_mae_atomw`, `forces_rmse_atomw`, `forces_cosine_similarity_atomw` | the same three force metrics, exact over the epoch: sums and counts over every atom (and every DDP rank), epoch values only | `{split}_forces/` |
 
 Some notes on reading them:
 
-- The force metrics are **flat means over atoms**, as published MLIP numbers are, even when the loss is normalised per structure.
+- Within a batch the force metrics are **flat means over atoms**, as published MLIP numbers are, even when the loss is normalised per structure. Lightning then averages the batch values over the epoch **with one weight per structure**, so the epoch value of `forces_mae` is not the dataset-level number when batches differ in atom count (sets sorted by size): legacy SIMURGH Simplified on GMD Duplication OOD logged 0.050 eV/Å against a dataset-level 0.057 eV/Å. The `_atomw` metrics are exact; the SIMURGH (`simurgh_dev`) configs select checkpoints on `val_forces/forces_mae_atomw`.
 - **Cosine similarity and magnitude MAE separate direction errors from size errors.** A model with a good cosine but poor magnitude has the right shape of the potential energy surface at the wrong stiffness.
 - **Newton violation** must be ≈ 0 for autograd-derived forces on isolated molecules, because translation invariance makes $\sum_i \mathbf{F}_i = 0$ exact. A clearly non-zero value points to a direct (non-conservative) force head. A strongly anisotropic one (for example $z \gg x, y$) points to something direction-dependent: a surface normal, a periodic-boundary setting, or a cell vector.
 - `energy_mae_per_atom`, `forces_cosine_similarity` and `newton_violation` appear on the progress bar (`PROG_BAR_METRICS`). Everything else goes only to the loggers.

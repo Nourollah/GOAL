@@ -288,7 +288,7 @@ checkpoint_manager:
   top_k:
     enabled: true
     k: 5
-    metric: "val_forces/forces_mae" # validation = TestID only
+    metric: "val_forces/forces_mae_atomw" # exact atom-weighted MAE; validation = TestID only
     mode: "min"
   interval:
     enabled: true

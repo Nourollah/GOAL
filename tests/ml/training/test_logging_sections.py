@@ -170,7 +170,7 @@ class _LogSpy:
         self.prog_bar_keys: set[str] = set()
 
     def log(self, name: str, value: typing.Any, **kwargs: typing.Any) -> None:
-        self.logged[name] = float(value)
+        self.logged[name] = float(value.compute() if hasattr(value, "compute") else value)
         if kwargs.get("prog_bar", False):
             self.prog_bar_keys.add(name)
 

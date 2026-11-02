@@ -180,7 +180,7 @@ W&B and TensorBoard group panels by the text before the first `/`. GOAL chooses 
 | --- | --- |
 | `{split}/` | `total`, the loss actually optimised, plus any loss component that is neither energy nor forces (`stress`, `dipole`, `scalar_property`, custom losses). |
 | `{split}_energy/` | The energy loss term (and composite sub-terms like `energy_huber`), `energy_mae_per_atom`, `energy_rmse_per_atom`, and `energy_round_{L}`: ARACE's per-round energy contribution. A round that collapses to zero has stopped contributing. |
-| `{split}_forces/` | The forces loss term (and `forces_mae`/`forces_rmse`… sub-terms), `forces_mae`, `forces_rmse`, `forces_cosine_similarity`, `forces_magnitude_mae`, and `newton_violation` with its `_x`, `_y`, `_z` components. |
+| `{split}_forces/` | The forces loss term (and `forces_mae`/`forces_rmse`… sub-terms), `forces_mae`, `forces_rmse`, `forces_cosine_similarity`, `forces_magnitude_mae`, `newton_violation` with its `_x`, `_y`, `_z` components, and the exact epoch-level `forces_mae_atomw`, `forces_rmse_atomw` and `forces_cosine_similarity_atomw`. |
 | `{split}_gate/` | All gate diagnostics, which are numerous and kept off the progress bar: `gate_mean_round_{L}` (ARACE adaptive depth gate), `aux_loss` (its sparsity penalty), `gate_reg`, `artisan/round{L}/{pair}` (per element-pair artisan gates, $K(K+1)/2 \times$ rounds curves), and on the legacy ACE-first backbone only, `artisan_load/{pair}` and `artisan_load_variance` (validation only). |
 
 `{split}` is `train`, `val` or `test`. The reason for this split: per-atom energy errors and force cosines are on different scales and answer different questions, and the gate curves can number in the dozens. Kept apart, they do not bury `val_forces/forces_mae` in a wall of panels.

@@ -82,6 +82,10 @@ class GOALModule(L.LightningModule):
         #: (``dataset_stats.recompute``); empty means restore everything.
         self.keep_fresh_buffers: set[str] = set()
 
+        # Exact epoch-level force metrics per split, built on first use
+        # (torchmetrics states: not saved in checkpoints).
+        self._atomw: nn.ModuleDict = nn.ModuleDict()
+
         # EMA — keeps a shadow copy of weights for evaluation.
         # Lightning 2.6 provides EMAWeightAveraging callback as an alternative,
         # but we keep this for fine-grained control (e.g. per-step decay schedule).
@@ -518,6 +522,55 @@ class GOALModule(L.LightningModule):
                 add_dataloader_idx=False,
             )
 
+    def _log_atom_weighted(
+        self,
+        predictions: dict[str, torch.Tensor],
+        batch: AtomicGraph,
+        prefix: str,
+    ) -> None:
+        """Exact epoch-level force MAE, RMSE and cosine over every atom (``*_atomw``).
+
+        Sums and counts accumulate over the whole epoch (and across DDP
+        ranks), so the logged value is the dataset-level number.  The
+        ``forces_*`` step metrics stay as they were: batch means averaged
+        with one weight per graph, which under-reports on sets sorted by
+        size.
+        """
+        pred: torch.Tensor | None = predictions.get("forces", None)
+        target: torch.Tensor | None = getattr(batch, "forces", None)
+        if pred is None or target is None or pred.shape != target.shape:
+            return
+        from torchmetrics import MeanAbsoluteError, MeanMetric, MeanSquaredError
+
+        split: str = prefix.rstrip("/") + "_atomw"  # a bare "train" clashes with Module.train
+        if split not in self._atomw:
+            self._atomw[split] = nn.ModuleDict(
+                {
+                    "forces_mae_atomw": MeanAbsoluteError(),
+                    "forces_rmse_atomw": MeanSquaredError(squared=False),
+                    "forces_cosine_similarity_atomw": MeanMetric(),
+                }
+            ).to(pred.device)
+            for metric in self._atomw[split].values():
+                metric.set_dtype(torch.float64)  # sums over millions of atoms
+        metrics: nn.ModuleDict = self._atomw[split]
+        pred, target = pred.detach(), target.to(pred.dtype)
+        metrics["forces_mae_atomw"].update(pred, target)
+        metrics["forces_rmse_atomw"].update(pred, target)
+        nonzero: torch.Tensor = target.norm(dim=-1) > 0.0  # as forces_cosine_similarity
+        metrics["forces_cosine_similarity_atomw"].update(
+            nn.functional.cosine_similarity(pred[nonzero], target[nonzero], dim=-1, eps=1e-8)
+        )
+        for name, metric in metrics.items():
+            self.log(
+                self._key(prefix, name),
+                metric,
+                on_step=False,
+                on_epoch=True,
+                add_dataloader_idx=False,
+                metric_attribute=f"_atomw.{split}.{name}",  # built after Lightning's lookup
+            )
+
     def _log_round_energies(
         self,
         predictions: dict[str, torch.Tensor],
@@ -629,6 +682,7 @@ class GOALModule(L.LightningModule):
         # forces_{mae,rmse,cosine_similarity,magnitude_mae},
         # newton_violation).
         self._log_step_metrics(predictions, batch, prefix="train/")
+        self._log_atom_weighted(predictions, batch, prefix="train/")
         # ARACE per-round energy decomposition (no-op for other backbones).
         self._log_round_energies(predictions, batch, prefix="train/")
         # ARACE adaptive-gate means per round (no-op when the gate is off).
@@ -728,6 +782,7 @@ class GOALModule(L.LightningModule):
 
         self._log_losses(losses, batch, prefix=prefix, prog_bar=primary)
         self._log_step_metrics(predictions, batch, prefix=prefix, prog_bar=primary)
+        self._log_atom_weighted(predictions, batch, prefix=prefix)
         # ARACE per-round energy decomposition (no-op for other backbones).
         self._log_round_energies(predictions, batch, prefix=prefix)
         # ARACE adaptive-gate means per round (no-op when the gate is off).
@@ -805,6 +860,7 @@ class GOALModule(L.LightningModule):
         # ``prog_bar=False`` keeps the test loop as quiet as it was.
         self._log_losses(losses, batch, prefix="test/", prog_bar=False)
         self._log_step_metrics(predictions, batch, prefix="test/")
+        self._log_atom_weighted(predictions, batch, prefix="test/")
         # ARACE adaptive-gate means per round (no-op when the gate is off).
         self._log_gate_scores(predictions, batch, prefix="test/")
 
