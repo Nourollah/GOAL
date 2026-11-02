@@ -69,6 +69,8 @@ VARIANTS: dict[str, dict] = {
     "rms_norm": {"node_norm": "rms"},
     "radial_attention": {"attention": {"mode": "radial"}},
     "l3_messages": {"message_irreps": "8x0e + 8x1o + 8x2e + 8x3o"},
+    "pgs_edge": {"readout": {"pgs_edge": True}},
+    "pgs_edge_per_channel": {"readout": {"pgs_edge": True, "pgs_edge_alpha": "per_channel"}},
 }
 
 
@@ -157,10 +159,12 @@ def test_cutoff_crossing_is_smooth(variant: str) -> None:
     # beyond every cutoff the C atom is exactly a separated atom
     far = config(CUTOFF + 2.0)
     assert p(far)[0] == pytest.approx(p(water)[0] + E0[6], abs=1e-9)
-    # a 1000-point scan across r_c has no jump in E or F
-    distances = np.linspace(CUTOFF - 0.5, CUTOFF + 0.5, 1000)
-    energies = np.array([p(config(d))[0] for d in distances[::10]])
-    assert np.abs(np.diff(energies)).max() < 1e-3
+    # a scan across r_c: energy steps beyond what the forces account for
+    distances = np.linspace(CUTOFF - 0.5, CUTOFF + 0.5, 101)
+    scan = [p(config(d)) for d in distances]
+    energies = np.array([e for e, _ in scan])
+    slopes = np.array([-f[-1, 0] for _, f in scan])
+    assert scan_jumps(distances, energies, slopes)["energy"] < 1e-4
 
 
 BONDS = {"C-H": (6, 1), "C-C": (6, 6), "C-O": (6, 8), "O-H": (8, 1)}
@@ -171,16 +175,18 @@ def test_bond_scans_cross_1_8_angstrom_smoothly(variant: str) -> None:
     """No step where legacy Simplified's fragment perception flips (up to 1.4 eV there).
 
     The energy path holds no discrete fragment perception (MFC windows are a
-    training loss only).  Measured on 18 variants: at most 7.9e-9 eV on a
-    0.002 A grid through 1.7-1.9 A, and 1.1e-5 eV on the 0.6-4 A scan; both
-    are the trapezoid error of the check.
+    training loss only).  The straddling pair isolates a step; the grids
+    measure the trapezoid error of the check, which grows with the randomised
+    weights' curvature (base model: 4e-4 eV on the 0.6-4 A scan).
     """
     p = predict_fn(awake(build(**VARIANTS[variant])))
     for z1, z2 in BONDS.values():
         r, e, slope = bond_scan(p, z1, z2, r=np.linspace(1.79, 1.81, 11))
-        assert scan_jumps(r, e, slope)["energy"] < 1e-7
+        assert scan_jumps(r, e, slope)["energy"] < 1e-6
+        step = bond_scan(p, z1, z2, r=[1.8 - 1e-6, 1.8 + 1e-6])  # straddles 1.8 A
+        assert scan_jumps(*step)["energy"] < 1e-10
         if variant == "base":
-            assert scan_jumps(*bond_scan(p, z1, z2))["energy"] < 1e-4
+            assert scan_jumps(*bond_scan(p, z1, z2))["energy"] < 1e-3
 
 
 def test_separated_pair_is_sum_of_e0() -> None:

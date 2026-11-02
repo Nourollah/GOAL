@@ -78,6 +78,7 @@ DEFAULTS: dict[str, typing.Any] = {
         "pgs_components": 16,
         "pgs_t_max": 3.0,
         "pgs_beta": 18.4,
+        "pgs_edge_alpha": "scalar",
         "mlp_hidden": 16,
     },
     "pair_line": {
@@ -617,6 +618,32 @@ class _PANGate(nn.Module):
         return torch.where(mask, a * g.unsqueeze(-1), a)
 
 
+class _PGSEdge(nn.Module):
+    """PGS edge correction (arXiv:2606.15892, Eq. S9, App. F): ``w' = w + g(e) ⊙ s(r)``.
+
+    ``s(r) = Σ_m α_m B_m(r)`` with ``B_m = √(2/r_c) sin(mπr/r_c)/r · u(r)``, the
+    model's own envelope ``u``; ``g = 2σ(MLP(e))`` reads the radial network's
+    input ``e``.  ``α`` and the gate's last layer start at zero (``w' = w``,
+    ``g = 1``).  ``s`` carries ``u``, so the correction and its first two
+    derivatives vanish at ``r_c``.
+    """
+
+    def __init__(
+        self, in_dim: int, out_dim: int, cutoff: float, p: int, per_channel: bool
+    ) -> None:
+        super().__init__()
+        self.cutoff, self.p = cutoff, p
+        self.basis = _BesselBasis(cutoff, 16)
+        self.alpha = nn.Parameter(torch.zeros(16, out_dim) if per_channel else torch.zeros(16, 1))
+        self.gate = _MLP([in_dim, 64, out_dim], zero_last=True)
+
+    def forward(self, e: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        """Additive correction ``(E, P)`` to the tensor-product weights."""
+        env = polynomial_envelope(lengths / self.cutoff, self.p).unsqueeze(-1)
+        s = (self.basis(lengths) * env) @ self.alpha
+        return 2.0 * torch.sigmoid(self.gate(e)) * s
+
+
 class _Interaction(nn.Module):
     """One ACE layer: channel-wise A-basis, product basis and linear update."""
 
@@ -682,6 +709,18 @@ class _Interaction(nn.Module):
             self.radial = nn.Linear(in_dim, radial_out, bias=False)
         else:
             self.radial = _MLP([in_dim, *cfg["radial_mlp"], radial_out])
+        rd = cfg["readout"]
+        self.pgs_edge = (
+            _PGSEdge(
+                in_dim,
+                self.tp.weight_numel,
+                cfg["cutoff"],
+                cfg["envelope_p"],
+                rd["pgs_edge_alpha"] == "per_channel",
+            )
+            if rd["pgs_edge"]
+            else None
+        )
         mode = cfg["attention"]["mode"]
         self.attention = (
             _AttentionGate(mode, irreps_h, irreps_mid_sorted, cfg["num_rbf"])
@@ -723,6 +762,7 @@ class _Interaction(nn.Module):
         pair_code: torch.Tensor | None,
         env: torch.Tensor,
         avg_num_neighbors: float,
+        lengths: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """One layer: messages, A-basis, product basis and update."""
         sender, receiver = edge_index
@@ -732,13 +772,16 @@ class _Interaction(nn.Module):
         if self.env_proj is not None:
             scalars = h[:, : self.irreps_h.count("0e")]
             radial_in += [self.env_proj(scalars)[sender], self.env_proj(scalars)[receiver]]
-        weights = self.radial(torch.cat(radial_in, dim=-1))
+        radial_in = torch.cat(radial_in, dim=-1)
+        weights = self.radial(radial_in)
         if self.low_rank is not None:
             factors = weights.reshape(weights.shape[0], self.num_paths, self.low_rank.shape[1])
             weights = torch.einsum("epr,prc->epc", factors, self.low_rank).reshape(
                 weights.shape[0], self.tp.weight_numel
             )
         weights = weights * env.unsqueeze(-1)
+        if self.pgs_edge is not None:
+            weights = weights + self.pgs_edge(radial_in, lengths)
         messages = self.tp(self.linear_up(h)[sender], sh, weights)
         if self.message_gate is not None:
             messages = messages * self.message_gate(h, edge_index, sh, env).unsqueeze(-1)
@@ -913,7 +956,9 @@ class _AtomLine(nn.Module):
             pair_code = self.pair_code(torch.cat([ei + ej, ei * ej], dim=-1))
         energy = h.new_zeros(h.shape[0])
         for t, (layer, readout) in enumerate(zip(self.layers, self.readouts)):
-            h = layer(h, elem, emb, edge_index, sh, rbf, pair_code, env, avg_num_neighbors)
+            h = layer(
+                h, elem, emb, edge_index, sh, rbf, pair_code, env, avg_num_neighbors, lengths
+            )
             scalars = h[:, : self.channels]
             if t == len(self.layers) - 1 and self.pgs is not None:
                 scalars = self.pgs(scalars)  # the energy MLP reads the lifted invariants
@@ -1923,8 +1968,10 @@ class SimurghDev(nn.Module):
                 "kernels: cuequivariance is not implemented: SIMURGH has only the e3nn path "
                 "(cuequivariance-torch is not a GOAL dependency yet)"
             )
+        _choice(cfg["readout"], "pgs_edge_alpha", ("scalar", "per_channel"), "readout.")
+        if cfg["core"] == "ece" and cfg["readout"]["pgs_edge"]:
+            raise ValueError("readout.pgs_edge acts on the ACE radial weights: needs core: ace")
         for flag, on in (
-            ("readout.pgs_edge", cfg["readout"]["pgs_edge"]),
             ("pair_line.bond_order", cfg["pair_line"]["bond_order"]),
             ("diagnostics.calm", cfg["diagnostics"]["calm"]),
         ):

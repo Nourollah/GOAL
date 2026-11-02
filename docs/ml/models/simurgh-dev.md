@@ -12,6 +12,7 @@ $$E = \sum_i E_0(Z_i) + s\Big[\sum_i e_i + \sum_{i<j}\phi_{Z_iZ_j}(r_{ij}) + \su
 | --- | --- | --- |
 | $e_i$: body-ordered ACE atom line (channel-wise A-basis, symmetric product basis up to $\nu = 3$, linear update, per-layer readout) | WP2 | on |
 | smooth local attention (`gate`, exactly uniform when fresh) and the PGS readout (arXiv:2606.15892, Eq. S10): $y_i = x_i + D(x_i) + \sum_m \alpha_m K((t_{im} - t_m)/w)$ lifts the final invariants that the energy MLP reads; 16 compact exponential-of-semicircle kernels on $[-3, 3]$, $\beta = 18.4$ | WP8 A, C1 | on |
+| PGS edge (`readout.pgs_edge`, arXiv:2606.15892, Eq. S9): $w'_{ij} = w_{ij} + g(e_{ij}) \odot \sum_m \alpha_m B_m(r_{ij})$ on the per-edge tensor-product weights, 16 enveloped Fourier–Bessel functions | C2 | off |
 | $\phi_{ab}(r)$: pair line per unordered element pair, plus a fixed ZBL wall below `r_min` | WP3 | on |
 | $\varepsilon_{ij}$: ECE bond line (`pair_line.mode: ece \| phi+ece`) | WP11 | off |
 | $E_{\text{elec}}$: latent charges (and dipoles), damped Coulomb | WP7 | off |
