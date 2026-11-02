@@ -53,6 +53,14 @@ def build(cfg, overrides: dict, stats: dict, device: str):
         value = overrides.pop(f"mfc_{key.split('_')[0]}", None)
         if value is not None:
             backbone["mfc"][key] = float(value) if key == "fraction" else int(value)
+    import yaml
+
+    for key in [k for k in overrides if "." in k]:  # any backbone key, e.g. readout.pgs=false
+        *path, leaf = key.split(".")
+        node = backbone
+        for part in path:
+            node = node.setdefault(part, {})
+        node[leaf] = yaml.safe_load(str(overrides.pop(key)))
     if overrides:
         raise ValueError(f"unknown variant keys {sorted(overrides)}")
     return SimurghDev(**backbone).to(device).train()
@@ -169,6 +177,10 @@ def main(argv: list[str] | None = None) -> None:
     dm.setup("fit")
     batch = next(iter(dm.train_dataloader())).to(args.device)
     stats = {"avg_num_neighbors": compute_avg_num_neighbors(dm.data_train), "scale": 1.0}
+    stats["atom_statistics"] = {  # what goal-train would inject for the PAN gate
+        "pan_rho": {"mean": 10.0, "std": 3.0},
+        "pan_eta": {"mean": 0.3, "std": 0.1},
+    }
     for variant in args.variant or ["channels=128"]:
         overrides: dict = {}
         for item in variant.split(";"):
