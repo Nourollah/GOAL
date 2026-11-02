@@ -15,6 +15,7 @@ thresholds and error quantiles per γ bin.  See
 from __future__ import annotations
 
 import argparse
+import itertools
 from pathlib import Path
 
 import numpy as np
@@ -120,7 +121,7 @@ def score(ckpt: str, device: str, split: str, out: str | None) -> dict:
         bins = [0, 0.5, 1, 1.5, 2, 5, np.inf]
         report["error_quantiles_by_gamma"] = {
             f"{lo}-{hi}": np.quantile(err[(nbr >= lo) & (nbr < hi)], [0.5, 0.95]).tolist()
-            for lo, hi in zip(bins[:-1], bins[1:])
+            for lo, hi in itertools.pairwise(bins)
             if ((nbr >= lo) & (nbr < hi)).any()
         }
     if out:

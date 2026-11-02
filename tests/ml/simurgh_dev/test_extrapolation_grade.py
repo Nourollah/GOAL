@@ -96,14 +96,14 @@ def test_sharded_build_equals_single_shard(setup) -> None:
 
 
 def test_flagged_fraction_on_the_build_set(setup) -> None:
-    model, grade, frames, z, n = setup
+    _, grade, _, z, n = setup
     pooled = score(grade, z, n)
     fraction = float((pooled > 1).mean(dtype=torch.float64))
     assert 0.0 < fraction < 0.1, fraction  # the source reports 2-5 %
 
 
 def test_bond_scan_leaves_the_support(setup) -> None:
-    model, grade, frames, *_ = setup
+    model, grade, *_ = setup
     base = molecule("CH3CH2OH")
     c, o = 0, 2  # the C-O bond of ase's ethanol
     assert base.get_chemical_symbols()[o] == "O"

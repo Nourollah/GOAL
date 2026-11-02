@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import itertools
 from pathlib import Path
 
 import numpy as np
@@ -95,7 +96,7 @@ def test_zero_iterations_are_bit_identical_and_runs_are_deterministic() -> None:
     assert runs[0][0] == runs[1][0]
     assert all(torch.equal(runs[0][1][k], runs[1][1][k]) for k in runs[0][1])
     losses = runs[0][0]
-    assert all(b <= a + 1e-12 for a, b in zip(losses, losses[1:]))  # accepted iterations
+    assert all(b <= a + 1e-12 for a, b in itertools.pairwise(losses))  # accepted iterations
 
 
 def test_convex_quadratic_reaches_its_minimiser() -> None:

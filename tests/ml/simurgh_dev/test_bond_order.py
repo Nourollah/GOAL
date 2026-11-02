@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 import pytest
 import torch
@@ -88,7 +90,7 @@ def test_bond_order_falls_under_compression() -> None:
         atoms.positions *= factor
         _, vec, r, ei = edges(atoms)
         orders.append(float(m.bond_orders(vec, r, ei, torch.tensor([1, 0, 0, 0, 0]))[0]))
-    assert all(a < b for a, b in zip(orders, orders[1:])), orders
+    assert all(a < b for a, b in itertools.pairwise(orders)), orders
     assert all(0 < b < 1 for b in orders)
 
 

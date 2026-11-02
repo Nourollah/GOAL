@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 import torch
-from ase import Atoms
 from ase.build import molecule
 
 import goal.ml.nn.models  # noqa: F401  (registers the ablation)
@@ -49,8 +48,10 @@ def model(**long_range):
 
 def pair_terms(a: str, b: str, h_i: float, h_j: float, dtype=torch.float64):
     (ai, ci), (aj, cj) = lr.FREE_ATOM[SYMBOL[a]], lr.FREE_ATOM[SYMBOL[b]]
-    t = lambda x: torch.tensor([x], dtype=dtype)  # noqa: E731
-    return lr.dispersion_pair_terms(t(h_i * ai), t(h_j * aj), t(h_i**2 * ci), t(h_j**2 * cj))
+    alpha_i, alpha_j, c6_i, c6_j = (
+        torch.tensor([x], dtype=dtype) for x in (h_i * ai, h_j * aj, h_i**2 * ci, h_j**2 * cj)
+    )
+    return lr.dispersion_pair_terms(alpha_i, alpha_j, c6_i, c6_j)
 
 
 @pytest.mark.parametrize(("dtype", "rtol"), [(torch.float64, 1e-9), (torch.float32, 1e-5)])
@@ -96,7 +97,7 @@ def test_limits_and_derived_values() -> None:
 
 def test_combination_rule_and_closure() -> None:
     a = torch.tensor([3.1, 9.7])
-    c = torch.tensor([5.2, 41.0])  # noqa: E702
+    c = torch.tensor([5.2, 41.0])
     eq19 = lr.dispersion_pair_terms(a[:1], a[1:], c[:1], c[1:])["C6"]
     ts = 2 * c[0] * c[1] / (a[1] / a[0] * c[0] + a[0] / a[1] * c[1])
     assert float(eq19) == pytest.approx(float(ts), rel=1e-12)
