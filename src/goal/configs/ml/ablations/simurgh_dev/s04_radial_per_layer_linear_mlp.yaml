@@ -1,0 +1,24 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 4: radial expansion linear in layer 1, MLP in layer 2 (the source order is ambiguous)
+# Base: simurgh_dev_gmd26_FD.  Screen with seed 42; seeds 43
+# and 44 only if the change exceeds 2x the base seed s.d.
+#
+#   goal-train --config-name ablations/simurgh_dev/s04_radial_per_layer_linear_mlp seed=42
+# Another task: replace the first default (e.g. /simurgh_dev_gmd26_FF).
+########################################################
+
+defaults:
+  - /simurgh_dev_gmd26_FD
+  - _self_
+
+task_name: "simurgh_dev_abl_s04_radial_per_layer_linear_mlp"
+experiment:
+  name: "simurgh_dev_abl_s04_radial_per_layer_linear_mlp"
+  description: "SIMURGH ablation: radial expansion linear in layer 1, MLP in layer 2 (the source order is ambiguous)"
+
+model:
+  backbone:
+    radial:
+      per_layer: [linear, mlp]

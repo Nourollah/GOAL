@@ -106,7 +106,7 @@ model:
     dtype: float32 # float64 only in stage 11, on A100/H100/H200
     radial:
       low_rank: null # null | 1-4
-      per_layer: null # null | [mlp, linear]
+      per_layer: null # null | [mlp, linear] | [linear, mlp] (stage 4; the source order is ambiguous)
       env_conditioned: false
     a_basis:
       regularity_prior_sigma: null # null | 0.25 | 0.5 (Å)

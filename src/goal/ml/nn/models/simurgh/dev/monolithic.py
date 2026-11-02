@@ -2446,6 +2446,9 @@ class SimurghDev(nn.Module):
             )
         _choice(cfg["readout"], "pgs_edge_alpha", ("scalar", "per_channel"), "readout.")
         _choice(cfg["attention"], "pan_gate_descriptors", ("full", "generic"), "attention.")
+        per_layer = cfg["radial"]["per_layer"]
+        if per_layer is not None and any(kind not in ("linear", "mlp") for kind in per_layer):
+            raise ValueError(f"radial.per_layer entries must be linear or mlp, got {per_layer}")
         if cfg["diagnostics"]["calm"] and (
             cfg["core"] != "ace" or cfg["product_basis"] != "symmetric"
         ):
