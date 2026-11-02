@@ -167,7 +167,10 @@ DEFAULTS: dict[str, typing.Any] = {
         "stop_grad": "parent",
         "parameters": "shared",
         "window_weighting": "uniform",
+        "violation_every": 10,  # epochs between violation scores (window_weighting: violation)
+        "chemical_scheme": "rotatable",  # level-1 groups of window_type: chemical
         "tolerance": "none",
+        "tolerance_file": None,
         "include_charges": True,
         "diagnostic": True,
     },
@@ -1793,6 +1796,8 @@ class Window:
     nodes: np.ndarray
     core: np.ndarray
     parent: int
+    #: positions of H caps on the window's cut bonds (``chemical`` windows only)
+    caps: np.ndarray | None = None
 
 
 def core_mask(
@@ -1880,6 +1885,74 @@ def sphere_windows(
     return []
 
 
+#: Cap bond length (Å) from the kept atom X of a cut bond X-Y.
+CAP_LENGTH: dict[int, float] = {6: 1.09, 7: 1.01, 8: 0.96}
+
+
+def chemical_windows(
+    positions: np.ndarray,
+    numbers: np.ndarray,
+    buffer: float,
+    levels: int,
+    rng: np.random.Generator,
+    scheme: str = "rotatable",
+    tries: int = 8,
+) -> list[Window]:
+    """Nested windows of chemical groups (``goal.ml.data.fragments``) with H caps.
+
+    Level 1 is one randomly chosen group; each further level adds the groups
+    bonded to it.  Every cut bond X-Y (X kept) is capped with an H on the
+    X→Y line at :data:`CAP_LENGTH` from X (C, N or O; other X: no window).
+    The core keeps ``buffer`` from every removed atom and every cap.
+    """
+    from ase.data import covalent_radii
+
+    from goal.ml.data.fragments import compute_fragment_index
+
+    groups = compute_fragment_index(
+        torch.as_tensor(positions), torch.as_tensor(numbers), scheme=scheme, on_failure="fallback"
+    ).numpy()
+    radius = covalent_radii[numbers]
+    d = np.linalg.norm(positions[:, None] - positions[None], axis=-1)
+    bonded = (d < 1.2 * (radius[:, None] + radius[None])) & ~np.eye(len(numbers), dtype=bool)
+    heavy = numbers > 1
+    full = np.ones(len(numbers), dtype=bool)
+    for _ in range(tries):
+        inside = groups == rng.choice(np.unique(groups))
+        levels_in = [inside]
+        for _ in range(levels - 2):
+            grown = levels_in[-1] | np.isin(groups, groups[bonded[levels_in[-1]].any(axis=0)])
+            levels_in.append(grown)
+        windows: list[Window] = []
+        parent, parent_index = full, -1
+        for inside in reversed(levels_in):  # largest first, as the other generators
+            x, y = np.nonzero(bonded & inside[:, None] & ~inside[None, :])
+            if (
+                inside.all()
+                or not (parent & ~inside).any()
+                or not np.isin(numbers[x], list(CAP_LENGTH)).all()
+            ):
+                break
+            unit = positions[y] - positions[x]
+            unit /= np.linalg.norm(unit, axis=1, keepdims=True)
+            caps = positions[x] + unit * np.array([CAP_LENGTH[z] for z in numbers[x]])[:, None]
+            core = core_mask(positions, inside, parent, buffer)
+            if len(caps):
+                far = (
+                    np.linalg.norm(positions[:, None] - caps[None], axis=-1).min(axis=1) >= buffer
+                )
+                core &= far
+            if not (heavy & core).any():
+                break
+            windows.append(
+                Window(np.flatnonzero(inside), np.flatnonzero(core), parent_index, caps)
+            )
+            parent, parent_index = inside, len(windows) - 1
+        if len(windows) == levels - 1:
+            return windows
+    return []
+
+
 class _MFC(nn.Module):
     """Training objective of multi-scale fragment consistency.
 
@@ -1890,9 +1963,11 @@ class _MFC(nn.Module):
     ``none``.  Running scales normalise the energy and force terms.
     """
 
-    def __init__(self, cfg: dict, cutoff: float) -> None:
+    def __init__(
+        self, cfg: dict, cutoff: float, channels: int = 0, cap_element: int | None = None
+    ) -> None:
         super().__init__()
-        self.cfg = cfg
+        self.cfg, self.cutoff = cfg, cutoff
         self.window_type = _choice(cfg, "window_type", ("halfspace", "sphere", "chemical"), "mfc.")
         self.stop_grad = _choice(cfg, "stop_grad", ("parent", "none", "child"), "mfc.")
         self.objectives = set(cfg["objective"])
@@ -1906,14 +1981,31 @@ class _MFC(nn.Module):
             raise ValueError(f"mfc.fraction must be in (0, 1], got {cfg['fraction']}")
         if self.window_type == "sphere" and len(cfg["radii"]) != cfg["levels"] - 1:
             raise ValueError("mfc.radii needs levels - 1 radii")
-        for flag, on in (
-            ("mfc.window_type: chemical", self.window_type == "chemical"),
-            ("mfc.parameters: separate", cfg["parameters"] != "shared"),
-            ("mfc.window_weighting: violation", cfg["window_weighting"] != "uniform"),
-            ("mfc.tolerance: calibrated", cfg["tolerance"] != "none"),
-        ):
-            if on:
-                _not_yet(flag)
+        _choice(cfg, "parameters", ("shared", "separate"), "mfc.")
+        _choice(cfg, "window_weighting", ("uniform", "violation"), "mfc.")
+        if _choice(cfg, "tolerance", ("none", "calibrated"), "mfc.") == "calibrated":
+            raise NotImplementedError(
+                "mfc.tolerance: calibrated needs the maintainer's offline calibration file, "
+                f"mfc.tolerance_file (now {cfg['tolerance_file']!r}): a CSV with columns "
+                "d_min_A, d_max_A, tau_energy_eV and tau_force_eV_per_A, one row per bin of the "
+                "distance to the nearest removed or cap atom, from ORCA single points on capped "
+                "chemical windows.  Not wired yet."
+            )
+        #: ``parameters: separate``: residual sections of levels 2..L (the full structure is L)
+        self.residual = (
+            nn.ModuleList(
+                _MLP([2 * channels, 64, 1], zero_last=True) for _ in range(cfg["levels"] - 1)
+            )
+            if cfg["parameters"] == "separate"
+            else None
+        )
+        self.cap_element = cap_element
+        if self.window_type == "chemical" and cap_element is None:
+            raise ValueError(
+                "mfc.window_type: chemical caps cut bonds with H: H must be in elements"
+            )
+        #: ``window_weighting: violation``: mean core-force violation per structure (by geometry)
+        self.violation: dict[bytes, float] = {}
         self.register_buffer("sigma2", torch.zeros(3))  # running scales: energy, force, charge
         self.register_buffer("step", torch.zeros((), dtype=torch.long))
         self.rng = np.random.default_rng(0)
@@ -1926,14 +2018,45 @@ class _MFC(nn.Module):
             return 0.0
         return float(self.cfg["weight"]) * min(1.0, (epoch - start + 1) / ramp)
 
-    def structures(self, batch: np.ndarray) -> np.ndarray:
-        """The structures that get windows: all, or a random ``mfc.fraction`` of them."""
+    def structures(self, batch: np.ndarray, weights: np.ndarray | None = None) -> np.ndarray:
+        """The structures that get windows: all, or a ``mfc.fraction`` of them (∝ ``weights``)."""
         graphs = np.unique(batch)
         fraction = float(self.cfg["fraction"])
         if fraction < 1.0:
             k = max(1, round(fraction * len(graphs)))
-            graphs = np.sort(self.rng.choice(graphs, size=k, replace=False))
+            p = None if weights is None else weights[graphs] / weights[graphs].sum()
+            graphs = np.sort(self.rng.choice(graphs, size=k, replace=False, p=p))
         return graphs
+
+    @staticmethod
+    def keys(pos: np.ndarray, numbers: np.ndarray, batch: np.ndarray, num_graphs: int) -> list:
+        """A geometry key per structure (identifies it across epochs)."""
+        return [
+            hash((numbers[batch == g].tobytes(), np.round(pos[batch == g], 4).tobytes()))
+            for g in range(num_graphs)
+        ]
+
+    def structure_weights(self, keys: list) -> np.ndarray:
+        """``w_s = clip(v_s / mean v, 0.25, 4)``, mean 1 over scored structures; 1 if unscored."""
+        if self.cfg["window_weighting"] != "violation" or not self.violation:
+            return np.ones(len(keys))
+        mean = float(np.mean(list(self.violation.values())))
+        scored = np.array([k in self.violation for k in keys])
+        w = np.ones(len(keys))
+        if scored.any() and mean > 0:
+            v = np.array([self.violation.get(k, mean) for k in keys])
+            raw = np.clip(v / mean, 0.25, 4.0)
+            w[scored] = raw[scored] / raw[scored].mean()
+        return w
+
+    def residual_energy(self, h: torch.Tensor, batch: torch.Tensor, num_graphs: int):
+        """``parameters: separate``: ``Δe^(L)`` per atom of the full structure, and a zero
+        holding the other levels' sections on the graph."""
+        s = h[:, : self.residual[0][0].in_features // 2]
+        pooled = scatter(s, batch, dim=0, dim_size=num_graphs, reduce="mean")[batch]
+        x = torch.cat([s, pooled], dim=-1)
+        held = sum(p.sum() for m in self.residual[:-1] for p in m.parameters()) * 0.0
+        return self.residual[-1](x).squeeze(-1), held
 
     def windows(
         self, pos: np.ndarray, numbers: np.ndarray, batch: np.ndarray, graphs: np.ndarray
@@ -1953,14 +2076,24 @@ class _MFC(nn.Module):
                         self.rng,
                         self.principal_prob,
                     )
-                else:
+                elif self.window_type == "sphere":
                     ws = sphere_windows(
                         pos[idx], heavy, self.cfg["buffer"], self.cfg["radii"], self.rng
+                    )
+                else:
+                    ws = chemical_windows(
+                        pos[idx],
+                        numbers[idx],
+                        self.cfg["buffer"],
+                        self.cfg["levels"],
+                        self.rng,
+                        self.cfg["chemical_scheme"],
                     )
                 base = len(out)
                 for level, w in enumerate(ws):
                     parent = -1 if w.parent < 0 else base + w.parent
-                    out.append((g, Window(idx[w.nodes], idx[w.core], parent), k * 3 + level))
+                    window = Window(idx[w.nodes], idx[w.core], parent, w.caps)
+                    out.append((g, window, k * 3 + level))
         return out
 
     def _scale(self, i: int, value: torch.Tensor) -> torch.Tensor:
@@ -1994,10 +2127,13 @@ class _MFC(nn.Module):
         if shifts is not None and bool(shifts.abs().sum() > 0):
             raise ValueError("MFC windows are defined for molecules (non-periodic graphs)")
         batch_np = batch.cpu().numpy()
-        graphs = self.structures(batch_np)
-        windows = self.windows(
-            pos_d.detach().cpu().numpy(), graph.atomic_numbers.cpu().numpy(), batch_np, graphs
-        )
+        pos_np, numbers_np = pos_d.detach().cpu().numpy(), graph.atomic_numbers.cpu().numpy()
+        num_graphs = int(batch_np.max()) + 1
+        violation = self.cfg["window_weighting"] == "violation"
+        keys = self.keys(pos_np, numbers_np, batch_np, num_graphs) if violation else None
+        weights = self.structure_weights(keys) if violation else np.ones(num_graphs)
+        graphs = self.structures(batch_np, weights if violation else None)
+        windows = self.windows(pos_np, numbers_np, batch_np, graphs)
         valid = len({g for g, _, _ in windows}) / len(graphs)
         if not windows:
             return {"mfc": zero, "mfc_valid_fraction": zero + valid}
@@ -2005,28 +2141,45 @@ class _MFC(nn.Module):
         # copies of the window atoms, one block per window
         device = pos.device
         copies = [torch.as_tensor(w.nodes, device=device) for _, w, _ in windows]
-        offsets = np.cumsum([0] + [len(c) for c in copies])
-        src = torch.cat(copies)
+        caps = [
+            pos_d.new_zeros(0, 3) if w.caps is None else torch.as_tensor(w.caps).to(pos_d)
+            for _, w, _ in windows
+        ]  # constant H caps (chemical windows), after each window's own atoms
+        offsets = np.cumsum([0] + [len(c) + len(p) for c, p in zip(copies, caps)])
         lookup = torch.full((pos.shape[0],), -1, dtype=torch.long, device=device)
         row, col = graph.edge_index
-        edges = []
-        for k, c in enumerate(copies):
+        edges, pos_blocks, elem_blocks = [], [], []
+        for k, (c, p) in enumerate(zip(copies, caps)):
+            pos_blocks += [pos_d[c], p]
+            elem_blocks += [elem[c], elem.new_full((len(p),), self.cap_element or 0)]
+            if len(p):  # caps: the window's own neighbour list
+                x = torch.cat([pos_d[c], p]).detach()
+                pair = (torch.cdist(x, x) < self.cutoff) & ~torch.eye(
+                    len(x), dtype=torch.bool, device=device
+                )
+                edges.append(torch.nonzero(pair).T + int(offsets[k]))
+                continue
             lookup.fill_(-1)
             lookup[c] = torch.arange(len(c), device=device) + int(offsets[k])
             keep = (lookup[row] >= 0) & (lookup[col] >= 0)
             edges.append(torch.stack([lookup[row[keep]], lookup[col[keep]]]))
         edge_index = torch.cat(edges, dim=1)
+        elem_w = torch.cat(elem_blocks)
         child_grad = self.stop_grad != "child"
         parent_grad = self.stop_grad != "parent"
-        pos_w = pos_d[src] if child_grad else pos_d[src].detach().requires_grad_(True)
+        pos_w = torch.cat(pos_blocks)
+        if not child_grad:
+            pos_w = pos_w.detach().requires_grad_(True)
         vec = pos_w[edge_index[1]] - pos_w[edge_index[0]]
         e_w, h_w = model.atom_line(
-            elem[src], edge_index, vec, vec.norm(dim=-1), model.avg_num_neighbors
+            elem_w, edge_index, vec, vec.norm(dim=-1), model.avg_num_neighbors
         )
+        window_weight = [float(weights[g]) for g, _, _ in windows]
         s = model.scale
 
         def block(k: int) -> slice:
-            return slice(int(offsets[k]), int(offsets[k + 1]))
+            """The window's own atoms (caps excluded)."""
+            return slice(int(offsets[k]), int(offsets[k]) + len(windows[k][1].nodes))
 
         def rows(k: int, atoms: np.ndarray) -> torch.Tensor:
             """Rows of window ``k``'s copy holding the given (global) atoms."""
@@ -2046,17 +2199,21 @@ class _MFC(nn.Module):
 
         n_windows = len(windows)
         out: dict[str, torch.Tensor] = {"mfc_valid_fraction": zero + valid}
+        score_now = model.epoch % int(self.cfg["violation_every"]) == 0
+        scores: dict = {}
         loss = zero
         if "energy" in self.objectives:
-            child, parent = [], []
+            child, parent, wt = [], [], []
             for k, (_, w, _) in enumerate(windows):
                 child.append(s * e_w[rows(k, w.core)])
                 e_p, r_p = parent_rows(k, w.core)
                 parent.append(s * e_p[r_p])
+                wt.append(torch.full((len(w.core),), window_weight[k], device=device))
             child_t = maybe_detach(torch.cat(child), child_grad)
             parent_t = maybe_detach(torch.cat(parent), parent_grad)
             sigma = self._scale(0, parent_t.detach().square().mean())
-            term = (child_t - parent_t).square().sum() / sigma / n_windows
+            wt_t = torch.cat(wt).to(child_t.dtype)
+            term = ((child_t - parent_t).square() * wt_t).sum() / sigma / n_windows
             out["mfc_energy"] = term.detach()
             loss = loss + self.cfg["weight_energy"] * term
         if q_full is not None and self.cfg["include_charges"]:
@@ -2064,7 +2221,7 @@ class _MFC(nn.Module):
                 torch.arange(n_windows, device=device),
                 torch.as_tensor(np.diff(offsets), device=device),
             )
-            q_w = model.electrostatics.charges(h_w, elem[src], pos_w, owner, n_windows)
+            q_w = model.electrostatics.charges(h_w, elem_w, pos_w, owner, n_windows)
             child, parent = [], []
             for k, (_, w, _) in enumerate(windows):
                 child.append(q_w[rows(k, w.core)])
@@ -2115,11 +2272,21 @@ class _MFC(nn.Module):
                     else:
                         ref = f_parent[rows(w.parent, atoms)]
                     sigma = self._scale(1, ref.detach().square().sum(-1).mean())
-                    term = (
-                        term + (f_child[rows(k, atoms)] - ref).square().sum() / sigma / n_windows
-                    )
+                    diff = f_child[rows(k, atoms)] - ref
+                    term = term + window_weight[k] * diff.square().sum() / sigma / n_windows
+                    if violation and name == "core_force" and score_now:
+                        core = np.isin(atoms, w.core)
+                        v = float(
+                            diff.detach()[torch.as_tensor(core, device=device)].norm(dim=-1).mean()
+                        )
+                        scores.setdefault(keys[windows[k][0]], []).append(v)
             out[f"mfc_{name}"] = term.detach()
             loss = loss + self.cfg["weight_force"] * term
+        for key, values in scores.items():
+            self.violation[key] = float(np.mean(values))
+        if violation:
+            w = torch.tensor(window_weight, device=device)
+            out["mfc_weight_min"], out["mfc_weight_max"] = w.min(), w.max()
         out["mfc"] = lam * loss
         return out
 
@@ -2550,7 +2717,16 @@ class SimurghDev(nn.Module):
         )
         if pl["pair_first_epochs"] and not pl["enabled"]:
             raise ValueError("pair_line.pair_first_epochs needs pair_line.enabled")
-        self.mfc = _MFC(cfg["mfc"], cfg["cutoff"]) if cfg["mfc"]["enabled"] else None
+        self.mfc = (
+            _MFC(
+                cfg["mfc"],
+                cfg["cutoff"],
+                self.atom_line.channels,
+                elements.index(1) if 1 in elements else None,
+            )
+            if cfg["mfc"]["enabled"]
+            else None
+        )
         self.epoch = 0
         self.to(getattr(torch, cfg["dtype"]))
 
@@ -2725,7 +2901,14 @@ class SimurghDev(nn.Module):
             wall = scatter(half_wall, edge_index[1], dim=0, dim_size=n, reduce="sum")
         if self.bond_order is not None:  # eV, half of each pair term on each atom
             wall = wall + self.bond_order(vectors, lengths, edge_index, elem)
-        atomic = self._e0_on(pos.device)[elem] + (self.scale * (e_atom + e_pair) + wall).double()
+        line_energy = e_atom + e_pair
+        held = None
+        if self.mfc is not None and self.mfc.residual is not None:
+            # mfc.parameters: separate (ablation only: the pooled mean breaks far-copy
+            # extensivity for unlike fragments); MFC compares e_atom only
+            delta, held = self.mfc.residual_energy(h_last, batch, num_graphs)
+            line_energy = line_energy + delta
+        atomic = self._e0_on(pos.device)[elem] + (self.scale * line_energy + wall).double()
 
         def per_graph(x: torch.Tensor) -> torch.Tensor:
             return scatter(x, batch, dim=0, dim_size=num_graphs, reduce="sum")
@@ -2778,6 +2961,8 @@ class SimurghDev(nn.Module):
             )
         if self.training:
             aux = self._regularisers(elem, edge_index, e_atom, emb)
+            if held is not None:
+                aux = aux + held  # the other levels' residual sections stay on the graph
             terms: dict[str, torch.Tensor] = {}
             if in_support is not None:
                 terms["pgs_in_support"] = in_support  # atoms inside some kernel's support

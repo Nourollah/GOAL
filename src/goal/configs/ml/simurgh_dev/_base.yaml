@@ -196,7 +196,10 @@ model:
       stop_grad: parent # parent | none | child
       parameters: shared # shared | separate
       window_weighting: uniform # uniform | violation
+      violation_every: 10 # epochs between violation scores (violation weighting)
+      chemical_scheme: rotatable # level-1 groups of chemical windows (goal.ml.data.fragments)
       tolerance: none # none | calibrated
+      tolerance_file: null # calibrated: CSV d_min_A, d_max_A, tau_energy_eV, tau_force_eV_per_A
       include_charges: true
       diagnostic: true
   head: null

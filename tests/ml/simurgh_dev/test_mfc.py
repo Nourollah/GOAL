@@ -251,13 +251,96 @@ def test_fraction_and_every_n_steps_reduce_the_work() -> None:
         build(mfc={"enabled": True, "fraction": 0.0})
 
 
-@pytest.mark.parametrize(
-    "option",
-    [{"window_type": "chemical"}, {"parameters": "separate"}, {"tolerance": "calibrated"}],
-)
-def test_unimplemented_variants_refuse(option: dict) -> None:
-    with pytest.raises(NotImplementedError):
-        build(mfc={"enabled": True, **option})
+def test_calibrated_tolerance_names_the_file_it_needs() -> None:
+    with pytest.raises(NotImplementedError, match="tolerance_file.*d_min_A, d_max_A"):
+        build(mfc={"enabled": True, "tolerance": "calibrated"})
+
+
+def ester(seed: int = 0) -> Atoms:
+    """Pentyl pentanoate: BRICS cuts the ester into two groups of about 16 atoms."""
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("CCCCC(=O)OCCCCC"))
+    AllChem.EmbedMolecule(mol, randomSeed=seed)
+    AllChem.MMFFOptimizeMolecule(mol)
+    pos = mol.GetConformer().GetPositions()
+    return Atoms(numbers=[a.GetAtomicNum() for a in mol.GetAtoms()], positions=pos)
+
+
+def test_chemical_windows_are_capped_groups() -> None:
+    from goal.ml.nn.models.simurgh.dev.monolithic import CAP_LENGTH, chemical_windows
+
+    atoms = ester()
+    pos, numbers = atoms.positions, atoms.numbers
+    windows = chemical_windows(pos, numbers, 1.0, 3, np.random.default_rng(0), "brics")
+    assert len(windows) == 2 and windows[1].parent == 0
+    assert set(windows[1].nodes) < set(windows[0].nodes) < set(range(len(atoms)))
+    for w in windows:
+        assert w.caps is not None and len(w.caps) >= 1
+        kept = pos[w.nodes]
+        d = np.linalg.norm(w.caps[:, None] - kept[None], axis=-1)
+        x = w.nodes[d.argmin(axis=1)]  # each cap sits on the line from its kept atom X
+        lengths = d.min(axis=1)
+        assert np.allclose(lengths, [CAP_LENGTH[z] for z in numbers[x]])
+        removed = np.setdiff1d(np.arange(len(atoms)), w.nodes)
+        far = np.concatenate([pos[removed], w.caps])
+        assert np.linalg.norm(pos[w.core][:, None] - far[None], axis=-1).min() >= 1.0
+    with pytest.raises(ValueError, match="H must be in elements"):
+        build(mfc={"enabled": True, "window_type": "chemical"}, elements=[6, 8])
+
+
+def test_chemical_windows_vanish_for_a_strictly_local_model() -> None:
+    """Test (f) of WP6 with caps: one layer, cutoff <= buffer."""
+    cfg = {"enabled": True, "start_epoch": 0, "warmup_epochs": 1, "buffer": 2.0}
+    cfg |= {"window_type": "chemical", "chemical_scheme": "brics", "levels": 2}
+    model = awake(build(num_interactions=1, cutoff=2.0, mfc=cfg)).train()
+    terms = mfc_terms(model, batch_of(ester(), ester(seed=1)))
+    assert float(terms["mfc_valid_fraction"]) > 0
+    assert float(terms["mfc_energy"]) < 1e-20 and float(terms["mfc_core_force"]) < 1e-20
+    deep = awake(build(cutoff=2.0, mfc=cfg)).train()
+    assert float(mfc_terms(deep, batch_of(ester()))["mfc_energy"]) > 0
+
+
+@pytest.mark.parametrize("levels", [2, 3])
+def test_separate_parameters(levels: int) -> None:
+    from tests.ml.simurgh_dev.test_monolithic import load_shared
+
+    cfg = {"enabled": True, "start_epoch": 0, "warmup_epochs": 1, "buffer": BUFFER}
+    cfg |= {"levels": levels, "radii": [8.0], "parameters": "separate"}
+    separate, shared = build(mfc=cfg), build(mfc={**cfg, "parameters": "shared"})
+    load_shared(shared, separate)
+    chain = batch_of(alkane(16))
+    assert torch.equal(separate.eval()(chain)["energy"], shared.eval()(chain)["energy"])
+    model = awake(separate).train()
+    model.mfc.principal_prob = 1.0
+    out = model(chain)
+    assert not torch.equal(out["energy"], shared.train()(chain)["energy"])
+    (out["energy"].sum() + out["forces"].square().sum() + out["aux_loss"]).backward()
+    assert [n for n, p in model.named_parameters() if p.grad is None] == []
+
+
+def test_violation_weights() -> None:
+    model = mfc_model(window_weighting="violation", violation_every=1)
+    mfc = model.mfc
+    assert np.array_equal(mfc.structure_weights([1, 2]), [1.0, 1.0])  # nothing scored yet
+    mfc.violation = {1: 1.0, 2: 3.0, 3: 100.0, 4: 1e-3}
+    w = mfc.structure_weights([1, 2, 3, 4, 5])
+    assert w[4] == 1.0 and w[:4].mean() == pytest.approx(1.0)
+    raw = np.clip(np.array([1.0, 3.0, 100.0, 1e-3]) / np.mean([1.0, 3.0, 100.0, 1e-3]), 0.25, 4)
+    assert np.allclose(w[:4], raw / raw.mean())
+    model.mfc.violation = {}
+    batch = batch_of(alkane(16), alkane(18, seed=1))
+    terms = mfc_terms(model, batch)  # epoch 0: a scoring epoch
+    assert len(model.mfc.violation) >= 1 and "mfc_weight_max" in terms
+    again = mfc_model(window_weighting="violation", violation_every=1)
+    mfc_terms(again, batch)
+    assert again.mfc.violation == model.mfc.violation  # deterministic for a fixed seed
+    picks = mfc_model(window_weighting="violation", fraction=0.5).mfc
+    chosen = [
+        tuple(picks.structures(np.repeat(np.arange(4), 3), np.array([1e-9, 1e-9, 1.0, 1.0])))
+    ]
+    assert chosen == [(2, 3)]
 
 
 # ---------------------------------------------------------------------------

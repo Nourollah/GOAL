@@ -50,7 +50,14 @@ The same network is evaluated on windows of a structure: half-space cuts or sphe
 - the forces those energies generate;
 - the charges, when electrostatics are on.
 
-The larger context is the stop-gradient teacher. With `buffer >= r_c` the objectives vanish for a strictly local model, so they penalise only dependence carried by message passing. MFC is on in the GMD configs and off for rMD17, MD22 and 3BPA. Its parts are logged under `train_mfc/`.
+The larger context is the stop-gradient teacher. With `buffer >= r_c` the objectives vanish for a strictly local model, so they penalise only dependence carried by message passing. MFC is on in the GMD configs and off for rMD17, MD22 and 3BPA.
+
+Variants (all off by default):
+
+- `window_type: chemical`: level-1 windows are chemical groups (`chemical_scheme`, from `goal.ml.data.fragments`), higher levels add the bonded groups. Cut bonds X–Y are capped with H on the X→Y line (1.09, 1.01 and 0.96 Å from C, N and O); caps are constants, excluded from the force comparison, and the core keeps `buffer` from them too. Bond perception happens only here, in the loss. Few windows are valid on GMD at a 5 Å buffer.
+- `parameters: separate`: a residual section per level reads the per-molecule mean of the final scalars; the full structure's energy includes the last one, and MFC compares only the atom-line energies. Ablation only: the pooled mean breaks far-copy extensivity.
+- `window_weighting: violation`: every `violation_every` epochs the training pass scores each structure's mean core-force violation; its MFC loss is weighted by clip(v/mean v, 0.25, 4) (mean 1), and with `fraction` < 1 structures are drawn in proportion to the weights.
+- `tolerance: calibrated` raises until the offline calibration file exists (`tolerance_file`: CSV columns `d_min_A`, `d_max_A`, `tau_energy_eV`, `tau_force_eV_per_A`). Its parts are logged under `train_mfc/`.
 
 ## Configuration
 
