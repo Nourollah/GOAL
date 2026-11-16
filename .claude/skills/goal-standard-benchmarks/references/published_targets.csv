@@ -1,0 +1,53 @@
+system,value,unit,model,source,table
+Aspirin,5.59,meV/Å,MACE+PAN+PGS (scalar pathway),arXiv:2606.15892 Table S2,rMD17 force MAE N=950-1000
+Azobenzene,2.2,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=950-1000
+Benzene,0.1,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=950-1000
+Ethanol,1.4,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=950-1000
+Malonaldehyde,3.1,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=950-1000
+Naphthalene,0.9,meV/Å,Allegro,arXiv:2204.05249 Table 1,rMD17 force MAE N=950-1000
+Paracetamol,4.0,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=950-1000
+Salicylic acid,2.62,meV/Å,MACE+PAN+PGS (scalar pathway),arXiv:2606.15892 Table S2,rMD17 force MAE N=950-1000
+Toluene,1.1,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=950-1000
+Uracil,1.7,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=950-1000
+Aspirin,1.7,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 energy MAE N=950-1000
+Azobenzene,0.5,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 energy MAE N=950-1000
+Benzene,0.01,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 energy MAE N=950-1000
+Ethanol,0.113,meV (total),MACE-MARA,arXiv:2602.02671 Table 1,rMD17 energy MAE N=950-1000
+Malonaldehyde,0.395,meV (total),MACE-MARA,arXiv:2602.02671 Table 1,rMD17 energy MAE N=950-1000
+Naphthalene,0.2,meV (total),NequIP (l=3),arXiv:2101.03164 Table 2,rMD17 energy MAE N=950-1000
+Paracetamol,0.9,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 energy MAE N=950-1000
+Salicylic acid,0.5,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 energy MAE N=950-1000
+Toluene,0.2,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 energy MAE N=950-1000
+Uracil,0.2,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 energy MAE N=950-1000
+Aspirin,38.2,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+Azobenzene,16.2,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+Benzene,1.1,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+Ethanol,23.8,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+Malonaldehyde,40.9,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+Naphthalene,8.2,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+Paracetamol,30.13,meV/Å,ICTP-sym,arXiv:2405.14253 Table 1,rMD17 force MAE N=50
+Salicylic acid,26.7,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+Toluene,10.7,meV/Å,EquiformerV2 + AniDS,arXiv:2510.22123 Table 6,rMD17 force MAE N=50
+Uracil,25.0,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 1,rMD17 force MAE N=50
+AT-AT,2.294,meV/Å,ECENet,arXiv:2609.23134 Table 1,MD22 force MAE
+AT-AT-CG-CG,2.103,meV/Å,ECENet,arXiv:2609.23134 Table 1,MD22 force MAE
+Ac-Ala3-NHMe,2.229,meV/Å,ECENet,arXiv:2609.23134 Table 1,MD22 force MAE
+Buckyball catcher,2.546,meV/Å,ECENet,arXiv:2609.23134 Table 1,MD22 force MAE
+DHA,1.444,meV/Å,ECENet,arXiv:2609.23134 Table 1,MD22 force MAE
+Double-walled nanotube,9.124,meV/Å,ECENet,arXiv:2609.23134 Table 1,MD22 force MAE
+Stachyose,1.912,meV/Å,ECENet,arXiv:2609.23134 Table 1,MD22 force MAE
+AT-AT,2.602,meV (total),ECENet,arXiv:2609.23134 Table 1,MD22 energy MAE
+AT-AT-CG-CG,3.938,meV (total),ECENet,arXiv:2609.23134 Table 1,MD22 energy MAE
+Ac-Ala3-NHMe,1.899,meV (total),ECENet,arXiv:2609.23134 Table 1,MD22 energy MAE
+Buckyball catcher,12.931,meV (total),ECENet,arXiv:2609.23134 Table 1,MD22 energy MAE
+DHA,2.155,meV (total),ECENet,arXiv:2609.23134 Table 1,MD22 energy MAE
+Double-walled nanotube,28.117,meV (total),LiTEN,arXiv:2507.00884 Table 2,MD22 energy MAE
+Stachyose,2.693,meV (total),ECENet,arXiv:2609.23134 Table 1,MD22 energy MAE
+1200 K,54.26,meV/Å,"TACE (spe^cart, nu=3)",arXiv:2509.14961 Table 1,3BPA force RMSE N=500
+300 K,7.6,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 2,3BPA force RMSE N=500
+600 K,19.2,meV/Å,GRACE (ACE^(g)),arXiv:2311.16326 Table 2,3BPA force RMSE N=500
+Dihedral slices,15.1,meV/Å,"TECE (TACE + radial rotary complex attention, 2 layers, nu=2, w1)",arXiv:2607.10664 Table 2,3BPA force RMSE N=500
+1200 K,23.42,meV (total),"TACE (spe^cart, nu=3)",arXiv:2509.14961 Table 1,3BPA energy RMSE N=500
+300 K,1.7,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 2,3BPA energy RMSE N=500
+600 K,7.3,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 2,3BPA energy RMSE N=500
+Dihedral slices,7.4,meV (total),GRACE (ACE^(g)),arXiv:2311.16326 Table 2,3BPA energy RMSE N=500

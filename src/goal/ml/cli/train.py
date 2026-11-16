@@ -305,10 +305,9 @@ def _run_training(cfg: DictConfig) -> None:
             "simurgh_legacy_arace",
             "simurgh_legacy_monolithic",
             "simurgh_legacy_monolithic_arace",
-            "simurgh_dev",
         )
-        and "elements" not in reused
-    ):
+        or backbone_name.startswith("simurgh_dev")  # the model and its simurgh_dev_abl_* arms
+    ) and "elements" not in reused:
         elements: list[int] = compute_unique_elements(datamodule.data_train)
         symbol_str: str = " ".join(f"{ATOMIC_SYMBOLS.get(z, '?')}({z})" for z in elements)
         print(f"[stats] elements discovered in training set: {symbol_str}")
@@ -370,7 +369,7 @@ def _run_training(cfg: DictConfig) -> None:
 
     # SIMURGH: avg_num_neighbors when null, and scale = RMS of the training
     # force components when the config asks for it (``scale: force_rms``).
-    if backbone_name == "simurgh_dev":
+    if backbone_name.startswith("simurgh_dev"):  # the model and its simurgh_dev_abl_* arms
         if backbone_kwargs.get("avg_num_neighbors") is None:
             backbone_kwargs["avg_num_neighbors"] = compute_avg_num_neighbors(datamodule.data_train)
             print(f"[stats] avg_num_neighbors={backbone_kwargs['avg_num_neighbors']:.4f}")

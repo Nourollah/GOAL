@@ -1196,19 +1196,8 @@ class _AtomLine(nn.Module):
             )
         self.register_buffer("pan_stats", stats)  # (2, [mean, s.d.]), frozen
 
-    def forward(
-        self,
-        elem: torch.Tensor,
-        edge_index: torch.Tensor,
-        vectors: torch.Tensor,
-        lengths: torch.Tensor,
-        avg_num_neighbors: float,
-        a_shift: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Atomic energies ``e_i`` (unscaled) and the final invariant features.
-
-        ``a_shift`` (denoising copies only) is added to the first layer's A-basis.
-        """
+    def prepare(self, elem, edge_index, vectors, lengths) -> dict[str, typing.Any]:
+        """What every layer shares: ``h`` (layer input), bases, envelope, pair code, PAN."""
         emb = self.embedding.weight
         h = self.embed_to_h(emb[elem])
         sh = o3.spherical_harmonics(
@@ -1225,26 +1214,66 @@ class _AtomLine(nn.Module):
         if self.pan_stats is not None:
             raw = pan_descriptors(vectors, lengths, edge_index[1], h.shape[0], self.cutoff, self.p)
             pan = (raw - self.pan_stats[:, 0].to(raw.dtype)) / self.pan_stats[:, 1].to(raw.dtype)
+        return {
+            "h": h,
+            "emb": emb,
+            "sh": sh,
+            "rbf": rbf,
+            "env": env,
+            "pair_code": pair_code,
+            "pan": pan,
+        }
+
+    def step(
+        self,
+        t: int,
+        h: torch.Tensor,
+        ctx: dict[str, typing.Any],
+        elem: torch.Tensor,
+        edge_index: torch.Tensor,
+        lengths: torch.Tensor,
+        avg_num_neighbors: float,
+        a_shift: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Layer ``t`` and its readout: the layer's features and atomic energies (unscaled)."""
+        h = self.layers[t](
+            h,
+            elem,
+            ctx["emb"],
+            edge_index,
+            ctx["sh"],
+            ctx["rbf"],
+            ctx["pair_code"],
+            ctx["env"],
+            avg_num_neighbors,
+            lengths,
+            ctx["pan"],
+            a_shift if t == 0 else None,
+        )
+        scalars = h[:, : self.channels]
+        if t == len(self.layers) - 1 and self.pgs is not None:
+            scalars = self.pgs(scalars)  # the energy MLP reads the lifted invariants
+        return h, self.readouts[t](scalars).squeeze(-1)
+
+    def forward(
+        self,
+        elem: torch.Tensor,
+        edge_index: torch.Tensor,
+        vectors: torch.Tensor,
+        lengths: torch.Tensor,
+        avg_num_neighbors: float,
+        a_shift: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Atomic energies ``e_i`` (unscaled) and the final invariant features.
+
+        ``a_shift`` (denoising copies only) is added to the first layer's A-basis.
+        """
+        ctx = self.prepare(elem, edge_index, vectors, lengths)
+        h = ctx["h"]
         energy = h.new_zeros(h.shape[0])
-        for t, (layer, readout) in enumerate(zip(self.layers, self.readouts)):
-            h = layer(
-                h,
-                elem,
-                emb,
-                edge_index,
-                sh,
-                rbf,
-                pair_code,
-                env,
-                avg_num_neighbors,
-                lengths,
-                pan,
-                a_shift if t == 0 else None,
-            )
-            scalars = h[:, : self.channels]
-            if t == len(self.layers) - 1 and self.pgs is not None:
-                scalars = self.pgs(scalars)  # the energy MLP reads the lifted invariants
-            energy = energy + readout(scalars).squeeze(-1)
+        for t in range(len(self.layers)):
+            h, e = self.step(t, h, ctx, elem, edge_index, lengths, avg_num_neighbors, a_shift)
+            energy = energy + e
         return energy, h
 
 
@@ -2171,9 +2200,9 @@ class _MFC(nn.Module):
         if not child_grad:
             pos_w = pos_w.detach().requires_grad_(True)
         vec = pos_w[edge_index[1]] - pos_w[edge_index[0]]
-        e_w, h_w = model.atom_line(
-            elem_w, edge_index, vec, vec.norm(dim=-1), model.avg_num_neighbors
-        )
+        # the same line energies as the full structure's e_atom (the ECE line's atomic split
+        # e_i = 1/2 sum_j (eps_ij + eps_ji) included), or MFC compares unlike quantities
+        e_w, h_w, _ = model.line_energies(elem_w, edge_index, vec, vec.norm(dim=-1))
         window_weight = [float(weights[g]) for g, _, _ in windows]
         s = model.scale
 
@@ -2730,6 +2759,34 @@ class SimurghDev(nn.Module):
         self.epoch = 0
         self.to(getattr(torch, cfg["dtype"]))
 
+    def line_energies(
+        self,
+        elem: torch.Tensor,
+        edge_index: torch.Tensor,
+        vectors: torch.Tensor,
+        lengths: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Line energies ``e_i`` (unscaled), final atom features and bond energies (or None).
+
+        The core's atomic energies plus, with an ECE bond line, its atomic split
+        ``e_i = 1/2 sum_j (eps_ij + eps_ji)``.  The full structure and the MFC windows
+        both use this, so the consistency loss always compares the same quantity.
+        """
+        e_atom, h = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
+        bond = getattr(self.atom_line, "last_bond_energies", None)
+        if self.ece_line is not None:
+            line = self.ece_line(
+                h,
+                self.ece_codes.weight[elem],
+                edge_index,
+                vectors,
+                lengths,
+                self.avg_num_neighbors,
+            )
+            e_atom = e_atom + line["atomic_energies"]
+            bond = line["bond_energies"]
+        return e_atom, h, bond
+
     def set_epoch(self, epoch: int) -> None:
         """Current training epoch (GOALModule calls this every step)."""
         self.epoch = int(epoch)
@@ -2810,7 +2867,8 @@ class SimurghDev(nn.Module):
         passes ``{name: {mean, std}}`` back as ``atom_statistics``.  Empty
         unless the PAN gate uses its descriptors.
         """
-        cfg = _merge(DEFAULTS, dict(config))
+        # an arm's own sections (long_range, ...) are checked by its constructor
+        cfg = _merge(DEFAULTS, {k: v for k, v in dict(config).items() if k in DEFAULTS})
         att = cfg["attention"]
         if not att["pan_gate"] or att["pan_gate_descriptors"] != "full":
             return {}
@@ -2871,24 +2929,12 @@ class SimurghDev(nn.Module):
         edge_index = graph.edge_index
         emb = self.atom_line.embedding.weight
 
-        e_atom, h_last = self.atom_line(elem, edge_index, vectors, lengths, self.avg_num_neighbors)
+        e_atom, h_last, bond = self.line_energies(elem, edge_index, vectors, lengths)
         pgs = getattr(self.atom_line, "pgs", None)
         in_support = None if pgs is None else pgs.last_in_support  # before MFC windows reuse it
         calm = None
         if self.config["diagnostics"]["calm"]:  # output only: the grade's feature blocks
             calm = [layer.last_basis for layer in self.atom_line.layers]
-        bond = getattr(self.atom_line, "last_bond_energies", None)
-        if self.ece_line is not None:
-            line = self.ece_line(
-                h_last,
-                self.ece_codes.weight[elem],
-                edge_index,
-                vectors,
-                lengths,
-                self.avg_num_neighbors,
-            )
-            e_atom = e_atom + line["atomic_energies"]
-            bond = line["bond_energies"]
         if self.training and self.epoch < self.config["pair_line"]["pair_first_epochs"]:
             e_atom = 0.0 * e_atom  # pair-first stage: the atom line gets zero gradients
         e_pair = torch.zeros_like(e_atom)

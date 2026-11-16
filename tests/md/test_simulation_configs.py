@@ -28,6 +28,7 @@ SIMULATION_CONFIGS = [
     "md/mts/simulations/mts_respa",
     "md/mts/simulations/online_learner",
     "md/mts/simulations/orca_ml_learner",
+    "md/mts/simulations/mts_xtb_gfn1",
 ]
 
 
@@ -111,7 +112,8 @@ class TestGoalSimulateConfig:
             ],
         )
         sim = Simulation.from_config(cfg)
-        assert sim.timestep_fs == 0.5
+        assert sim.dynamics_cfg["timestep_fs"] == 0.5
+        assert sim.dynamics_cfg["friction_per_fs"] == 0.01
         result = sim.run()
         assert result.steps_completed == 5
         assert (tmp_path / "trajectory.traj").is_file()
@@ -162,6 +164,42 @@ class TestMTSConfig:
         assert sim.slow_calc is not None
         assert sim.run()["steps_completed"] == 2
 
+    def test_unknown_mts_key_raises(self, emt_builder) -> None:
+        from goal.md.mts.ipi_adapter import MTSSimulation
+
+        cfg = _compose(
+            "md/mts/simulations/mts_respa",
+            overrides=[
+                "~fast_calculator",
+                "+fast_calculator={type: test_emt}",
+                "slow_calculator=null",
+                "+mts.time_step_fs=0.5",
+            ],
+        )
+        with pytest.raises(TypeError, match="time_step_fs"):
+            MTSSimulation.from_config(cfg)
+
+    def test_xtb_gfn1_config_runs_with_tblite_slow_level(self, emt_builder, tmp_path) -> None:
+        pytest.importorskip("tblite.ase")
+        from goal.md.mts.ipi_adapter import MTSSimulation
+
+        cfg = _compose(
+            "md/mts/simulations/mts_xtb_gfn1",
+            overrides=[
+                "~fast_calculator",
+                "+fast_calculator={type: test_emt}",
+                "molecule.smiles=O",
+                "mts.total_steps=2",
+                f"mts.output_dir={tmp_path}",
+            ],
+        )
+        sim = MTSSimulation.from_config(cfg)
+        assert type(sim.slow_calc).__name__ == "TBLite"
+        assert sim.slow_calc.parameters["method"] == "GFN1-xTB"
+        result = sim.run()
+        assert result["steps_completed"] == 2
+        assert result["mts_stats"]["slow_calculator_calls"] == 3
+
 
 class TestLangevinUnits:
     def test_fs_arguments_are_converted(self) -> None:
@@ -192,7 +230,7 @@ class TestLangevinUnits:
     def test_template_is_one_femtosecond(self) -> None:
         import hydra
 
-        cfg = OmegaConf.load(Path(CONFIGS_DIR, "md/dynamics/langevin.yaml"))
+        cfg = OmegaConf.load(Path(CONFIGS_DIR, "md/dynamics/langevin_ase.yaml"))
         dyn = hydra.utils.instantiate(cfg, atoms=molecule("H2O"))
         assert dyn.dt == pytest.approx(1.0 * units.fs)
 

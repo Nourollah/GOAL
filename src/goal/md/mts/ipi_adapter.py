@@ -466,8 +466,7 @@ class MTSSimulation:
         atoms = MoleculeFactory.from_config(cfg.molecule, default_key="from_smiles")
 
         # MTS config
-        mts_raw = dict(cfg.get("mts", {}))
-        mts_cfg = MTSConfig(**{k: v for k, v in mts_raw.items() if hasattr(MTSConfig, k)})
+        mts_cfg = MTSConfig(**dict(cfg.get("mts", {})))  # unknown keys raise TypeError
 
         if cfg.get("ml_calculator") is not None and cfg.get("base_calculator") is not None:
             # Online-learning mode (online_learner.yaml): the force provider

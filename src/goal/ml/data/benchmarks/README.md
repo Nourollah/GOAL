@@ -58,6 +58,7 @@ print(graph.forces.shape)      # (21, 3) in eV/Å
 | **rMD17** | ~10k/mol | H, C, N, O | energy, forces | ~100 MB | PyG |
 | **ANI-1** | ~20M | H, C, N, O | energy, forces | ~30 GB | PyG |
 | **ANI-1x** | ~5M | H, C, N, O | energy, forces | ~7 GB | PyG |
+| **GMD** | 282k frames, 140 molecules | H, C, N, O | energy, forces | per task, a few hundred MB | Hugging Face Hub (`dataset_type: gmd`) |
 | **QM9** | 134k | H, C, N, O, F | 19 properties | ~1 GB | PyG |
 | **SPICE** | ~1.1M | H, C, N, O, F, P, S, Cl, Br, I | energy, forces | ~15 GB | Zenodo |
 

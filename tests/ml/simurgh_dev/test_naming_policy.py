@@ -43,6 +43,7 @@ SCOPE: tuple[str, ...] = (
     "scripts/simurgh_dev/**/*",
     "docs/ml/models/simurgh-dev.md",
     ".agents/skills/goal-simurgh/**/*",
+    ".claude/skills/goal-simurgh/**/*",
 )
 
 

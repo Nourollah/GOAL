@@ -239,8 +239,6 @@ def compute_fragment_index(
         labels = _rdkit_labels(
             positions=positions,
             atomic_numbers=atomic_numbers,
-            bond_src=src,
-            bond_dst=dst,
             scheme=scheme,
             charge=charge,
             periodic=bool(pbc is not None and bool(pbc.any())),
@@ -453,8 +451,6 @@ def _renumber(labels: torch.Tensor) -> torch.Tensor:
 def _rdkit_labels(
     positions: torch.Tensor,
     atomic_numbers: torch.Tensor,
-    bond_src: torch.Tensor,
-    bond_dst: torch.Tensor,
     scheme: str,
     charge: int,
     periodic: bool,
@@ -463,21 +459,48 @@ def _rdkit_labels(
 ) -> torch.Tensor:
     """Fragment labels from an rdkit-perceived molecule.
 
-    Perception (``rdDetermineBonds``, the xyz2mol algorithm) depends only
-    on the connectivity and the total charge, so the result is cached on
-    the bond graph: an MD trajectory whose topology never changes pays
-    for perception exactly once, not once per frame.
+    Perception (``rdDetermineBonds``, the xyz2mol algorithm) assigns
+    connectivity from the coordinates, then bond orders from the
+    connectivity and the total charge.  The cheap first step runs on every
+    frame and keys the cache; the expensive second one runs once per
+    topology, so an MD trajectory whose topology never changes pays for it
+    once, not once per frame.  (Keying on the flat ``covalent_cutoff`` bond
+    graph instead missed the cache whenever a geminal H-H pair, about
+    1.78 A apart, crossed 1.8 A, although the perception had not changed.)
     """
     n_atoms: int = int(positions.shape[0])
     elements: tuple[int, ...] = tuple(int(z) for z in atomic_numbers.tolist())
 
-    # Cache key: same elements + same bonds ⇒ same perception ⇒ same
-    # fragmentation, whatever the coordinates did in between.
-    pairs = torch.stack([bond_src, bond_dst], dim=-1) if bond_src.numel() else None
-    bond_key: tuple[tuple[int, int], ...] = (
-        tuple(sorted({(min(a, b), max(a, b)) for a, b in pairs.tolist()}))
-        if pairs is not None
-        else ()
+    from rdkit import Chem
+    from rdkit.Chem import rdDetermineBonds
+
+    # Perception writes its complaints straight to stderr from C++, where
+    # neither ``warnings`` nor logging can reach them.  On a corpus with a
+    # non-trivial failure rate (measured: ~7% of OMol25 rows) that is both
+    # a flood of unattributable lines and a real cost — 300 structures/s
+    # became 70 with the logger live.  Nothing is lost by blocking it:
+    # a failure still raises, and ``compute_fragment_index`` reports the
+    # exception message through ``_warn_once``.  ``BlockLogs`` restores
+    # whatever state was there on exit, so a caller who wants rdkit's
+    # chatter elsewhere keeps it.
+    from rdkit.rdBase import BlockLogs
+
+    table = Chem.GetPeriodicTable()
+    coords = positions.detach().to(torch.float64).tolist()
+    block: str = f"{n_atoms}\n\n" + "\n".join(
+        f"{table.GetElementSymbol(z)} {x:.8f} {y:.8f} {zc:.8f}"
+        for z, (x, y, zc) in zip(elements, coords)
+    )
+    mol = Chem.MolFromXYZBlock(block)
+    if mol is None:
+        raise ValueError("rdkit could not read the structure as an XYZ block.")
+    with BlockLogs():
+        rdDetermineBonds.DetermineConnectivity(mol)
+
+    # Cache key: same elements + same connectivity + same charge ⇒ same
+    # bond orders ⇒ same fragmentation, whatever the coordinates did.
+    bond_key: tuple[tuple[int, int], ...] = tuple(
+        sorted((b.GetBeginAtomIdx(), b.GetEndAtomIdx()) for b in mol.GetBonds())
     )
     key = (scheme, int(charge), elements, bond_key, smarts, keep_groups)
     cached = _LABEL_CACHE.get(key)
@@ -493,31 +516,8 @@ def _rdkit_labels(
             f"convention."
         )
 
-    from rdkit import Chem
-    from rdkit.Chem import rdDetermineBonds
-
-    table = Chem.GetPeriodicTable()
-    coords = positions.detach().to(torch.float64).tolist()
-    block: str = f"{n_atoms}\n\n" + "\n".join(
-        f"{table.GetElementSymbol(z)} {x:.8f} {y:.8f} {zc:.8f}"
-        for z, (x, y, zc) in zip(elements, coords)
-    )
-    mol = Chem.MolFromXYZBlock(block)
-    if mol is None:
-        raise ValueError("rdkit could not read the structure as an XYZ block.")
-    # Perception writes its complaints straight to stderr from C++, where
-    # neither ``warnings`` nor logging can reach them.  On a corpus with a
-    # non-trivial failure rate (measured: ~7% of OMol25 rows) that is both
-    # a flood of unattributable lines and a real cost — 300 structures/s
-    # became 70 with the logger live.  Nothing is lost by blocking it:
-    # a failure still raises, and ``compute_fragment_index`` reports the
-    # exception message through ``_warn_once``.  ``BlockLogs`` restores
-    # whatever state was there on exit, so a caller who wants rdkit's
-    # chatter elsewhere keeps it.
-    from rdkit.rdBase import BlockLogs
-
     with BlockLogs():
-        rdDetermineBonds.DetermineBonds(mol, charge=int(charge))
+        rdDetermineBonds.DetermineBondOrders(mol, charge=int(charge))
 
     # Atoms that must stay together, matched once and used twice: to veto
     # cuts inside a group, and to merge labels afterwards.

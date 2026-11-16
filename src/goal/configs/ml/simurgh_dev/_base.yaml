@@ -13,8 +13,8 @@
 # Defaults are the proposed model B0: ACE core (nu = 3, L = 2 messages,
 # lmax_sh 3, 2 layers, 5 Å, 128 channels, 8 Bessel functions), phi_ab pair
 # line with a ZBL wall, pair-conditioned radial weights, attention gate,
-# PGS readout; Huber loss after a 5-epoch energy-only warm-up, AMSGrad,
-# EMA, float32.  Every optional capability defaults to off.
+# PGS readout; MSE loss after a 5-epoch warm-up at E:F = 1:1, AMSGrad,
+# EMA, trainer safeguards, float32.  Every optional capability defaults to off.
 #
 # goal-train derives `elements`, `avg_num_neighbors` (when null) and
 # `scale: force_rms` (RMS of the training force components) from the
@@ -54,11 +54,8 @@ paths:
 # test_* every epoch but never selected on.
 # ─────────────────────────────────────────────────────
 data:
-  dataset_type: trajectory
-  train_dir: ${paths.data_dir}/GMD/FragmentDuplication/Training
-  val_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestID
-  test_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestOOD
-  root: ${paths.data_dir}/GMD/FragmentDuplication
+  dataset_type: gmd
+  root: ${paths.data_dir}/GMD # graph cache (raw files: the Hugging Face cache)
   monitor_test_during_training: true
   cutoff: 5.0 # neighbour list; must equal model.backbone.cutoff
   batch_size: 48
@@ -103,7 +100,7 @@ model:
     avg_num_neighbors: null # derived from the training set by goal-train
     node_norm: none # none | rms (Muon arm only)
     kernels: auto # auto | cuequivariance | e3nn
-    dtype: float32 # float64 only in stage 11, on A100/H100/H200
+    dtype: float32 # float64 only in stage 13, on A100/H100/H200
     radial:
       low_rank: null # null | 1-4
       per_layer: null # null | [mlp, linear] | [linear, mlp] (stage 4; the source order is ambiguous)
@@ -235,7 +232,11 @@ trainer:
 # TRAINING RECIPE (WP4)
 # ─────────────────────────────────────────────────────
 training:
-  gradient_clip: 10.0
+  gradient_clip: 10.0 # clips the gradient, not the AMSGrad step
+  safeguards: # trainer-side divergence guards; none of them changes the model
+    lr_warmup_steps: 1000 # lr rises linearly over the first 1000 optimiser steps
+    weight_ramp_steps: 1000 # a stage that raises a loss weight ramps it in over 1000 steps
+    skip_nonfinite: true # a step with a NaN or inf gradient is skipped, weights untouched
   checkpoint_dir: ${paths.output_dir}/checkpoints
   compile_model: false
   compile:
@@ -249,7 +250,10 @@ training:
     cudnn_deterministic: false
   optimizer:
     name: amsgrad # amsgrad | muon | block_rms_adam (stage 1 decides)
-    lr: 0.01
+    # 5e-3, not the brief's 0.01: at 0.01 a GMD FF run (seed 42) diverged in the
+    # warm-up with no weight change: AMSGrad moves every element ~lr per step, coherent
+    # steps doubled the weight norms in 120 steps and the product basis did the rest.
+    lr: 0.005
     weight_decay: 5.0e-7 # decoupled; not on embeddings or pair-line coefficients
     muon_lr: 0.02 # muon only
     min_lr: 1.0e-6
@@ -264,32 +268,41 @@ training:
   aux: # training-only objectives; goal-train copies them to model.backbone.aux
     denoise: false # corrupted copies + noise head (rung D1; arXiv:2510.22123)
     hessian_distill: false # teacher Hessian rows (loss and label format only)
-  # warmup_huber: 5 energy-only epochs, then E:F = 1:100.  The separate arm
+  # Warm-up: 5 epochs at E:F = 1:1 (energy 100, forces 100), then E:F = 1:100.
+  # The force weight is 100 in every stage; at the switch only the energy weight
+  # changes, and it goes down.  Two schedules diverged to NaN on GMD: an
+  # energy-only warm-up (forces 0: the unchecked energy surface ran away to
+  # ~1e14 eV/atom within 2-4 epochs) and a warm-up at forces 1 (the jump to 100
+  # outran AMSGrad's second moment, the first updates were 2-3 lr, and the
+  # unnormalised product basis turned that into NaN within 4 steps).  Without a
+  # warm-up the energy gradient (with Huber: 1000x weaker than forces at 1:100) never
+  # learns the binding energy over the isolated-atom references.  A stage that
+  # raises a weight ramps it in (safeguards.weight_ramp_steps).  The separate arm
   # warmup_huber_switch adds a last stage (final 20% of epochs) with the
   # energy weight raised 400x and lr 2.5e-4, e.g.
   #   - {name: switch, epochs: null, lr: 2.5e-4, loss_weights: {energy: 400.0, forces: 100.0}}
   # after a finite "main" stage.
   stages:
-    - name: "energy_only"
+    - name: "warmup"
       epochs: 5
       loss_weights:
-        energy: 1.0
-        forces: 0.0
+        energy: 100.0
+        forces: 100.0
     - name: "main"
       epochs: null
       loss_weights:
         energy: 1.0
         forces: 100.0
-  # Huber on per-atom energy (delta 1 meV/atom) and on the per-atom
-  # force-error norm (delta 10 meV/Å); arms: fn mse | l1.
+  # MSE on per-atom energy and on the per-atom force-error norm (the default
+  # since 2026-11-16: on GMD Duplication, seed 42, it cut the TestID energy MAE
+  # from 19.7 to 1.1 meV/atom against Huber at delta 1 meV/atom, forces equal).
+  # Arms: fn huber (with delta) | l1.
   losses:
     - name: energy
-      fn: huber
-      delta: 0.001
+      fn: mse
       weight: 1.0
     - name: forces
-      fn: huber
-      delta: 0.010
+      fn: mse
       error: norm
       normalize_by_n_atoms: false # mean over atoms; true = per structure first
       weight: 100.0
@@ -323,6 +336,11 @@ callbacks:
   model_summary:
     _target_: lightning.pytorch.callbacks.RichModelSummary
     max_depth: 1
+  blowup_monitor: # logs per-layer feature size and update size; warns on a blow-up
+    _target_: goal.ml.training.callbacks.monitor.BlowupMonitor
+    modules: 'layers\.\d+(\.product)?$' # interaction outputs and product bases
+    max_feature: 1.0e+3 # healthy GMD runs peak at 35 (product basis, epoch 0)
+    max_update: 1.0 # median RMS(update)/lr; healthy <= 0.21, 2.1 when a divergence starts
 
 logger:
   csv:

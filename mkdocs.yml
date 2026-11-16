@@ -98,6 +98,7 @@ nav:
       - Installation: getting-started/installation.md
       - Project structure: getting-started/project-structure.md
       - Notebooks: getting-started/notebooks.md
+      - Agent skills: getting-started/agent-skills.md
   - ML (goal.ml):
       - ml/index.md
       - Training:

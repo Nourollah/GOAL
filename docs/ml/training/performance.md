@@ -13,6 +13,7 @@ This page covers the settings that change how fast, and how stably, a GOAL model
 | Precision | `trainer.precision` | `"32"` | `bf16-mixed` (with care), `64-true` for tests |
 | Gradient accumulation | `trainer.accumulate_grad_batches` | `1` | `2`–`8` when memory limits batch size |
 | Gradient clipping | `training.gradient_clip` | `10.0` | `1.0` if the early loss explodes |
+| Divergence safeguards | `training.safeguards.{lr_warmup_steps,weight_ramp_steps,skip_nonfinite}` | off (`simurgh_dev`: `1000`, `1000`, `true`) | on for a model that diverges |
 | EMA | `training.ema.{enabled,decay}` | `true`, `0.99` | `0.999` for long runs |
 | SWA | `callbacks.swa` (commented out) | off | alternative to EMA |
 | Sanity validation | `trainer.num_sanity_val_steps` | `2` | `0` for faster restarts |
@@ -130,6 +131,35 @@ Clipping is applied by `GOALModule.on_before_optimizer_step`, using Lightning's 
 
 > [!WARNING]
 > Under FSDP, norm clipping is rejected by Lightning, so set `training.gradient_clip=0`. Under DeepSpeed it is silently skipped. Move it to `trainer.gradient_clip_val` there and set `training.gradient_clip=0`. See [Distributed training](distributed.md).
+
+## Divergence safeguards
+
+```yaml
+training:
+  safeguards: # all off when the block is absent; unknown keys raise
+    lr_warmup_steps: 1000 # lr rises linearly over the first 1000 optimiser steps
+    weight_ramp_steps: 1000 # a stage that raises a loss weight ramps it in over 1000 steps
+    skip_nonfinite: true # a step with a NaN or inf gradient is skipped
+```
+
+Clipping limits the gradient, not the step. An Adam-type optimiser divides each step by its running gradient scale, so a gradient that is large relative to that history still gives a large step after clipping. These guards act on the step instead, and none of them changes the model.
+
+- `lr_warmup_steps` = $n$ multiplies the learning rate by $(t+1)/n$ at optimiser step $t < n$. The factor is applied around `optimizer.step()` only, so schedulers and a stage `lr` never see it, and `LearningRateMonitor` shows the unscaled rate.
+- `weight_ramp_steps` raises a loss weight that a new stage increases linearly from its previous-stage value over that many steps. A lowered weight applies at once. The ramp position is computed from `global_step`, so it survives a resume. Why it matters: AMSGrad's second moment averages over about 1000 steps ($\beta_2 = 0.999$). When a `simurgh_dev` run raised its force weight from 1 to 100 in one step, the median update was 2–3 times the learning rate for every parameter group (about 0.05 normally), and the run reached NaN 4 steps later.
+- `skip_nonfinite` drops every gradient of a step whose gradient norm is NaN or inf, so the weights and the optimiser state stay as they were. It warns with the step number. The check runs after the DDP all-reduce, so every rank skips together. After 100 skipped steps in a row (`GOALModule.MAX_SKIPS_IN_ROW`) the weights themselves have blown up, since every batch gives a non-finite gradient, and training stops. Skipping cannot undo a blow-up whose weights are still finite; watch the monitor below for that.
+
+The `BlowupMonitor` callback (`goal.ml.training.callbacks.monitor`, enabled in the `simurgh_dev` configs) watches for the early signs:
+
+```yaml
+callbacks:
+  blowup_monitor:
+    _target_: goal.ml.training.callbacks.monitor.BlowupMonitor
+    modules: 'layers\.\d+$' # regex on backbone submodule names
+    max_feature: 1.0e+3 # warn when a watched output exceeds this
+    max_update: 1.0 # warn when the median RMS(update)/lr exceeds this
+```
+
+It logs `monitor/update_median` and `monitor/update_max` (RMS of each parameter tensor's update divided by its learning rate) and `monitor/feature/<module>` (largest absolute output of each watched submodule), and warns once when a threshold is crossed. In the `simurgh_dev` divergence the median update passed 2 two steps before the features blew up, while in healthy runs it stayed below 0.21.
 
 ## Exponential moving average (EMA)
 

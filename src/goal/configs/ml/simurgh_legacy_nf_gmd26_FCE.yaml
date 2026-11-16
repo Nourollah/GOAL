@@ -118,13 +118,11 @@ paths:
 #     test_dir:  /path/test/          # optional
 # ─────────────────────────────────────────────────────
 data:
-  dataset_type: trajectory
+  dataset_type: gmd
 
-  # Mode 4 — directory-based per-split (GMD directory layout)
-  train_dir: ${paths.data_dir}/GMD/FragmentChainExtension/Training
-  val_dir: ${paths.data_dir}/GMD/FragmentChainExtension/TestID
-  test_dir: ${paths.data_dir}/GMD/FragmentChainExtension/TestOOD
-  root: ${paths.data_dir}/GMD/FragmentChainExtension # for logging
+  # GMD (dataset_type: gmd): the paper's splits, val = TestID, test = TestOOD
+  task: fragment_chain_extension # GMD from the Hugging Face Hub, downloaded on first use
+  root: ${paths.data_dir}/GMD # graph cache (raw files: the Hugging Face cache)
 
   # ── MONITOR THE OOD SET DURING TRAINING ──────────────────────────
   # true → the test split above also runs through the validation loop
@@ -151,15 +149,13 @@ data:
   cutoff: 8.0
 
   # DataLoader
-  batch_size: 48 # structures per mini-batch; 8–32 typical for atomistics
+  batch_size: 16 # structures per mini-batch; 8–32 typical for atomistics
   num_workers: 0 # 0 = single-process (required for Python 3.14 / some envs)
   pin_memory: false # true when using CUDA; false for CPU
   persistent_workers: false # true only when num_workers > 0
   prefetch_factor: null # null = PyTorch default; set 2–4 with num_workers > 0
 
   # Dataset kwargs forwarded to the dataset class (not used by DataModule itself)
-  energy_key: energy # key in ASE atoms.info / ExtXYZ properties
-  forces_key: forces # key in ASE atoms.arrays / ExtXYZ arrays
 
   # Custom label keys (MACE/FairChem-style) — overrides the *_key lines above.
   # Missing configured key → clear error listing the keys present in the file.

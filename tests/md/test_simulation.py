@@ -41,9 +41,10 @@ class TestSimulationConfig:
 
         cfg = SimulationConfig()
         assert cfg.steps == 1000
-        assert cfg.temperature_K == 300.0
-        assert cfg.timestep_fs == 1.0
+        assert cfg.chunk_size == 100
         assert cfg.log_interval == 10
+        # temperature and timestep belong to the dynamics section now
+        assert not hasattr(cfg, "temperature_K") and not hasattr(cfg, "timestep_fs")
 
 
 # ---------------------------------------------------------------------------

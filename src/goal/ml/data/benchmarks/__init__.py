@@ -25,3 +25,4 @@ DATASET_REGISTRY.register_lazy("ani1", "goal.ml.data.benchmarks.ani1:ANI1Dataset
 DATASET_REGISTRY.register_lazy("ani1x", "goal.ml.data.benchmarks.ani1:ANI1Dataset")
 DATASET_REGISTRY.register_lazy("qm9", "goal.ml.data.benchmarks.qm9:QM9Dataset")
 DATASET_REGISTRY.register_lazy("spice", "goal.ml.data.benchmarks.spice:SPICEDataset")
+DATASET_REGISTRY.register_lazy("gmd", "goal.ml.data.benchmarks.gmd:GMDDataset")

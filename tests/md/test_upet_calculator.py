@@ -12,7 +12,15 @@ from goal.md.core import calculator_factory as cf
 
 def test_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cf, "HAS_UPET", False)
+    monkeypatch.setattr(cf, "_UPET_IMPORT_ERROR", None)
     with pytest.raises(GOALCalculatorNotFound, match="pip install upet"):
+        cf.CalculatorFactory.create("upet", model="pet-mad-s")
+
+
+def test_installed_but_broken_import_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cf, "HAS_UPET", False)
+    monkeypatch.setattr(cf, "_UPET_IMPORT_ERROR", RuntimeError("TorchScript"))
+    with pytest.raises(GOALCalculatorNotFound, match="failed to import.*TorchScript"):
         cf.CalculatorFactory.create("upet", model="pet-mad-s")
 
 

@@ -115,6 +115,19 @@ class TestTopKPool:
         assert 0.5 in pool_values, "New best 0.5 should be in the pool"
         assert len(manager.top_k_pool) == 5
 
+    def test_non_finite_metric_never_ranked(self, tmp_path: Path) -> None:
+        """A diverged epoch (NaN or inf metric) is not saved as a 'best' checkpoint."""
+        manager = _make_manager(
+            tmp_path,
+            top_k={"enabled": True, "k": 5, "metric": "val_forces/forces_mae", "mode": "min"},
+            interval={"enabled": False},
+            last={"enabled": False},
+        )
+        _run_epochs(manager, [float("nan"), 0.9, float("inf"), 0.8], tmp_path)
+
+        assert sorted(v for v, _ in manager.top_k_pool) == [0.8, 0.9]
+        assert len(list(tmp_path.glob("best_*.ckpt"))) == 2
+
     def test_worse_than_all_not_saved(self, tmp_path: Path) -> None:
         """A checkpoint worse than all k-best is not saved to disk."""
         # Fill pool with values 0.1..0.5 (all better than 0.9)

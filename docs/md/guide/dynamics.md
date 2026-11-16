@@ -160,7 +160,7 @@ dyn = DynamicsFactory.create("langevin_ase", atoms, timestep=0.5 * units.fs,
 | `**kwargs` | | Forwarded to `Langevin` (`logfile`, `trajectory`, `rng`, …). |
 
 > [!WARNING]
-> **Units.** The bare `timestep` / `friction` arguments go to ASE unchanged, exactly like `ase.md.langevin.Langevin`: `timestep=1.0` means 1 ASE time unit ≈ **10.18 fs**, which is unstable for any molecule with hydrogens. Use `timestep_fs` / `friction_per_fs`, or multiply / divide by `units.fs`. The template [`src/goal/configs/md/dynamics/langevin.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/dynamics/langevin.yaml) uses `timestep_fs: 1.0` and `friction_per_fs: 0.05` (before October 2026 it passed `timestep: 1.0` raw).
+> **Units.** The bare `timestep` / `friction` arguments go to ASE unchanged, exactly like `ase.md.langevin.Langevin`: `timestep=1.0` means 1 ASE time unit ≈ **10.18 fs**, which is unstable for any molecule with hydrogens. Use `timestep_fs` / `friction_per_fs`, or multiply / divide by `units.fs`. The template [`src/goal/configs/md/dynamics/langevin_ase.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/dynamics/langevin_ase.yaml) uses `timestep_fs: 1.0` and `friction_per_fs: 0.05` (before October 2026 it passed `timestep: 1.0` raw).
 
 On ASE ≥ 3.28, `fixcm=True` emits a `FutureWarning`: ASE's in-integrator centre-of-mass fix does not sample NVT exactly. The deviation is small for large systems but noticeable for small molecules. The ASE-recommended replacement is shown below:
 

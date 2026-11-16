@@ -171,25 +171,19 @@ mts:                      # -> MTSConfig; unknown keys are ignored
 
 Calculator blocks use `type:` (or `key:`) for the backend. Every other key goes to the builder, so do **not** put `_target_`/`_convert_` in these blocks.
 
-> [!WARNING]
-> **The CLI does not currently see this structure.** The shipped config has no `# @package _global_` header. Hydra therefore nests a primary config loaded from `md/mts/simulations/` under `md.mts.simulations`, and `MTSSimulation.from_config` finds no `molecule`/`fast_calculator` at the top level. The default `slow_calculator` in `mts_respa.yaml` is [ORCA](../calculators/orca.md), which also needs a local ORCA installation and an absolute `orca_path`. Until the header is fixed, compose the config yourself and pass the sub-node. The example below also swaps the slow level for `tblite`, so it runs in a `-full` environment without ORCA:
->
-> ```python
-> from pathlib import Path
-> from hydra import compose, initialize_config_dir
-> from goal.md.mts import MTSSimulation
->
-> with initialize_config_dir(config_dir=str(Path("configs").resolve()), version_base="1.3"):
->     cfg = compose("md/mts/simulations/mts_respa", overrides=[
->         "md.mts.simulations.fast_calculator.checkpoint=models/ethanol.simurgh",
->         "md.mts.simulations.mts.total_steps=500",
->     ])
-> sim_cfg = cfg.md.mts.simulations
-> # Replace (not merge) the ORCA block. A Hydra "++key={...}" override would MERGE
-> # and leave ORCA-only keys such as orca_path behind.
-> sim_cfg.slow_calculator = {"type": "tblite", "method": "GFN2-xTB"}
-> result = MTSSimulation.from_config(sim_cfg).run()
-> ```
+The default `slow_calculator` in `mts_respa.yaml` is [ORCA](../calculators/orca.md), which needs a local ORCA installation and an absolute `orca_path`. [`mts_xtb_gfn1.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/mts/simulations/mts_xtb_gfn1.yaml) uses [GFN1-xTB through tblite](../calculators/tblite.md) as the slow level instead, so it runs in any `-full` environment. Its fast level is SIMURGH through [`goal_model_or_untrained.yaml`](../calculators/goal-model.md#without-a-checkpoint): a trained model when you pass `fast_calculator.checkpoint`, otherwise an untrained one. A Hydra group override swaps in a foundation model:
+
+```bash
+pixi run -e cuda-full goal-simulate-mts --config-name md/mts/simulations/mts_xtb_gfn1   # untrained SIMURGH
+pixi run -e cuda-full goal-simulate-mts --config-name md/mts/simulations/mts_xtb_gfn1 \
+    fast_calculator.checkpoint=models/ethanol.simurgh
+# UPET fast level
+pixi run -e cuda-full goal-simulate-mts --config-name md/mts/simulations/mts_xtb_gfn1 \
+    md/calculators@fast_calculator=upet fast_calculator.version=1.5.0
+```
+
+> [!NOTE]
+> For small molecules xTB is cheaper per call than the ML models. On ethanol, GFN1-xTB took 2.5 ms per call against 58 ms for `simurgh_dev` and 126 ms for `pet-mad-s` on a shared GPU, so this pairing tests the MTS machinery and produces the xTB–ML force difference; it does not save time. MTS saves time when the slow level costs much more than the fast one, such as DFT.
 
 ### Online learning from a config
 
@@ -285,7 +279,7 @@ for frame in reference_frames:
 
 Switch events are logged at `INFO` level by `goal.md.mts.dual_calculator.qm_ml_learner` (disable with `log_switch_events=False`). Fine-tuning failures are logged as `WARNING`s and do not stop the run, so watch the log.
 
-For RESPA, `result["mts_stats"]` reports the inner/outer timesteps and ratio. The call counters read a `calculation_count` attribute that most ASE calculators don't have, so they usually show `"N/A"`.
+For RESPA, `result["mts_stats"]` reports the inner/outer timesteps, the ratio and how many times each calculator was called.
 
 ## Known limitations
 

@@ -1,0 +1,37 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH combined base (2026-11-16): the base with MFC at weight 0.1 plus the
+# arms that helped in the Duplication screening, each with the settings of its
+# screening run (MSE, s06_loss_mse, is the default loss since then):
+#   s09_mfc_violation_weighting, s09_pgs_beta_9.2, s05_radial_env_conditioned,
+#   s02_correlation5_ladder_reduced, s06_weight_decay_1e-3.
+#
+#   goal-train --config-name ablations/simurgh_dev/combined_base seed=42
+# Another task: replace the first default (e.g. /simurgh_dev_gmd26_FF).
+########################################################
+
+defaults:
+  - /simurgh_dev_gmd26_FD
+  - _self_
+
+task_name: "simurgh_dev_abl_combined_base"
+experiment:
+  name: "simurgh_dev_abl_combined_base"
+  description: "SIMURGH combined base: MFC 0.1, violation weighting, PGS beta 9.2, environment-conditioned radial, correlation 5 (ladder_reduced), weight decay 1e-3"
+
+model:
+  backbone:
+    correlation: 5
+    product_basis: ladder_reduced
+    radial:
+      env_conditioned: true
+    readout:
+      pgs_beta: 9.2
+    mfc:
+      weight: 0.1
+      window_weighting: violation
+
+training:
+  optimizer:
+    weight_decay: 1.0e-3

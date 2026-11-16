@@ -381,3 +381,25 @@ def test_ddp_static_graph_two_processes() -> None:
     results = manager.dict()
     mp.spawn(_ddp_worker, args=(2, port, results), nprocs=2, join=True)
     assert dict(results) == {0: True, 1: True}
+
+
+def test_mfc_windows_include_the_ece_line() -> None:
+    """pair_line phi+ece: windows get the ECE atomic split e_i = 1/2 sum_j (eps_ij + eps_ji)
+    as the full structure does, so a model whose whole range (one ACE layer, one ECE
+    layer: about 3 r_c) fits inside the buffer has zero MFC."""
+    from tests.ml.simurgh_dev.test_ece import ECE
+
+    buffer = 16.0
+    cfg = {"enabled": True, "start_epoch": 0, "warmup_epochs": 1, "buffer": buffer}
+    model = build(
+        num_interactions=1,
+        pair_line={"mode": "phi+ece"},
+        ece={**ECE, "num_mp_layers": 1},
+        mfc=cfg,
+    )
+    model.mfc.principal_prob = 1.0
+    model = awake(model).train()
+    terms = mfc_terms(model, batch_of(alkane(40)))
+    assert float(terms["mfc_valid_fraction"]) > 0
+    assert float(terms["mfc_energy"]) < 1e-20
+    assert float(terms["mfc_core_force"]) < 1e-20

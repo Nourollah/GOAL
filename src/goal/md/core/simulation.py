@@ -334,11 +334,7 @@ class Simulation:
         from goal.md.core.calculator_factory import CalculatorFactory
         from goal.md.core.molecule_factory import MoleculeFactory
 
-        if (
-            cfg.get("molecule") is None
-            or cfg.get("calculator") is None
-            or cfg.get("dynamics") is None
-        ):
+        if cfg.get("molecule") is None or cfg.get("calculator") is None:
             raise ValueError(
                 "A simulation config needs top-level 'molecule:', 'calculator:', and the optional 'dynamics:' "
                 f"sections; got top-level keys {sorted(cfg.keys())}.  A config "
@@ -350,7 +346,7 @@ class Simulation:
         calculator = CalculatorFactory.from_config(cfg.calculator, default_key="goal_model")
 
         # Dynamics Parameters
-        dyn_cfg = dict(cfg.get("dynamics", {}))
+        dyn_cfg = dict(cfg.get("dynamics") or {})  # optional: langevin_ase defaults
 
         # Make a copy of the dynamics config to avoid changes to the original config and remove keys Hydra reserves for ``instantiate``.
         dynamics_cfg: dict[str, typing.Any] = {

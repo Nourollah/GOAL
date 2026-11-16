@@ -101,6 +101,32 @@ class TestCalculatorFactory:
         with pytest.raises(ValueError, match="not registered"):
             CalculatorFactory.create("nonexistent_calc_xyz")
 
+    def test_goal_model_needs_checkpoint_or_model_config(self) -> None:
+        from goal.md.core.calculator_factory import CalculatorFactory
+
+        with pytest.raises(ValueError, match="checkpoint.*model_config"):
+            CalculatorFactory.create("goal_model")
+
+    def test_goal_model_or_untrained_template_builds_without_checkpoint(self) -> None:
+        """No checkpoint: the template builds an untrained model that gives finite forces."""
+        from hydra import compose, initialize_config_dir
+
+        from goal import CONFIGS_DIR
+        from goal.md.core.calculator_factory import CalculatorFactory
+        from goal.md.core.molecule_factory import MoleculeFactory
+
+        with initialize_config_dir(config_dir=CONFIGS_DIR, version_base="1.3"):
+            section = compose("md/calculators/goal_model_or_untrained").md.calculators
+        assert section.checkpoint is None
+        section.device = "cpu"
+        calc = CalculatorFactory.from_config(section)  # outside a Hydra app
+        atoms = MoleculeFactory.create("from_smiles", smiles="CCO")
+        atoms.calc = calc
+        forces = atoms.get_forces()
+        assert forces.shape == (len(atoms), 3)
+        assert np.isfinite(forces).all()
+        assert np.isfinite(atoms.get_potential_energy())
+
     def test_custom_registration(self) -> None:
         """Test custom calculators can be registered with decorator."""
         from goal.md.core.calculator_factory import (

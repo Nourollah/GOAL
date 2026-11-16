@@ -20,7 +20,8 @@
 | `test_step(batch, batch_idx)` | like validation, but with base loss weights |
 | `configure_optimizers()` | AdamW with equivariant / standard parameter groups, plus the configured scheduler |
 | `configure_model()` | optional `torch.compile` of the backbone |
-| `on_before_optimizer_step(optimizer)` | gradient-norm clipping (`training.gradient_clip`) |
+| `optimizer_step(...)` | scales the learning rate during `training.safeguards.lr_warmup_steps` |
+| `on_before_optimizer_step(optimizer)` | skips a step with a non-finite gradient (`training.safeguards.skip_nonfinite`), then gradient-norm clipping (`training.gradient_clip`) |
 | `on_train_batch_end(...)` | EMA update |
 | `on_save_checkpoint` / `on_load_checkpoint` | persist and restore the EMA shadow (`goal_ema`) |
 

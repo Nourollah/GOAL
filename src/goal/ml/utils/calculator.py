@@ -279,17 +279,17 @@ def apply_ema_weights(module: torch.nn.Module, raw: typing.Mapping[str, typing.A
     return applied
 
 
-def _build_module_from_ckpt(
-    path: str | Path,
-    device: torch.device,
-    use_ema: bool,
-) -> LoadedCheckpoint:
-    """Load a GOALModule from a Lightning checkpoint.
+def config_cutoff(cfg: typing.Any) -> float:
+    """Neighbour-list cutoff of a training config (``data.cutoff``, else the backbone's)."""
+    return float(cfg.data.get("cutoff", cfg.model.backbone.get("cutoff", 5.0)))
 
-    Reconstructs backbone + head + loss from the saved Hydra config,
-    loads the state dict, and extracts the neighbour-list cutoff.
-    Lightning's ``load_from_checkpoint`` cannot be used directly because
-    backbone/head/loss are excluded from ``save_hyperparameters``.
+
+def build_goal_module(cfg: typing.Any) -> typing.Any:
+    """A ``GOALModule`` (backbone + head + loss) built from a training config,
+    with freshly initialised weights.
+
+    Lightning's ``load_from_checkpoint`` cannot be used for checkpoints
+    because backbone/head/loss are excluded from ``save_hyperparameters``.
 
     All ``goal`` imports happen inside this function so that, when it
     runs under :func:`frozen_source_imports`, the model classes are
@@ -307,13 +307,6 @@ def _build_module_from_ckpt(
     from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY, LOSS_REGISTRY
     from goal.ml.training.loss import CompositeLoss, WeightedLoss
     from goal.ml.training.module import GOALModule
-
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {path}")
-
-    raw = torch.load(str(path), map_location=device, weights_only=False)
-    cfg = raw["hyper_parameters"]["config"]
 
     # Rebuild backbone from saved config
     bb_cls = BACKBONE_REGISTRY.get(cfg.model.backbone.name)
@@ -358,7 +351,23 @@ def _build_module_from_ckpt(
         )
         loss = CompositeLoss([])
 
-    module = GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
+    return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
+
+
+def _build_module_from_ckpt(
+    path: str | Path,
+    device: torch.device,
+    use_ema: bool,
+) -> LoadedCheckpoint:
+    """Load a GOALModule from a Lightning checkpoint: rebuild it from the
+    saved Hydra config, load the state dict, and read the cutoff."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+    raw = torch.load(str(path), map_location=device, weights_only=False)
+    cfg = raw["hyper_parameters"]["config"]
+    module = build_goal_module(cfg)
 
     # Build in the dtype the weights were saved in.  ``load_state_dict``
     # copies into the existing parameters and keeps *their* dtype, so a
@@ -375,15 +384,7 @@ def _build_module_from_ckpt(
     elif not use_ema:
         apply_ema_weights(module, {})  # re-seed module.ema from the raw weights
     logger.info("Loaded %s weights from %s.", weights.upper(), path.name)
-
-    # Extract cutoff from saved config
-    cutoff: float = float(
-        cfg.data.get(
-            "cutoff",
-            cfg.model.backbone.get("cutoff", 5.0),
-        )
-    )
-    return LoadedCheckpoint(module=module, cutoff=cutoff, config=cfg, weights=weights)
+    return LoadedCheckpoint(module=module, cutoff=config_cutoff(cfg), config=cfg, weights=weights)
 
 
 def fragment_options_from_config(config: typing.Any) -> dict[str, typing.Any]:

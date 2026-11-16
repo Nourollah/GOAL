@@ -12,6 +12,7 @@ Compatible with Lightning 2.6+ features including:
 
 from __future__ import annotations
 
+import math
 import re
 import typing
 import warnings
@@ -85,6 +86,8 @@ class GOALModule(L.LightningModule):
         # Exact epoch-level force metrics per split, built on first use
         # (torchmetrics states: not saved in checkpoints).
         self._atomw: nn.ModuleDict = nn.ModuleDict()
+        # Exact epoch-level energy metrics per split, per atom and per molecule.
+        self._energy_exact: nn.ModuleDict = nn.ModuleDict()
 
         # EMA — keeps a shadow copy of weights for evaluation.
         # Lightning 2.6 provides EMAWeightAveraging callback as an alternative,
@@ -146,6 +149,18 @@ class GOALModule(L.LightningModule):
             if bool(config.training.get("strict_stage_labels", False)):
                 raise ValueError(msg)
             warnings.warn(msg, stacklevel=2)
+
+        # Divergence guards, all off by default (``training.safeguards``).
+        self._safeguards: dict[str, typing.Any] = dict(
+            config.training.get("safeguards", None) or {}
+        )
+        unknown_sg = set(self._safeguards) - {
+            "lr_warmup_steps",
+            "weight_ramp_steps",
+            "skip_nonfinite",
+        }
+        if unknown_sg:
+            raise ValueError(f"unknown training.safeguards keys: {sorted(unknown_sg)}")
 
     def configure_model(self) -> None:
         """Hook called before ``configure_optimizers`` (Lightning 2.4+).
@@ -350,6 +365,7 @@ class GOALModule(L.LightningModule):
             set_epoch(epoch)
         stage: typing.Any = self._get_current_stage(epoch)
         if stage is None:
+            self._push_loss_weights()
             return
         self._apply_stage_weights(stage)
         stage_name: str = str(stage.get("name", "?"))
@@ -367,7 +383,49 @@ class GOALModule(L.LightningModule):
             # ``rank_zero_only`` keeps DDP runs quiet.
             from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
-            rank_zero_info(f"[stage] epoch={epoch} → {stage_name!r}  " f"active_weights={active}")
+            rank_zero_info(f"[stage] epoch={epoch} → {stage_name!r}  active_weights={active}")
+        self._ramp_stage_weights(stage)
+        self._push_loss_weights()
+
+    def _push_loss_weights(self) -> None:
+        """Tell a backbone with ``set_loss_weights`` the loss weights now in force (a model
+        with its own label terms, e.g. two energy heads, weights them like the main loss)."""
+        set_weights: typing.Any = getattr(self.backbone, "set_loss_weights", None)
+        if callable(set_weights):
+            set_weights(
+                {lbl: float(wl.weight) for lbl, wl in self._weighted_loss_by_label.items()}
+            )
+
+    def _ramp_stage_weights(self, stage: typing.Any) -> None:
+        """Ramp in the loss weights ``stage`` raises (``safeguards.weight_ramp_steps``).
+
+        A raised weight goes linearly from its previous-stage value to the
+        new one over that many optimiser steps; lowered weights apply at
+        once.  A sudden rise of the dominant weight outruns AMSGrad's second
+        moment and inflates the first updates.  The ramp position is derived
+        from ``global_step``, so it survives a resume.
+        """
+        n: int = int(self._safeguards.get("weight_ramp_steps", 0))
+        if n <= 0 or getattr(self, "_trainer", None) is None:
+            return
+        idx: int = next(i for i, s in enumerate(self._stages_cfg) if s is stage)
+        if idx == 0:
+            return
+        batches: float = float(self.trainer.num_training_batches)
+        if not math.isfinite(batches) or batches <= 0:  # sanity check: loop not set up yet
+            return
+        per_epoch: int = math.ceil(batches / getattr(self.trainer, "accumulate_grad_batches", 1))
+        start: int = sum(int(s["epochs"]) for s in self._stages_cfg[:idx]) * per_epoch
+        done: float = (self.global_step - start) / n
+        if done >= 1:
+            return
+        before: dict[str, float] = dict(self._base_loss_weights)
+        for s in self._stages_cfg[:idx]:
+            before.update({str(k): float(v) for k, v in dict(s.get("loss_weights") or {}).items()})
+        for label, wl in self._weighted_loss_by_label.items():
+            old: float = before.get(label, wl.weight)
+            if wl.weight > old:
+                wl.weight = old + (wl.weight - old) * max(done, 0.0)
 
     # ------------------------------------------------------------------
     # Logger sections
@@ -511,6 +569,8 @@ class GOALModule(L.LightningModule):
         is_train = prefix.startswith("train")
         metrics: dict[str, torch.Tensor] = mlip_metrics(predictions, batch)
         for name, value in metrics.items():
+            if name.startswith("energy_"):  # exact versions: _log_energy_exact
+                continue
             self.log(
                 self._key(prefix, name),
                 value,
@@ -569,6 +629,69 @@ class GOALModule(L.LightningModule):
                 on_epoch=True,
                 add_dataloader_idx=False,
                 metric_attribute=f"_atomw.{split}.{name}",  # built after Lightning's lookup
+            )
+
+    #: Exact energy metrics: (name, error measure, per atom?).
+    ENERGY_EXACT: typing.ClassVar[tuple[tuple[str, str, bool], ...]] = tuple(
+        (f"energy_{m}_per_{unit}", m, unit == "atom")
+        for unit in ("atom", "molecule")
+        for m in ("mae", "mse", "rmse")
+    )
+
+    def _log_energy_exact(
+        self,
+        predictions: dict[str, torch.Tensor],
+        batch: AtomicGraph,
+        prefix: str,
+        prog_bar: bool = True,
+    ) -> None:
+        """Exact epoch-level energy MAE, MSE and RMSE, per atom and per molecule.
+
+        Each structure's error is accumulated over the whole epoch and across
+        DDP ranks, so the RMSE is the square root of the dataset-level MSE, not
+        a mean of per-batch values.  Per atom divides a structure's error by
+        its atom count (eV/atom, MSE in eV²/atom²); per molecule is its total
+        energy error (eV, MSE in eV²).  Keys: ``{split}_energy/energy_{mae,mse,
+        rmse}_per_{atom,molecule}``; ``energy_mae_per_atom`` keeps its name.
+        """
+        pred: torch.Tensor | None = predictions.get("energy", None)
+        n_atoms: torch.Tensor | None = predictions.get("num_atoms", None)
+        target: torch.Tensor | None = getattr(batch, "energy", None)
+        if pred is None or n_atoms is None or target is None:
+            return
+        from torchmetrics import MeanAbsoluteError, MeanSquaredError
+
+        split: str = prefix.rstrip("/") + "_energy"  # a bare "train" clashes with Module.train
+        if split not in self._energy_exact:
+            self._energy_exact[split] = nn.ModuleDict(
+                {
+                    name: (
+                        MeanAbsoluteError() if m == "mae" else MeanSquaredError(squared=m == "mse")
+                    )
+                    for name, m, _ in self.ENERGY_EXACT
+                }
+            ).to(pred.device)
+            for metric in self._energy_exact[split].values():
+                metric.set_dtype(torch.float64)
+        pred = pred.detach().flatten()
+        target = target.to(pred.dtype).flatten()
+        n: torch.Tensor = n_atoms.to(pred.dtype).clamp(min=1.0)
+        is_train: bool = prefix.startswith("train")
+        for name, _, per_atom in self.ENERGY_EXACT:
+            metric = self._energy_exact[split][name]
+            p, t = (pred / n, target / n) if per_atom else (pred, target)
+            if is_train:
+                metric(p, t)  # forward: the batch value for the step log, and accumulate
+            else:
+                metric.update(p, t)
+            self.log(
+                self._key(prefix, name),
+                metric,
+                on_step=is_train,
+                on_epoch=True,
+                prog_bar=prog_bar and name in PROG_BAR_METRICS,
+                add_dataloader_idx=False,
+                metric_attribute=f"_energy_exact.{split}.{name}",
             )
 
     def _log_round_energies(
@@ -683,6 +806,7 @@ class GOALModule(L.LightningModule):
         # newton_violation).
         self._log_step_metrics(predictions, batch, prefix="train/")
         self._log_atom_weighted(predictions, batch, prefix="train/")
+        self._log_energy_exact(predictions, batch, prefix="train/")
         # ARACE per-round energy decomposition (no-op for other backbones).
         self._log_round_energies(predictions, batch, prefix="train/")
         # ARACE adaptive-gate means per round (no-op when the gate is off).
@@ -783,6 +907,7 @@ class GOALModule(L.LightningModule):
         self._log_losses(losses, batch, prefix=prefix, prog_bar=primary)
         self._log_step_metrics(predictions, batch, prefix=prefix, prog_bar=primary)
         self._log_atom_weighted(predictions, batch, prefix=prefix)
+        self._log_energy_exact(predictions, batch, prefix=prefix, prog_bar=primary)
         # ARACE per-round energy decomposition (no-op for other backbones).
         self._log_round_energies(predictions, batch, prefix=prefix)
         # ARACE adaptive-gate means per round (no-op when the gate is off).
@@ -861,6 +986,7 @@ class GOALModule(L.LightningModule):
         self._log_losses(losses, batch, prefix="test/", prog_bar=False)
         self._log_step_metrics(predictions, batch, prefix="test/")
         self._log_atom_weighted(predictions, batch, prefix="test/")
+        self._log_energy_exact(predictions, batch, prefix="test/", prog_bar=False)
         # ARACE adaptive-gate means per round (no-op when the gate is off).
         self._log_gate_scores(predictions, batch, prefix="test/")
 
@@ -1129,8 +1255,60 @@ class GOALModule(L.LightningModule):
         """
         self._reseed_ema_if_pending()
 
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: typing.Any,
+        optimizer_closure: typing.Any = None,
+    ) -> None:
+        """Optimiser step, with the learning rate scaled during ``safeguards.lr_warmup_steps``.
+
+        The scale is linear in ``global_step`` (``(step + 1) / n``) and is
+        undone right after the step, so schedulers and stage ``lr`` values
+        never see it (a learning-rate monitor shows the unscaled rate).
+        """
+        n: int = int(self._safeguards.get("lr_warmup_steps", 0))
+        factor: float = min(1.0, (self.global_step + 1) / n) if n > 0 else 1.0
+        saved: list[float] = [g["lr"] for g in optimizer.param_groups]
+        for g in optimizer.param_groups:
+            g["lr"] = g["lr"] * factor
+        try:
+            optimizer.step(closure=optimizer_closure)
+        finally:
+            for g, lr in zip(optimizer.param_groups, saved, strict=True):
+                g["lr"] = lr
+
+    #: ``safeguards.skip_nonfinite``: consecutive skipped steps that stop training.
+    MAX_SKIPS_IN_ROW: typing.ClassVar[int] = 100
+
     def on_before_optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
-        """Gradient clipping before optimiser step."""
+        """Skip non-finite steps (``safeguards.skip_nonfinite``), then clip gradients.
+
+        A skipped step drops every gradient, so the optimiser leaves the
+        weights and its moment estimates untouched.  The check runs after
+        the DDP all-reduce, so every rank makes the same decision.  After
+        ``MAX_SKIPS_IN_ROW`` skips in a row the weights themselves have blown
+        up (every batch is non-finite), so training stops instead of idling.
+        """
+        if self._safeguards.get("skip_nonfinite", False):
+            grads: list[torch.Tensor] = [p.grad for p in self.parameters() if p.grad is not None]
+            if grads and not torch.isfinite(torch.nn.utils.get_total_norm(grads)):
+                optimizer.zero_grad(set_to_none=True)
+                from lightning.pytorch.utilities.rank_zero import rank_zero_warn
+
+                self._skips_in_row = getattr(self, "_skips_in_row", 0) + 1
+                rank_zero_warn(
+                    f"[safeguards] non-finite gradient at step {self.global_step}: skipped"
+                )
+                if self._skips_in_row >= self.MAX_SKIPS_IN_ROW:
+                    rank_zero_warn(
+                        f"[safeguards] {self._skips_in_row} non-finite steps in a row: the "
+                        "weights have diverged, stopping"
+                    )
+                    self.trainer.should_stop = True
+                return
+            self._skips_in_row = 0
         clip_val: float = self.config.training.get("gradient_clip", 0)
         if clip_val > 0:
             self.clip_gradients(

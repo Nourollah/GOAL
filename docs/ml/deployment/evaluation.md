@@ -12,6 +12,8 @@ Every evaluation path (validation during training, the test-set monitor, `goal-e
 | --- | --- | --- | --- |
 | `energy_mae_per_atom` | `test_energy/energy_mae_per_atom` | $\langle \lvert E^{\text{pred}}_m - E^{\text{ref}}_m \rvert / N_m \rangle_m$ | eV/atom |
 | `energy_rmse_per_atom` | `test_energy/energy_rmse_per_atom` | $\sqrt{\langle ((E^{\text{pred}}_m - E^{\text{ref}}_m)/N_m)^2 \rangle_m}$ | eV/atom |
+| `energy_mse_per_atom` | `test_energy/energy_mse_per_atom` | $\langle ((E^{\text{pred}}_m - E^{\text{ref}}_m)/N_m)^2 \rangle_m$ | eV²/atom² |
+| `energy_{mae,mse,rmse}_per_molecule` | `test_energy/energy_mae_per_molecule`, … | the same without the division by $N_m$: the total-energy error of each structure | eV, eV² |
 | `forces_mae` | `test_forces/forces_mae` | mean absolute error over every Cartesian force component | eV/Å |
 | `forces_rmse` | `test_forces/forces_rmse` | RMS error over every Cartesian force component | eV/Å |
 | `forces_cosine_similarity` | `test_forces/forces_cosine_similarity` | mean per-atom $\cos\angle(\mathbf F^{\text{pred}}_i, \mathbf F^{\text{ref}}_i)$, in $[-1, 1]$ | — |

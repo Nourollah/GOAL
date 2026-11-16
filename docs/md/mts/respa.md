@@ -64,7 +64,7 @@ print(dyn.mts_stats)
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
 | `atoms` | required | System (masses must be set) |
-| `fast_calculator` | required | Cheap calculator, called once per inner step. It is also attached as `atoms.calc`. |
+| `fast_calculator` | required | Cheap calculator, called once per inner step. |
 | `timestep` | required | **Inner** timestep in ASE units (`n_fs * ase.units.fs`) |
 | `mts_ratio` | `4` | Inner steps per outer step; outer step = `mts_ratio * timestep` |
 | `slow_calculator` | `None` | Expensive calculator. Its correction `F_QM − F_fast` is applied once per outer step. |
@@ -74,8 +74,9 @@ print(dyn.mts_stats)
 
 Methods and properties:
 
-- `step()` advances **one outer step**. `run(steps)` runs `steps` outer steps, recomputing both force levels first, and then calls observers after each outer step.
-- `mts_stats` returns `{"fast_calculator_calls", "slow_calculator_calls", "mts_ratio", "inner_timestep_fs", "outer_timestep_fs"}`. The call counts read a `calculation_count` attribute, and most ASE calculators report `"N/A"`.
+- `step()` advances **one outer step**. `run(steps)` runs `steps` outer steps. As in ASE, observers see the initial state (step 0) and then each outer step. Forces are computed once at step 0 and carried over, so running in chunks costs no extra calls.
+- `dt` and `get_time()` count **outer** steps, so ASE's `MDLogger` time column is the simulated time.
+- `mts_stats` returns `{"fast_calculator_calls", "slow_calculator_calls", "mts_ratio", "inner_timestep_fs", "outer_timestep_fs"}`. The integrator counts the calls itself.
 
 ### Through `MTSSimulation`
 
@@ -94,8 +95,7 @@ Methods and properties:
 | `chunk_size` | `50` | outer steps per internal `run()` call |
 | `show_progress` | `True` | progress bar |
 
-> [!NOTE]
-> `RespaIntegrator.run()` recomputes the fast and slow forces at its start, and `MTSSimulation` calls it once per chunk. Each chunk therefore costs **one extra QM call**, about 2 % overhead at `chunk_size=50`. Raise `chunk_size` when QM calls are very expensive.
+Unknown `mts:` keys raise `TypeError`.
 
 ## Choosing the inner and outer steps
 
@@ -120,25 +120,11 @@ Practical recipe:
 
 ### Monitoring the right energy
 
-`RespaIntegrator` sets `atoms.calc = fast_calculator`, so ASE's `MDLogger` and trajectory writers report the **ML** potential energy. That is *not* the conserved quantity of the RESPA dynamics. To check conservation, log the slow-level energy, which the integrator has just computed at the current positions:
-
-```python
-energies = []
-def conserved():
-    e_qm = dyn.slow_calc.results.get("energy")     # evaluated at the end of the last outer step
-    if e_qm is not None:
-        energies.append(e_qm + atoms.get_kinetic_energy())
-
-dyn.attach(conserved, interval=1)
-dyn.run(500)
-```
+With a slow calculator, `atoms.calc` is the slow calculator after every outer step, so ASE's `MDLogger` and trajectory writers report $E_\text{QM}$ and $\mathbf F_\text{QM}$ at the current positions. $E_\text{QM} + K$ is the conserved quantity of the RESPA dynamics, so the logged `Etot` is the right one to watch in an NVE test, and each trajectory frame is a QM-labelled structure. Without a slow calculator the log shows the fast level.
 
 ## Thermostat details
 
-With `temperature_K` set, an Ornstein–Uhlenbeck update $\mathbf p \leftarrow c_1\mathbf p + c_2\boldsymbol\xi$ is applied after each **outer** half-kick, where $c_1 = e^{-\gamma\,\delta t}$ and $c_2 = \sqrt{m k_B T (1-c_1^2)}$.
-
-> [!NOTE]
-> The coefficients use the **inner** step δt, but the O-update runs only twice per outer step. The canonical momentum distribution is still preserved, but the effective friction is $\gamma_\text{eff} \approx 2\gamma/n$ rather than $\gamma$. With `mts_ratio=4` and `friction=0.01`, the coupling acts like γ ≈ 0.005 fs⁻¹. Scale `friction` by $n/2$ if you want a specific thermalisation time.
+With `temperature_K` set, an Ornstein–Uhlenbeck update $\mathbf p \leftarrow c_1\mathbf p + c_2\boldsymbol\xi$ is applied after each **outer** half-kick, where $c_1 = e^{-\gamma\,\Delta t/2}$ (half an outer step, since it runs twice per outer step) and $c_2 = \sqrt{m k_B T (1-c_1^2)}$.
 
 ## Testing without QM
 

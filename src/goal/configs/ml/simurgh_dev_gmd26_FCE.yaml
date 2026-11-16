@@ -19,12 +19,8 @@ experiment:
 task_name: "simurgh_dev_gmd26_FCE"
 
 data:
-  energy_key: energy
-  forces_key: forces
-  train_dir: ${paths.data_dir}/GMD/FragmentChainExtension/Training
-  val_dir: ${paths.data_dir}/GMD/FragmentChainExtension/TestID
-  test_dir: ${paths.data_dir}/GMD/FragmentChainExtension/TestOOD
-  root: ${paths.data_dir}/GMD/FragmentChainExtension
+  task: fragment_chain_extension # GMD from the Hugging Face Hub, downloaded on first use
+  root: ${paths.data_dir}/GMD # graph cache (raw files: the Hugging Face cache)
   fragment_smarts: ["[CX4]-[CX4]"]
 
 # Multi-scale fragment consistency: on in the GMD configs (half-space

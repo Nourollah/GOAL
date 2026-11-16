@@ -107,7 +107,8 @@ Inside the loop, `GOALModule` does the following:
 - Applies the current stage of `training.stages` (a loss-weight curriculum) on every train and validation step.
 - Runs validation and test forwards under `torch.enable_grad()`, so autograd force heads work. This is why `trainer.inference_mode` **must** stay `false`.
 - Evaluates with the EMA shadow weights when `training.ema.enabled`.
-- Clips gradients by norm (`training.gradient_clip`) in `on_before_optimizer_step`.
+- Clips gradients by norm (`training.gradient_clip`) in `on_before_optimizer_step`, after skipping a step with a non-finite gradient when `training.safeguards.skip_nonfinite` is on.
+- Warms up the learning rate and ramps in raised stage weights when `training.safeguards` asks for it (see [Divergence safeguards](performance.md#divergence-safeguards)).
 - Logs losses and MLIP metrics into separate logger sections per split and property.
 
 The optimiser is always AdamW with two parameter groups. Equivariant tensor-product and `EquivariantLinear` parameters get no weight decay, and everything else gets `training.optimizer.weight_decay`. The scheduler is chosen by `training.optimizer.scheduler_type`:

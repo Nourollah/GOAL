@@ -80,3 +80,29 @@ def test_atom_weighted_force_metrics_are_dataset_level() -> None:
     assert seen["val_forces/forces_mae_atomw"] == float(got["val_forces/forces_mae_atomw"])
     # the existing metric keeps its name and its graph-weighted batch average
     assert abs(float(got["val_forces/forces_mae"]) - float(err.abs().mean())) > 1e-3
+
+
+def test_energy_metrics_are_dataset_level_per_atom_and_per_molecule() -> None:
+    cfg = OmegaConf.create(
+        {"training": {"ema": {"enabled": False}, "gradient_clip": 0.0, "optimizer": {"lr": 1e-3}}}
+    )
+    loss = CompositeLoss([WeightedLoss(ForcesLoss(loss_fn="mae"), 1.0, label="forces")])
+    module = GOALModule(backbone=_Linear(), head=None, loss=loss, config=cfg)
+    frames = _frames()
+    for i, f in enumerate(frames):
+        f.energy = torch.tensor([0.5 * i - 1.0], dtype=torch.float64)
+    trainer = L.Trainer(
+        accelerator="cpu", logger=False, enable_progress_bar=False, enable_model_summary=False
+    )
+    trainer.validate(module, DataLoader(frames, batch_size=2), verbose=False)
+    got = {k: float(v) for k, v in trainer.callback_metrics.items()}
+
+    n = torch.tensor([float(f.num_nodes) for f in frames], dtype=torch.float64)
+    err = torch.stack([0.3 * f.pos.sum() - f.energy[0] for f in frames])  # per molecule, eV
+    for unit, e in (("molecule", err), ("atom", err / n)):
+        assert abs(got[f"val_energy/energy_mae_per_{unit}"] - float(e.abs().mean())) < 1e-12
+        assert abs(got[f"val_energy/energy_mse_per_{unit}"] - float(e.square().mean())) < 1e-12
+        rmse = float(e.square().mean().sqrt())  # sqrt of the dataset MSE ...
+        assert abs(got[f"val_energy/energy_rmse_per_{unit}"] - rmse) < 1e-12
+        per_batch = torch.stack([e[i : i + 2].square().mean().sqrt() for i in (0, 2)]).mean()
+        assert abs(rmse - float(per_batch)) > 1e-3  # ... not the mean of per-batch RMSEs

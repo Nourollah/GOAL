@@ -1,0 +1,22 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 11: combined base at correlation 3 (symmetric) instead of 5 (ladder_reduced)
+# Base: the combined base (ablations/simurgh_dev/combined_base).  Seed 42 on Duplication.
+#
+#   goal-train --config-name ablations/simurgh_dev/s11_loo_correlation5 seed=42
+########################################################
+
+defaults:
+  - /ablations/simurgh_dev/combined_base
+  - _self_
+
+task_name: "simurgh_dev_abl_s11_loo_correlation5"
+experiment:
+  name: "simurgh_dev_abl_s11_loo_correlation5"
+  description: "SIMURGH ablation: combined base at correlation 3 (symmetric) instead of 5 (ladder_reduced)"
+
+model:
+  backbone:
+    correlation: 3
+    product_basis: symmetric

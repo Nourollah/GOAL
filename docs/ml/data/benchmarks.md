@@ -17,6 +17,7 @@ them.
 | `qm9` | `QM9Dataset` | ~134k molecules | H C N O F | one of 19 properties (**no forces**) | 110k / 10k / rest |
 | `ani1x`, `ani1` | `ANI1Dataset` | ~5M (1x) / ~20M (1) | H C N O | energy, forces | 80% / 10% / rest |
 | `spice` | `SPICEDataset` | ~1.1M | H C N O F P S Cl Br I | energy, forces | 80% / 10% / rest |
+| `gmd` | `GMDDataset` | 282k frames, 140 molecules | H C N O | energy, forces | the paper's per-task windows (train / TestID / TestOOD) |
 
 `md17` and `rmd17` map to the **same class**, and `revised: true` is the
 default, so `dataset_type: md17` loads **rMD17** unless you set
@@ -51,6 +52,63 @@ print(len(train), g.pos.shape, g.energy, g.forces.shape)   # 950 (21, 3) ... (21
 print(train.statistics())    # num_structures, avg_num_atoms, energy_mean/std, forces_rms
 print(train.citation())      # BibTeX
 ```
+
+## GMD
+
+[GMD](https://huggingface.co/datasets/AmirMasoud/GMD) (arXiv:2605.08988), the
+compositional-generalisation benchmark, is a native dataset: `dataset_type: gmd`
+downloads, on first use, only the files a task needs from the Hugging Face Hub
+(into the standard Hugging Face cache) and caches the graphs under `data.root`.
+Nothing is added by hand, and no molecular data lives in this repository.
+
+```yaml
+data:
+  dataset_type: gmd
+  task: fragment_fusion          # fragment_{chain_extension,fusion,duplication,combination,fission},
+                                 # the two *_augmented variants, all, or custom
+  format: traj                   # traj | lmdb | zarr | npz: the same labels in four layouts
+  seed: null                     # null: the paper's frame windows; an int: random disjoint frames
+  n_train: 1000                  # frames per training molecule (paper: [0, 1000))
+  n_val: 200                     # validation frames per training molecule (paper: [1000, 1200))
+  n_test: 200                    # test frames per molecule (paper: [1400, 1600))
+  val_split: test_id             # GOAL's validation set: test_id, val or test_ood
+  test_split: test_ood           # GOAL's test set: test_ood (the unseen molecules) or test_id
+  train_molecules: null          # replace the task's molecules: "Family/Molecule" or a "Family"
+  test_molecules: null
+  extra_train_molecules: []      # or add trajectories, e.g. [Alkanes/C8H18]
+  extra_test_molecules: []
+  fractions: [0.8, 0.1, 0.1]     # task: all
+  revision: main                 # a commit hash pins the data
+  local_root: null               # a local copy of the repository: nothing is downloaded
+  root: ${paths.data_dir}/GMD    # graph cache
+```
+
+The selection is the dataset's own: with `seed: null`, frames [0, n_train) of
+each training molecule for training, [1000, 1000 + n_val) for `val`,
+[1400, 1400 + n_test) for TestID, and [1400, 1400 + n_test) of each unseen
+molecule for TestOOD; with a seed, disjoint random frames per molecule, drawn
+exactly as the dataset card's `gmd.load(..., seed=...)` draws them. GOAL
+validates and selects checkpoints on TestID and tests on TestOOD, so the OOD
+number is never used for selection. Frames are non-periodic (the stored cell is
+the padding box of the sampling MD), and the isolated-atom references are in
+`goal.ml.data.benchmarks.gmd.ATOM_REFS`.
+
+Every GMD config in `src/goal/configs/ml/` (`*_gmd26_*`) uses it. Typical
+variations:
+
+```bash
+# the paper protocol on Fusion
+goal-train --config-name simurgh_dev_gmd26_FF
+# a random draw of 500 training frames per molecule, from the Zarr copy
+goal-train --config-name simurgh_dev_gmd26_FF data.seed=42 data.n_train=500 data.format=zarr
+# your own selection of trajectories
+goal-train --config-name simurgh_dev_gmd26_FD data.task=custom \
+  'data.train_molecules=[CarboxylicAcids,Alkanes/C8H18]' 'data.test_molecules=[DiCarboxylicAcids]'
+```
+
+On a cluster whose compute nodes have no network, load the task once on a
+login node (or any machine that shares the Hugging Face cache): the dataset
+falls back to the cached files when the Hub cannot be reached.
 
 ## Processed caches and cache keys
 

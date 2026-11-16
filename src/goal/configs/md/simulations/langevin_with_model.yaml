@@ -24,3 +24,9 @@ log_interval: 10
 output_dir: outputs/md/langevin
 trajectory_file: trajectory.traj
 log_file: md.log
+
+# Molecules with hydrogens: 0.5 fs, light friction (the values this config
+# used before the dynamics templates; the langevin_ase template is 1 fs).
+dynamics:
+  timestep_fs: 0.5
+  friction_per_fs: 0.01

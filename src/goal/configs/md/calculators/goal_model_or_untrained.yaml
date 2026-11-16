@@ -1,0 +1,13 @@
+# goal_model that falls back to an UNTRAINED model when no checkpoint is given:
+#   checkpoint set  -> load that trained model (model_config is not used)
+#   checkpoint null -> build model_config with freshly initialised weights
+defaults:
+  - goal_model
+  - _self_
+
+checkpoint: null
+model_config: ml/simurgh_dev/_base # SIMURGH defaults; E0 provided for H, C, N, O
+model_overrides: # what goal-train would derive from a training set
+  - model.backbone.elements=[1,6,7,8] # extend together with atomic_energies.values
+  - ++model.backbone.avg_num_neighbors=17.54 # GMD-26 FragmentFusion training set
+  - model.backbone.scale=0.93 # eV/Å, force RMS of the same set

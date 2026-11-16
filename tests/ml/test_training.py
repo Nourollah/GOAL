@@ -72,6 +72,34 @@ class TestLossSystem:
         assert "ForcesLoss" in result
         assert result["total"] == result["EnergyLoss"] + result["ForcesLoss"]
 
+    def test_zero_weight_term_is_logged_but_not_in_the_total(self):
+        """A stage-disabled (weight 0) term must not turn an overflow into NaN (0 * inf)."""
+        from goal.ml.training.loss import (
+            CompositeLoss,
+            EnergyLoss,
+            ForcesLoss,
+            WeightedLoss,
+        )
+
+        composite = CompositeLoss(
+            [WeightedLoss(EnergyLoss(), weight=1.0), WeightedLoss(ForcesLoss(), weight=0.0)]
+        )
+        energy = torch.tensor([1.0], requires_grad=True)
+        forces = torch.full((5, 3), float("inf"), requires_grad=True)
+        pred = {"energy": energy, "num_atoms": torch.tensor([5.0]), "forces": forces}
+        target = {
+            "energy": torch.tensor([2.0]),
+            "num_atoms": torch.tensor([5.0]),
+            "forces": torch.zeros(5, 3),
+        }
+
+        result = composite(pred, target)
+        result["total"].backward()
+        assert torch.isfinite(result["total"])
+        assert result["total"] == result["EnergyLoss"]
+        assert "ForcesLoss" in result and not result["ForcesLoss"].requires_grad
+        assert forces.grad is None and torch.isfinite(energy.grad).all()
+
     def test_loss_registry(self):
         """Built-in losses should be in the registry."""
         # Force import to trigger @register decorators

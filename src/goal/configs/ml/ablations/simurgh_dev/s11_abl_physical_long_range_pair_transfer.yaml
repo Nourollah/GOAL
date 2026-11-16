@@ -1,0 +1,23 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 11: combined base + physical long range, pair-transfer charge constraint
+# Base: the combined base (ablations/simurgh_dev/combined_base).  Seed 42 on Duplication.
+#
+#   goal-train --config-name ablations/simurgh_dev/s11_abl_physical_long_range_pair_transfer seed=42
+########################################################
+
+defaults:
+  - /ablations/simurgh_dev/combined_base
+  - _self_
+
+task_name: "simurgh_dev_abl_s11_abl_physical_long_range_pair_transfer"
+experiment:
+  name: "simurgh_dev_abl_s11_abl_physical_long_range_pair_transfer"
+  description: "SIMURGH ablation: combined base + physical long range, pair-transfer charge constraint"
+
+model:
+  backbone:
+    name: simurgh_dev_abl_physical_long_range
+    long_range:
+      charge_constraint: pair_transfer

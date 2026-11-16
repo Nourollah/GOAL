@@ -1,0 +1,49 @@
+# @package _global_
+# MTS-RESPA: ML fast forces + GFN1-xTB (tblite) slow correction.
+# Slow force = F_xTB - F_ML, applied once per outer step (mts_ratio inner steps),
+# so the trajectory follows the xTB surface; only forces enter, so the ML and
+# xTB energy references never need to agree.
+#
+# Usage: SIMURGH as the fast model, untrained unless a checkpoint is given:
+#   pixi run -e cuda-full goal-simulate-mts --config-name md/mts/simulations/mts_xtb_gfn1
+#   pixi run -e cuda-full goal-simulate-mts --config-name md/mts/simulations/mts_xtb_gfn1 \
+#       fast_calculator.checkpoint=path/to/model.simurgh
+#
+# UPET as the fast model:
+#   pixi run -e cuda-full goal-simulate-mts --config-name md/mts/simulations/mts_xtb_gfn1 \
+#       md/calculators@fast_calculator=upet fast_calculator.version=1.5.0
+# upet asks HuggingFace on every load; to load offline pass
+#   "fast_calculator.checkpoint_path='/abs/path/pet-mad-s-v1.5.0.ckpt'" instead of version.
+#
+# Fast-only dry run: append slow_calculator=null mts.total_steps=100.
+# Logged Epot/Etot and trajectory labels are xTB's (Etot is the conserved quantity).
+# temperature_K=null (NVE) starts from zero velocities: equilibrate first.
+defaults:
+  - /md/calculators@fast_calculator: goal_model_or_untrained
+  - /md/calculators@slow_calculator: tblite
+  - _self_
+
+molecule:
+  key: from_smiles
+  smiles: CCO
+
+fast_calculator:
+  device: cuda
+
+slow_calculator:
+  method: GFN1-xTB
+  charge: 0
+  multiplicity: 1
+
+mts:
+  timestep_fs: 0.5 # inner step; explicit H
+  mts_ratio: 4 # xTB once per 2 fs
+  total_steps: 1000 # outer steps (2 ps)
+  temperature_K: 300.0 # null = NVE
+  friction: 0.01 # 1/fs
+  log_interval: 10
+  trajectory_file: trajectory.traj
+  log_file: md.log
+  output_dir: outputs/md/mts_xtb_gfn1
+  chunk_size: 50
+  show_progress: false

@@ -93,7 +93,43 @@ class TestRespaIntegrator:
             friction=0.01,
         )
         dyn.run(5)
-        # Should complete without error
+        # The O-update runs twice per outer step, so each covers half of it
+        assert dyn._lang_c1 == pytest.approx(np.exp(-0.01 * 0.5))
+
+    def test_mts_ratio_1_is_verlet_on_the_slow_level(self) -> None:
+        """At mts_ratio=1 the fast force cancels exactly: the run is velocity
+        Verlet on the slow surface, and observers see the slow level's energy."""
+        from ase.calculators.lj import LennardJones
+        from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
+        from ase.md.verlet import VelocityVerlet
+
+        from goal.md.mts.integrators.respa import RespaIntegrator
+
+        ref = _copper_bulk()
+        MaxwellBoltzmannDistribution(ref, temperature_K=300.0, rng=np.random.default_rng(0))
+        atoms = ref.copy()
+        VelocityVerlet(ref, timestep=1.0 * units.fs).run(5)
+        fast = LennardJones(sigma=2.3, epsilon=0.1, rc=5.0)
+        RespaIntegrator(
+            atoms, fast, timestep=1.0 * units.fs, mts_ratio=1, slow_calculator=EMT()
+        ).run(5)
+        np.testing.assert_allclose(atoms.positions, ref.positions, atol=1e-10)
+        assert atoms.get_potential_energy() == pytest.approx(ref.get_potential_energy())
+
+    def test_outer_step_time_and_call_counts(self) -> None:
+        """Log time advances by the outer step; chunked runs add no extra calls."""
+        from goal.md.mts.integrators.respa import RespaIntegrator
+
+        dyn = RespaIntegrator(
+            _copper_bulk(), EMT(), timestep=0.5 * units.fs, mts_ratio=4, slow_calculator=EMT()
+        )
+        times: list[float] = []
+        dyn.attach(lambda: times.append(dyn.get_time() / units.fs), interval=1)
+        dyn.run(2)
+        dyn.run(1)
+        assert times == pytest.approx([0.0, 2.0, 4.0, 6.0])  # step 0 once, then each outer step
+        assert dyn.mts_stats["fast_calculator_calls"] == 1 + 3 * 4
+        assert dyn.mts_stats["slow_calculator_calls"] == 1 + 3
 
     def test_mts_stats(self) -> None:
         """Test RespaIntegrator reports correct MTS statistics."""

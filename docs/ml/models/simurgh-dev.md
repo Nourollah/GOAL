@@ -74,9 +74,10 @@ pixi run -e cuda goal-train --config-name simurgh_dev_gmd26_FD
 
 The training recipe:
 
-- Huber loss on per-atom energy and on the per-atom force-error norm;
-- five energy-only epochs, then E:F = 1:100;
-- AMSGrad with EMA.
+- MSE loss on per-atom energy and on the per-atom force-error norm (Huber until November 2026: MSE cut the GMD Duplication energy error from 19.7 to 1.1 meV/atom at equal force error);
+- five warm-up epochs at E:F = 1:1, then E:F = 1:100, with the force weight at 100 throughout (an energy-only warm-up, and a warm-up at force weight 1, both diverged to NaN);
+- AMSGrad with EMA;
+- the trainer [divergence safeguards](../training/performance.md#divergence-safeguards) and the `BlowupMonitor` callback.
 
 Checkpoints are selected on `val_forces/forces_mae_atomw`, the exact atom-weighted force MAE on the validation set (TestID on GMD).
 

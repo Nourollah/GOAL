@@ -92,11 +92,15 @@ except ImportError:
     Vasp = None  # type: ignore[assignment,misc]
     HAS_VASP = False
 
+# Any failure, as for flashmd: upet imports metatensor, whose TorchScript
+# compilation raises RuntimeError once torch_geometric has been imported.
 try:
     from upet.calculator import UPETCalculator
 
     HAS_UPET = True
-except ImportError:
+    _UPET_IMPORT_ERROR: Exception | None = None
+except Exception as _exc:  # noqa: BLE001
+    _UPET_IMPORT_ERROR = _exc
     UPETCalculator = None  # type: ignore[assignment,misc]
     HAS_UPET = False
 
@@ -107,7 +111,7 @@ except ImportError:
 # only for environments without upet, where nothing can be built anyway.
 try:
     from upet._version import UPET_AVAILABLE_MODELS as _UPET_MODEL_LIST
-except ImportError:  # pragma: no cover — exercised only without upet installed
+except Exception:  # noqa: BLE001  # pragma: no cover — no upet, or its import failed (above)
     _UPET_MODEL_LIST = [
         "pet-mad-xs",
         "pet-mad-s",
@@ -236,13 +240,39 @@ def register_calculator(
 # ============================================================================
 
 
+def _untrained_goal_module(
+    model_config: str, overrides: list[str] | None
+) -> dict[str, typing.Any]:
+    """``module`` and ``cutoff`` of an untrained model composed from an experiment config."""
+    from hydra import compose, initialize_config_dir
+    from hydra.core.global_hydra import GlobalHydra
+
+    from goal import CONFIGS_DIR
+    from goal.ml.utils.calculator import build_goal_module, config_cutoff
+
+    overrides = list(overrides or [])
+    if GlobalHydra.instance().is_initialized():  # inside a Hydra app such as goal-simulate-mts
+        cfg = compose(config_name=model_config, overrides=overrides)
+    else:
+        with initialize_config_dir(config_dir=CONFIGS_DIR, version_base="1.3"):
+            cfg = compose(config_name=model_config, overrides=overrides)
+    module = build_goal_module(cfg)
+    log.warning(
+        "goal_model: no checkpoint given; built an UNTRAINED %s (%d parameters) from %s.",
+        cfg.model.backbone.name,
+        sum(p.numel() for p in module.parameters()),
+        model_config,
+    )
+    return {"module": module, "cutoff": config_cutoff(cfg)}
+
+
 @register_calculator("goal_model")
 class GOALModelBuilder(CalculatorBuilder):
     """Load trained models from goal.ml checkpoints."""
 
     def build(
         self,
-        checkpoint: str | Path,
+        checkpoint: str | Path | None = None,
         cutoff: float | None = None,
         device: str = "cpu",
         dtype: torch.dtype | None = None,
@@ -251,14 +281,17 @@ class GOALModelBuilder(CalculatorBuilder):
         use_ema: bool = True,
         fragment_on_failure: str | None = "fallback",
         neighbor_list_backend: str | None = None,
+        model_config: str | None = None,
+        model_overrides: list[str] | None = None,
     ) -> ase.calculators.calculator.Calculator:
         """Load goal.ml trained model as ASE calculator.
 
         Parameters
         ----------
-        checkpoint : str or Path
+        checkpoint : str or Path, optional
             A ``.simurgh`` archive, a checkpoint directory, or a bare
-            ``.ckpt`` file.
+            ``.ckpt`` file.  ``None`` builds an untrained model from
+            ``model_config`` instead.
         cutoff : float, optional
             Ignored: the cutoff always comes from the checkpoint's config,
             because a model evaluated with a different neighbour list is
@@ -278,6 +311,14 @@ class GOALModelBuilder(CalculatorBuilder):
             See :class:`~goal.ml.utils.calculator.GOALCalculator`.
         neighbor_list_backend : str, optional
             See :class:`~goal.ml.utils.calculator.GOALCalculator`.
+        model_config : str, optional
+            Used only without ``checkpoint``: an experiment config under
+            ``goal/configs`` (e.g. ``"ml/simurgh_dev_gmd26_FF"``) to build
+            with freshly initialised weights.  Ignored when ``checkpoint``
+            is given.
+        model_overrides : list of str, optional
+            Hydra overrides for ``model_config``, e.g. the dataset statistics
+            ``goal-train`` would otherwise fill in.
 
         Returns
         -------
@@ -286,6 +327,22 @@ class GOALModelBuilder(CalculatorBuilder):
         """
         from goal.ml.utils.calculator import GOALCalculator
 
+        if checkpoint is None:
+            if model_config is None:
+                raise ValueError(
+                    "goal_model needs a `checkpoint` (trained model) or a `model_config` "
+                    "(experiment config to build an untrained model from)."
+                )
+            return GOALCalculator(
+                **_untrained_goal_module(model_config, model_overrides),
+                device=device,
+                dtype=dtype,
+                head=head,
+                fragment_on_failure=fragment_on_failure,
+                neighbor_list_backend=neighbor_list_backend,
+            )
+        if model_config is not None:
+            log.info("goal_model: loading %s; model_config is not used.", checkpoint)
         if cutoff is not None:
             log.info(
                 "goal_model: ignoring cutoff=%s; the checkpoint's own cutoff is used.", cutoff
@@ -462,10 +519,15 @@ class UPETBuilder(CalculatorBuilder):
             If ``model`` is not a recognised identifier.
         """
         if not HAS_UPET:
+            if _UPET_IMPORT_ERROR is None or isinstance(_UPET_IMPORT_ERROR, ImportError):
+                raise GOALCalculatorNotFound(
+                    "UPET is not installed. Use a `-full` pixi environment or pip install upet. "
+                    "See docs/md/calculators/upet.md."
+                )
             raise GOALCalculatorNotFound(
-                "UPET is not installed. Install with: pip install upet. "
-                "See docs/md/calculators/upet.md."
-            )
+                f"UPET is installed but failed to import: {_UPET_IMPORT_ERROR!r}. If "
+                "torch_geometric (goal.ml) was imported first, import goal.md before it."
+            ) from _UPET_IMPORT_ERROR
 
         # Validate the model identifier unless a checkpoint overrides it.
         if checkpoint_path is None:

@@ -57,6 +57,7 @@ callbacks:
 
 - **`GOALRichProgressBar`** is Lightning's `RichProgressBar` with a stage-aware description. While a `training.stages` curriculum is active, the bar reads `[energy_forces 12/∞] Epoch 17/1499` instead of only `Epoch 17/1499`. Lightning allows only one progress bar, so this one is configured here rather than in code. Remove it (`~callbacks.rich_progress_bar`) to get Lightning's default TQDM bar, which is easier to read in plain-text SLURM logs.
 - **`RichModelSummary`** prints the module tree and parameter counts once at startup.
+- **`BlowupMonitor`** (`simurgh_dev` configs only) logs per-layer feature size and update size and warns before a run diverges. See [Divergence safeguards](performance.md#divergence-safeguards).
 - **`EarlyStopping`** stops when `val_forces/forces_mae` has not improved by `min_delta` for `patience` *validation* epochs. Two interactions to keep in mind:
     - With `trainer.check_val_every_n_epoch: k`, patience counts validation runs, which is $k\times$ more epochs.
     - `trainer.min_epochs` (10 in the shipped configs) prevents stopping before that epoch.
@@ -179,7 +180,7 @@ W&B and TensorBoard group panels by the text before the first `/`. GOAL chooses 
 | Section | Contents |
 | --- | --- |
 | `{split}/` | `total`, the loss actually optimised, plus any loss component that is neither energy nor forces (`stress`, `dipole`, `scalar_property`, custom losses). |
-| `{split}_energy/` | The energy loss term (and composite sub-terms like `energy_huber`), `energy_mae_per_atom`, `energy_rmse_per_atom`, and `energy_round_{L}`: ARACE's per-round energy contribution. A round that collapses to zero has stopped contributing. |
+| `{split}_energy/` | The energy loss term (and composite sub-terms like `energy_huber`), the energy MAE, MSE and RMSE per atom and per molecule (`energy_{mae,mse,rmse}_per_{atom,molecule}`, exact epoch values: errors accumulate over every structure and rank, and the RMSE is the square root of the dataset MSE), and `energy_round_{L}`: ARACE's per-round energy contribution. A round that collapses to zero has stopped contributing. |
 | `{split}_forces/` | The forces loss term (and `forces_mae`/`forces_rmse`… sub-terms), `forces_mae`, `forces_rmse`, `forces_cosine_similarity`, `forces_magnitude_mae`, `newton_violation` with its `_x`, `_y`, `_z` components, and the exact epoch-level `forces_mae_atomw`, `forces_rmse_atomw` and `forces_cosine_similarity_atomw`. |
 | `{split}_gate/` | All gate diagnostics, which are numerous and kept off the progress bar: `gate_mean_round_{L}` (ARACE adaptive depth gate), `aux_loss` (its sparsity penalty), `gate_reg`, `artisan/round{L}/{pair}` (per element-pair artisan gates, $K(K+1)/2 \times$ rounds curves), and on the legacy ACE-first backbone only, `artisan_load/{pair}` and `artisan_load_variance` (validation only). |
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import warnings
 from collections import deque
@@ -64,6 +65,10 @@ _KNOWN_MIN_METRICS: frozenset[str] = frozenset(
         "energy_mae",
         "energy_mae_per_atom",
         "energy_rmse_per_atom",
+        "energy_mse_per_atom",
+        "energy_mae_per_molecule",
+        "energy_mse_per_molecule",
+        "energy_rmse_per_molecule",
         "forces_mae",
         "forces_rmse",
         "forces_magnitude_mae",
@@ -486,6 +491,14 @@ class GOALCheckpointManager(Callback):
                 return
 
         value: float = float(metrics[self.top_k_metric])
+        if not math.isfinite(value):
+            log.warning(
+                "[ckpt/top_k] %s is %s at epoch %d (diverged?): not ranked",
+                self.top_k_metric,
+                value,
+                epoch,
+            )
+            return
         metric_slug = self.top_k_metric.replace("/", "_")
         filename = f"best_{metric_slug}={value:.4f}_epoch={epoch:04d}.ckpt"
         filepath = str(Path(self._resolved_dirpath) / filename)

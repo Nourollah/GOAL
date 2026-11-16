@@ -310,8 +310,12 @@ class CompositeLoss(nn.Module):
 
         for loss in self.losses:
             val: torch.Tensor = loss(predictions, targets)
+            if loss.weight == 0:
+                # Stage-disabled term: logged only, so 0 * inf cannot make the total NaN.
+                val = val.detach()
+            else:
+                total = total + val
             breakdown[loss.label] = val
-            total = total + val
 
             if loss.group is not None:
                 if loss.group not in group_sums:

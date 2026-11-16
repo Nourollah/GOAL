@@ -1,0 +1,23 @@
+# @package _global_
+# ^ REQUIRED (config group ablations/simurgh_dev): see simurgh_dev/_base.yaml.
+########################################################
+# SIMURGH ablation, stage 12 (ECE branch next to the ACE core): ACE and ECE layers exchange messages (deep fusion; zero-initialised cross-links)
+# Base: the combined base (ablations/simurgh_dev/combined_base).  Seed 42 on Duplication.
+#
+#   goal-train --config-name ablations/simurgh_dev/s12_ace_ece_fusion seed=42
+########################################################
+
+defaults:
+  - /ablations/simurgh_dev/combined_base
+  - _self_
+
+task_name: "simurgh_dev_abl_s12_ace_ece_fusion"
+experiment:
+  name: "simurgh_dev_abl_s12_ace_ece_fusion"
+  description: "SIMURGH ablation: ACE and ECE layers exchange messages (deep fusion; zero-initialised cross-links)"
+
+model:
+  backbone:
+    name: simurgh_dev_abl_ace_ece_fusion
+    pair_line:
+      mode: phi+ece

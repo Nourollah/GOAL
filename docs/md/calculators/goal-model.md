@@ -23,6 +23,25 @@ dyn = Langevin(atoms, 0.5 * units.fs, temperature_K=300, friction=0.01)
 dyn.run(2000)
 ```
 
+## Without a checkpoint
+
+With `checkpoint=None` and a `model_config`, the builder composes that experiment config and builds the model with freshly initialised weights. This is the starting point for training a model on the fly, for example as the fast level of an MTS run. [`goal_model_or_untrained.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/md/calculators/goal_model_or_untrained.yaml) sets this up for SIMURGH: it loads `checkpoint` when you give one and otherwise builds an untrained `ml/simurgh_dev/_base`.
+
+```python
+calc = CalculatorFactory.create(
+    "goal_model",
+    model_config="ml/simurgh_dev/_base",
+    model_overrides=[
+        "model.backbone.elements=[1,6,7,8]",       # needs an E0 in atomic_energies.values for each
+        "++model.backbone.avg_num_neighbors=17.54",
+        "model.backbone.scale=0.93",                 # eV/Å
+    ],
+    device="cuda",
+)
+```
+
+SIMURGH refuses to build without `elements`, `avg_num_neighbors` and a numeric `scale`, which `goal-train` normally derives from the training set. The template's values come from the GMD-26 FragmentFusion training set, and its elements are H, C, N and O, the elements with an isolated-atom energy in `ml/simurgh_dev/_base`. An untrained SIMURGH starts with a zero readout, so its forces are close to zero.
+
 ## Accepted checkpoint formats
 
 `checkpoint` is passed straight to `GOALCalculator(checkpoint_path=...)`, which dispatches on what it gets:
@@ -48,7 +67,7 @@ pixi run -e cuda-full goal-pack-archive \
 
 | Argument | Type | Default | Meaning |
 |----------|------|---------|---------|
-| `checkpoint` | `str \| Path` | required | Archive, checkpoint directory, or `.ckpt` file |
+| `checkpoint` | `str \| Path \| None` | `None` | Archive, checkpoint directory, or `.ckpt` file. `None` builds an untrained model from `model_config` |
 | `select` | `str` | `"best"` | Weights inside a checkpoint directory: `best`, `last`, `epoch=N` or a `.ckpt` filename |
 | `use_ema` | `bool` | `True` | Use the EMA weights when the checkpoint has them (the weights validation and `best` selection used) |
 | `device` | `str` | `"cpu"` | `"cpu"`, `"cuda"`, `"cuda:1"`, … |
@@ -56,6 +75,8 @@ pixi run -e cuda-full goal-pack-archive \
 | `head` | `str \| None` | `None` | Head tag for multi-head models |
 | `fragment_on_failure` | `str \| None` | `"fallback"` | For fragment-aware models: what to do when rdkit bond perception fails mid-run; `None` keeps the training setting |
 | `neighbor_list_backend` | `str \| None` | `None` | `None` = the training config's backend (else `ase`); `"auto"` uses the GPU kernel for large systems ([Neighbour lists](../../integrations/neighbor_list.md)) |
+| `model_config` | `str \| None` | `None` | Only without `checkpoint`: an experiment config under `src/goal/configs`, such as `ml/simurgh_dev/_base`, built with freshly initialised weights. Ignored (logged) when `checkpoint` is given |
+| `model_overrides` | `list[str] \| None` | `None` | Hydra overrides for `model_config`, typically the dataset statistics `goal-train` would derive |
 | `cutoff` | `float \| None` | `None` | Ignored (logged): the cutoff always comes from the checkpoint, because a model evaluated with another neighbour list is a different model. Kept so older configs still load. |
 
 Models trained with fragment labels (`data.compute_fragment_index`) get them at inference automatically; the settings are read from the checkpoint's training config. See [ASE calculator](../../ml/deployment/ase-calculator.md#models-that-need-fragment-labels).

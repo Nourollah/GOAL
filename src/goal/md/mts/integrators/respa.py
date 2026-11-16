@@ -102,9 +102,10 @@ class RespaIntegrator(MolecularDynamics):
         logfile: str | None = None,
         loginterval: int = 1,
     ) -> None:
+        # ASE's dt is the time per step(), i.e. the outer step (log time, get_time()).
         super().__init__(
             atoms,
-            timestep=timestep,
+            timestep=mts_ratio * timestep,
             trajectory=trajectory,
             logfile=logfile,
             loginterval=loginterval,
@@ -115,8 +116,8 @@ class RespaIntegrator(MolecularDynamics):
         self.temperature_K = temperature_K
         self.friction = friction / units.fs
 
-        # Attach fast calculator as the atoms' calculator so that
-        # standard ASE observers (MDLogger, Trajectory) see forces.
+        # Observers (MDLogger, Trajectory) read atoms.calc: the slow level after
+        # each outer step (its energy is the conserved one), the fast one without it.
         self.atoms.calc = fast_calculator
 
         self._dt_inner = timestep
@@ -125,6 +126,8 @@ class RespaIntegrator(MolecularDynamics):
         # Cached force arrays
         self._fast_forces: np.ndarray | None = None
         self._slow_forces: np.ndarray | None = None
+        self.n_fast_calls = 0
+        self.n_slow_calls = 0
 
         # Langevin pre-computed coefficients
         self._lang_c1: np.ndarray | None = None
@@ -147,7 +150,7 @@ class RespaIntegrator(MolecularDynamics):
         """
         masses = atoms.get_masses()[:, np.newaxis]  # (N, 1), amu
         gamma = self.friction
-        dt = self._dt_inner
+        dt = self._dt_outer / 2.0  # the O-update runs twice per outer step
 
         self._lang_c1 = np.exp(-gamma * dt)
         self._lang_c2 = np.sqrt(
@@ -170,8 +173,7 @@ class RespaIntegrator(MolecularDynamics):
         atoms.calc = self.fast_calc
         f = atoms.get_forces().copy()
         self._fast_forces = f
-        # Restore view to fast calc
-        atoms.calc = self.fast_calc
+        self.n_fast_calls += 1
         return f
 
     def _compute_slow_forces(self) -> np.ndarray:
@@ -191,10 +193,11 @@ class RespaIntegrator(MolecularDynamics):
             self._slow_forces = np.zeros((n, 3))
             return self._slow_forces
 
-        # Compute expensive reference forces at current positions
-        atoms_copy = self.atoms.copy()
-        atoms_copy.calc = self.slow_calc
-        f_qm = atoms_copy.get_forces().copy()
+        # Expensive reference forces at the current positions; slow_calc stays
+        # attached so observers log E_QM and F_QM (= F_fast + F_slow here).
+        self.atoms.calc = self.slow_calc
+        f_qm = self.atoms.get_forces().copy()
+        self.n_slow_calls += 1
 
         # Use the already-cached fast forces (from last inner step)
         # to avoid redundant ML evaluation
@@ -282,24 +285,27 @@ class RespaIntegrator(MolecularDynamics):
     # ------------------------------------------------------------------
 
     def run(self, steps: int = 1) -> None:
-        """Run for ``steps`` outer RESPA steps."""
-        # Initial force computation
-        self._compute_fast_forces()
-        self._compute_slow_forces()
+        """Run for ``steps`` outer RESPA steps.
 
+        Forces are computed once at step 0 and then carried over, so running in
+        chunks costs no extra calls.  Observers see step 0, then each outer step
+        (ASE's convention).
+        """
+        if self.nsteps == 0 and self._fast_forces is None:
+            self._compute_fast_forces()
+            self._compute_slow_forces()
+            self.call_observers()
         for _ in range(steps):
             self.step()
-            self.call_observers()
             self.nsteps += 1
+            self.call_observers()
 
     @property
     def mts_stats(self) -> dict[str, typing.Any]:
         """Runtime statistics: call counts per calculator."""
         return {
-            "fast_calculator_calls": getattr(self.fast_calc, "calculation_count", "N/A"),
-            "slow_calculator_calls": (
-                getattr(self.slow_calc, "calculation_count", "N/A") if self.slow_calc else 0
-            ),
+            "fast_calculator_calls": self.n_fast_calls,
+            "slow_calculator_calls": self.n_slow_calls,
             "mts_ratio": self.mts_ratio,
             "inner_timestep_fs": self._dt_inner / units.fs,
             "outer_timestep_fs": self._dt_outer / units.fs,

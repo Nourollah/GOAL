@@ -13,7 +13,8 @@ The configs ship inside the package (`goal/configs/md/` when installed). `goal-s
 src/goal/configs/md/
 ├── calculators/            # one file per CalculatorFactory backend
 │   ├── goal_model.yaml     ├── mace.yaml     ├── flashmd.yaml   ├── upet.yaml   ├── tblite.yaml
-│   ├── cp2k.yaml           ├── cp2k_pw.yaml  ├── espresso.yaml  └── vasp.yaml
+│   ├── cp2k.yaml           ├── cp2k_pw.yaml  ├── espresso.yaml  ├── vasp.yaml
+│   └── goal_model_or_untrained.yaml
 ├── dynamics/
 │   └── langevin_ase.yaml   └── langevin_flashmd.yaml
 ├── molecules/
@@ -26,7 +27,7 @@ src/goal/configs/md/
     ├── base_calculators/orca_reference.yaml
     ├── ml_models/learner.yaml
     ├── dynamics/langevin_mts.yaml
-    └── simulations/{mts_respa, online_learner, orca_ml_learner}.yaml
+    └── simulations/{mts_respa, mts_xtb_gfn1, online_learner, orca_ml_learner}.yaml
 ```
 
 ## The schema `Simulation.from_config` reads
@@ -134,6 +135,7 @@ Each file is a `_target_: goal.md.core.calculator_factory.CalculatorFactory.crea
 | File | Backend key | Key field | Main settings | Works with `instantiate` |
 | --- | --- | --- | --- | --- |
 | `goal_model.yaml` | `goal_model` | `key` | `checkpoint: ???`, `select: best`, `use_ema: true`, `device: cpu`, `head: null` | Yes |
+| `goal_model_or_untrained.yaml` | `goal_model` | `key` (from `goal_model.yaml`) | `goal_model.yaml` plus `checkpoint: null`, `model_config: ml/simurgh_dev/_base`, `model_overrides` (elements, `avg_num_neighbors`, `scale`): an untrained SIMURGH unless `checkpoint` is set | No: it extends `goal_model.yaml` through `defaults:`, so compose it |
 | `flashmd.yaml` | `flashmd` | `key` | `model_name: pet-omatpes-v2`, `device: null` | Yes |
 | `mace.yaml` | `mace` | `key` | `model_name_or_path: small` (`small`/`medium`/`large` or a path) | Yes |
 | `upet.yaml` | `upet` | `key` | `model: pet-mad-s`, `version`, `checkpoint_path`, `variants`, `device: cuda`, `non_conservative: false` | Yes |
@@ -229,6 +231,7 @@ To reuse group templates through `defaults:` in your own config, place them unde
 | File | Purpose | Status with current code |
 | --- | --- | --- |
 | `simulations/mts_respa.yaml` | RESPA with an ML `fast_calculator` (`goal_model`) and an ORCA `slow_calculator`; `mts:` block (`timestep_fs: 1.0`, `mts_ratio: 4`, `total_steps: 10000`, `friction: 0.01`, outputs) | Default of `goal-simulate-mts`; needs `fast_calculator.checkpoint` and `slow_calculator.orca_path` (or `slow_calculator=null`) |
+| `simulations/mts_xtb_gfn1.yaml` | RESPA with a GOAL model as `fast_calculator` and GFN1-xTB (`tblite`) as `slow_calculator`; `mts:` block (`timestep_fs: 0.5`, `mts_ratio: 4`, `total_steps: 1000`) | Fast level `goal_model_or_untrained`: an untrained SIMURGH, or the trained model at `fast_calculator.checkpoint`; `md/calculators@fast_calculator=upet` for a UPET fast level |
 | `simulations/online_learner.yaml` | Online learning: `base_calculator` (ORCA), `ml_calculator`, `learner:` (buffer, fine-tuning, `policy: threshold`), `mts:` block (`mts_ratio: 1`) | Run with `goal-simulate-mts --config-name md/mts/simulations/online_learner`; builds a `QMLearnerCalculator` |
 | `simulations/orca_ml_learner.yaml` | The same online-learning run composed from the three templates below via `defaults:` | Run like `online_learner.yaml` |
 | `base_calculators/orca_reference.yaml` | ORCA template (`key: orca`, `orca_path: ???`, ωB97M-V/def2-TZVPD `keywords`, charge, multiplicity) | `_target_` template |

@@ -21,9 +21,9 @@ experiment:
 training:
   stages:
     - {
-        name: energy_only,
+        name: warmup,
         epochs: 5,
-        loss_weights: { energy: 1.0, forces: 0.0 },
+        loss_weights: { energy: 100.0, forces: 100.0 },
       }
     - { name: main, epochs: 315, loss_weights: { energy: 1.0, forces: 100.0 } }
     - {

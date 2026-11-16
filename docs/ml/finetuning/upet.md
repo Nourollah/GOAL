@@ -27,6 +27,8 @@ time.
 
 ## Install
 
+Both are in the `-full` pixi environments (except `cpu-full` on aarch64). With pip:
+
 ```bash
 pip install upet metatrain
 ```

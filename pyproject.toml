@@ -36,6 +36,7 @@ dependencies = [
   "ase>=3.23",
   "rdkit>=2026.3.3,<2027",
   "lmdb",
+  "huggingface_hub>=0.30", # GMD (dataset_type: gmd) downloads from the Hugging Face Hub
   "wandb",
   "rich>=13",
 ]
@@ -65,6 +66,7 @@ md = [
   "typer>=0.16.0",
   "pandas>=2.3.0,<3",
   "ipi>=3.0",
+  "upet>=0.2.6; platform_machine == 'x86_64'",   # its warp-lang dep has aarch64 wheels for glibc >= 2.34 only
 ]
 dev = ["pytest>=9.0.3,<10", "pytest-cov", "rootutils", "ruff", "mypy", "ipython>=9.13.0,<10", "jupyter>=1.1.1,<2", "ipykernel>=7.2.0,<8"]
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "markdown-callouts>=0.4"]
@@ -273,6 +275,11 @@ ipi = ">=3.0"
 typer = ">=0.16.0"
 pandas = ">=2.3.0,<3"
 
+# upet (from the `md` extra above, x86-64 only) also on aarch64 CUDA, which
+# declares glibc 2.34; plain linux-aarch64 targets 2.28, too old for warp-lang.
+[tool.pixi.feature.md.target.linux-aarch64-cuda.pypi-dependencies]
+upet = ">=0.2.6"
+
 # --- MACE (mace-torch) ---
 # mace-torch hard-pins e3nn==0.4.4, while GOAL's own equivariant blocks (SIMURGH/
 # ARACE etc.) require e3nn>=0.5 (currently 0.6.x). Because of that, `goal[mace]`
@@ -340,6 +347,8 @@ lint = "ruff check src/ tests/"
 lint-configs = "pytest tests/test_cli_and_packaging.py -k stale -q"
 format = "ruff format src/ tests/"
 typecheck = "mypy src/goal/ml/"
+sync-skills = "python scripts/agents/sync_skills.py"
+check-skills = "python scripts/agents/sync_skills.py --check"
 train = "python -c 'from goal.ml.cli.train import train_ml; train_ml()'"
 train-ml = "python -c 'from goal.ml.cli.train import train_ml; train_ml()'"
 # Arguments after the task name are appended, e.g.

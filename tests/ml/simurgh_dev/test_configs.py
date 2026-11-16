@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob
 import os
 
+import hydra.utils
 import pytest
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
@@ -47,9 +48,21 @@ def test_config_builds_the_model(name: str) -> None:
     backbone["message_irreps"] = "8x0e + 8x1o + 8x2e"
     SimurghDev(**backbone)
     stages = [s.name for s in cfg.training.stages]
-    assert stages == ["energy_only", "main"] and cfg.training.stages[0].epochs == 5
+    assert stages == ["warmup", "main"] and cfg.training.stages[0].epochs == 5
+    # forces on in the warm-up (at weight 0 the energy surface runs away to NaN), and
+    # the same force weight in every stage (a jump of it diverges under AMSGrad)
+    force_weights = {s.loss_weights.forces for s in cfg.training.stages}
+    assert len(force_weights) == 1 and force_weights.pop() > 0
+    assert dict(cfg.training.safeguards) == {
+        "lr_warmup_steps": 1000,
+        "weight_ramp_steps": 1000,
+        "skip_nonfinite": True,
+    }
+    monitor = hydra.utils.instantiate(cfg.callbacks.blowup_monitor)
+    assert monitor.pattern.search("atom_line.layers.1.product")
     losses = {loss.name: loss for loss in cfg.training.losses}
-    assert losses["forces"].error == "norm" and losses["forces"].fn == "huber"
+    assert losses["forces"].error == "norm" and losses["forces"].fn == "mse"
+    assert losses["energy"].fn == "mse"
     # exact dataset-level MAE, and never on OOD
     assert cfg.checkpoint_manager.top_k.metric == "val_forces/forces_mae_atomw"
     # MFC: on in the GMD configs, off on the single-system benchmarks
@@ -103,13 +116,24 @@ def test_least_squares_references_on_one_composition() -> None:
     )
 
 
+GMD_TASKS = {
+    "FD": "fragment_duplication",
+    "FF": "fragment_fusion",
+    "FCE": "fragment_chain_extension",
+    "FCB": "fragment_combination",
+    "FD_plus_alkane": "fragment_duplication",
+}
+
+
 @pytest.mark.parametrize("name", [t for t in TASKS if "gmd26" in t])
-def test_gmd_configs_use_directory_or_split_paths(name: str) -> None:
+def test_gmd_configs_download_the_task_from_the_hub(name: str) -> None:
+    """GMD comes from the Hugging Face Hub: validate on TestID, test on the OOD molecules."""
     data = _compose(name).data
+    assert data.dataset_type == "gmd" and data.get("train_dir") is None
+    assert data.get("task", "fragment_duplication") == GMD_TASKS[name.split("gmd26_")[1]]
+    assert data.get("val_split", "test_id") == "test_id"
     if name.endswith("plus_alkane"):
-        assert data.train_dir is None and len(data.train_paths) == 8
-    else:
-        assert data.val_dir.endswith("/TestID") and data.test_dir.endswith("/TestOOD")
+        assert list(data.extra_train_molecules) == ["Alkanes/C8H18"]
 
 
 ARMS = sorted(
@@ -124,7 +148,7 @@ def test_ablation_arm_builds_its_model(name: str) -> None:
     from goal.ml.registry import MODEL_REGISTRY
 
     cfg = _compose(name)
-    assert cfg.task_name.startswith("simurgh_dev_abl_s") and cfg.data.val_dir.endswith("TestID")
+    assert cfg.task_name.startswith("simurgh_dev_abl_s") and cfg.data.dataset_type == "gmd"
     backbone = OmegaConf.to_container(cfg.model.backbone, resolve=True)
     name_key = backbone.pop("name")
     channels = 8
@@ -160,3 +184,47 @@ def test_dataset_accepts_every_forwarded_data_key(name: str) -> None:
     else:  # **kwargs datasets: the benchmark loaders take named arguments only
         known = set(params) - {"self", "kwargs", "fragment_kwargs"}
         assert forwarded <= known, sorted(forwarded - known)
+
+
+#: The screening arms the combined base switches on (MSE is the default loss now).
+COMBINED_ARMS = (
+    "s06_loss_mse",
+    "s09_mfc_violation_weighting",
+    "s09_pgs_beta_9.2",
+    "s05_radial_env_conditioned",
+    "s02_correlation5_ladder_reduced",
+    "s06_weight_decay_1e-3",
+)
+
+
+def _changed(cfg, base: dict) -> dict:
+    def leaves(d, prefix=""):
+        for k, v in d.items():
+            if isinstance(v, dict) and v:
+                yield from leaves(v, f"{prefix}{k}.")
+            else:
+                yield f"{prefix}{k}", v
+
+    out = dict(leaves(OmegaConf.to_container(cfg, resolve=False)))
+    return {
+        k: v
+        for k, v in out.items()
+        if base.get(k) != v and k.split(".")[0] not in ("task_name", "experiment")
+    }
+
+
+def test_combined_base_is_the_screening_arms_together() -> None:
+    import goal.ml.nn.models  # noqa: F401
+    from goal.ml.registry import MODEL_REGISTRY
+
+    base = _changed(_compose("simurgh_dev_gmd26_FD"), {})
+    want = {"model.backbone.mfc.weight": 0.1}
+    for arm in COMBINED_ARMS:
+        want.update(_changed(_compose(f"ablations/simurgh_dev/{arm}"), base))
+    cfg = _compose("ablations/simurgh_dev/combined_base")
+    assert _changed(cfg, base) == want
+    backbone = OmegaConf.to_container(cfg.model.backbone, resolve=True)
+    backbone.pop("name")
+    backbone.update(avg_num_neighbors=10.0, scale=1.0, num_channels=8, atom_statistics=STATS)
+    backbone["message_irreps"] = backbone["message_irreps"].replace("128x", "8x")
+    MODEL_REGISTRY.get(cfg.model.backbone.name)(**backbone)

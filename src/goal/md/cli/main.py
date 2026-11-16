@@ -35,7 +35,7 @@ def simulate(
     """Run MD simulation from Hydra config.
 
     Example:
-        goal-md simulate -c src/goal/configs/md/simulations/langevin.yaml
+        goal-md simulate -c src/goal/configs/md/simulations/langevin_with_model.yaml
     """
     typer.echo(f"Running simulation from config: {config}")
     typer.echo("Not yet implemented - use notebooks for now")

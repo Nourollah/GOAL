@@ -161,22 +161,15 @@ class ECEBlock(nn.Module):
                 )
             )
 
-    def forward(
+    def init_state(
         self,
         densities: list[torch.Tensor],
         edge_index: torch.Tensor,
         frames: list[torch.Tensor],
         codes: torch.Tensor,
         rbf: torch.Tensor,
-        env: torch.Tensor,
-        avg_num_neighbors: float,
     ) -> torch.Tensor:
-        """Bond states ``(E, state, 2M+1)`` of every directed edge ``i -> j``.
-
-        ``densities``: per-degree atomic densities ``[(N, C, 2l+1)]`` (global
-        frame); ``frames``: ``D^l`` of each edge; ``codes``: element codes
-        ``(N, element_dim)``; ``rbf``, ``env``: radial basis and envelope.
-        """
+        """Bond states before message passing: both ends' densities in the bond frame, FiLM."""
         i, j = edge_index
         a = torch.cat(
             [
@@ -196,22 +189,54 @@ class ECEBlock(nn.Module):
             ],
             dim=-1,
         )
-        a = self.embed(a)
+        return self.embed(a)
+
+    def mp_round(
+        self,
+        k: int,
+        a: torch.Tensor,
+        edge_index: torch.Tensor,
+        frames: list[torch.Tensor],
+        env: torch.Tensor,
+        avg_num_neighbors: float,
+        num_nodes: int,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Round ``k``: bond -> atom -> bond.  New bond states, and the per-atom aggregate
+        of the round's bond messages (global frame, one ``(N, width, 2l+1)`` block per degree)."""
+        i, j = edge_index
+        m = self.msg[k](a)  # (E, (L+1) W, 2M+1)
+        s = torch.sigmoid(self.gate[k](a[..., self.mmax]))  # (E, H (L+1))
+        s = s.reshape(-1, self.lmax + 1, self.heads, 1).expand(
+            -1, -1, -1, self.width // self.heads
+        )
+        m = m * s.reshape(m.shape[0], m.shape[1], 1)
+        blocks = from_edge_frame(m, frames, self.width)  # global, per degree
+        agg = [
+            scatter(b * env[:, None, None], j, dim=0, dim_size=num_nodes, reduce="sum")
+            / avg_num_neighbors
+            for b in blocks
+        ]
+        a = a + self.rcv[k](to_edge_frame([x[i] for x in agg], frames, self.mmax))  # i's bonds
+        return a, agg
+
+    def forward(
+        self,
+        densities: list[torch.Tensor],
+        edge_index: torch.Tensor,
+        frames: list[torch.Tensor],
+        codes: torch.Tensor,
+        rbf: torch.Tensor,
+        env: torch.Tensor,
+        avg_num_neighbors: float,
+    ) -> torch.Tensor:
+        """Bond states ``(E, state, 2M+1)`` of every directed edge ``i -> j``.
+
+        ``densities``: per-degree atomic densities ``[(N, C, 2l+1)]`` (global
+        frame); ``frames``: ``D^l`` of each edge; ``codes``: element codes
+        ``(N, element_dim)``; ``rbf``, ``env``: radial basis and envelope.
+        """
+        a = self.init_state(densities, edge_index, frames, codes, rbf)
         n = densities[0].shape[0]
-        for msg, gate, rcv in zip(self.msg, self.gate, self.rcv):
-            m = msg(a)  # (E, (L+1) W, 2M+1)
-            s = torch.sigmoid(gate(a[..., self.mmax]))  # (E, H (L+1))
-            s = s.reshape(-1, self.lmax + 1, self.heads, 1).expand(
-                -1, -1, -1, self.width // self.heads
-            )
-            m = m * s.reshape(m.shape[0], m.shape[1], 1)
-            blocks = from_edge_frame(m, frames, self.width)  # global, per degree
-            agg = [
-                scatter(b * env[:, None, None], j, dim=0, dim_size=n, reduce="sum")
-                / avg_num_neighbors
-                for b in blocks
-            ]
-            a = a + rcv(
-                to_edge_frame([x[i] for x in agg], frames, self.mmax)
-            )  # outgoing bonds of i
+        for k in range(len(self.msg)):
+            a, _ = self.mp_round(k, a, edge_index, frames, env, avg_num_neighbors, n)
         return a

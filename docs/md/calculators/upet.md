@@ -2,7 +2,7 @@
 
 The `upet` backend runs metatensor PET foundation models (PET-MAD, PET-OMat, PET-SPICE, …) through upstream's `upet.calculator.UPETCalculator`. It handles both stock released weights and your own fine-tuned checkpoints. The builder is [`UPETBuilder`](https://github.com/Nourollah/GOAL/blob/main/src/goal/md/core/calculator_factory.py), selected with `key: upet`.
 
-Install: `pip install upet`. If it is missing, `create("upet", ...)` raises `GOALCalculatorNotFound`.
+Install: `upet` is in the `-full` pixi environments (`cuda-full`, `cpu-full` and `rocm-full`; not `cpu-full` on aarch64, where its `warp-lang` dependency needs glibc ≥ 2.34) and in the pip `md` extra on x86-64. Elsewhere, `pip install upet`. If it is missing, `create("upet", ...)` raises `GOALCalculatorNotFound`.
 
 > [!NOTE]
 > The `upet` package is the renamed successor of `pet-mad` (same project, `lab-cosmo/upet`). `pet-mad` 1.4.4 is the last release under the old name and old API. "UPET" and "PET-MAD" refer to the same family.

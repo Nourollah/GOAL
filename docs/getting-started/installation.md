@@ -153,7 +153,7 @@ The extras below come from `[project.optional-dependencies]`. Append them to the
 
 | Extra | Installs | Enables |
 |---|---|---|
-| `md` | `flashmd`, `tblite` (x86-64 only; PyPI has no aarch64 wheels), `ase>=3.25`, `typer`, `pandas`, `ipi>=3.0` | The MD module: `goal-simulate` CLIs, FlashMD, tblite (GFN-xTB) and i-PI. Quantum ESPRESSO is not a Python package; with pip, install `pw.x` separately |
+| `md` | `flashmd`, `tblite` (x86-64 only; PyPI has no aarch64 wheels), `ase>=3.25`, `typer`, `pandas`, `ipi>=3.0`, `upet` (x86-64 only; its `warp-lang` dependency has aarch64 wheels for glibc ≥ 2.34 only) | The MD module: `goal-simulate` CLIs, FlashMD, tblite (GFN-xTB), UPET and i-PI. Quantum ESPRESSO is not a Python package; with pip, install `pw.x` separately |
 | `mace` | `mace-torch>=0.3.16` | MACE adapters and the `mace_finetune` backbone. **Not installable together with GOAL's core `e3nn`**. Use the standalone venv below. |
 | `fairchem` | `fairchem-core>=1.0` | UMA / EquiformerV2 adapters and the `uma_finetune` backbone (pins `torch~=2.13`) |
 | `matscipy` | `matscipy` | matscipy neighbour-list backend |
@@ -174,7 +174,7 @@ The extras below come from `[project.optional-dependencies]`. Append them to the
 Some integrations are not declared as extras at all:
 
 ```bash
-pip install upet        # UPET / PET-MAD calculator in goal.md (CalculatorFactory.create("upet", ...))
+pip install upet        # UPET calculator, only where the `md` extra skips it (aarch64); the -full pixi environments have it except cpu-full on aarch64
 pip install metatrain   # provides `mtt`, which goal-finetune-upet launches as a subprocess
 ```
 
