@@ -45,6 +45,7 @@ jobs:
         uses: prefix-dev/setup-pixi@v0.8.1
         with:
           pixi-version: v0.76.1
+          manifest-path: pyproject.toml # explicit: the action's TOML parser rejects mixed platform lists
           environments: docs
           locked: true
           cache: true
