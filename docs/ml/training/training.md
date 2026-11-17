@@ -5,12 +5,12 @@ This page covers a `goal.ml` training run from start to finish: launching on a G
 ## The short version
 
 ```bash
-pixi run -e cuda goal-train                                   # SIMURGH ARACE on GMD-26, src/goal/configs/ml/simurgh_legacy_gmd26.yaml
-pixi run -e cuda goal-train --config-name simurgh_legacy_md17        # any other file in src/goal/configs/ml/
+pixi run -e cuda goal-train                                   # SIMURGH on GMD-26, src/goal/configs/ml/simurgh_dev_gmd26_FD.yaml
+pixi run -e cuda goal-train --config-name simurgh_dev_rmd17_aspirin   # any other file in src/goal/configs/ml/
 pixi run -e cuda goal-train trainer.max_epochs=300 data.batch_size=32 training.optimizer.lr=5e-3
 ```
 
-Each run is described by one self-contained experiment file in [`src/goal/configs/ml/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/configs/ml). That file holds the data, model, trainer, losses, checkpointing, logging and strategy settings. `--config-name` selects the file, and any key can be overridden on the command line using Hydra's `dotted.key=value` syntax. The default file is [`src/goal/configs/ml/simurgh_legacy_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26.yaml), which trains the default model, SIMURGH ARACE (`model.backbone.name: simurgh_legacy_arace`), on the GMD-26 FragmentDuplication set.
+Each run is described by one self-contained experiment file in [`src/goal/configs/ml/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/configs/ml). That file holds the data, model, trainer, losses, checkpointing, logging and strategy settings. `--config-name` selects the file, and any key can be overridden on the command line using Hydra's `dotted.key=value` syntax. The default file is [`src/goal/configs/ml/simurgh_dev_gmd26_FD.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_dev_gmd26_FD.yaml), which trains the default model, SIMURGH (`model.backbone.name: simurgh_dev`), on the GMD-26 FragmentDuplication set.
 
 You can launch the same entry point in four ways:
 
@@ -61,12 +61,12 @@ MPS does not support float64, so keep `trainer.precision` at `"32"` (the default
 ### Several GPUs or nodes
 
 ```bash
-pixi run -e cuda goal-train strategy.name=ddp trainer.devices=4                   # one node, 4 GPUs
-pixi run -e cuda goal-train strategy.name=ddp trainer.devices=4 trainer.num_nodes=2
+pixi run -e cuda goal-train ++strategy.name=ddp trainer.devices=4                   # one node, 4 GPUs
+pixi run -e cuda goal-train ++strategy.name=ddp trainer.devices=4 trainer.num_nodes=2
 ```
 
 > [!IMPORTANT]
-> The strategy comes from the top-level `strategy:` block (`strategy.name=…`), **not** from `trainer.strategy`. Whenever `strategy:` is present (it is in every shipped config), `goal-train` builds the strategy from it with `build_strategy(cfg)`, and that result overrides `trainer.strategy`. The full story, including FSDP and DeepSpeed, is in [Distributed training](distributed.md).
+> The strategy comes from the top-level `strategy:` block (`strategy.name=…`), **not** from `trainer.strategy`. Whenever `strategy:` is present, `goal-train` builds the strategy from it with `build_strategy(cfg)`, and that result overrides `trainer.strategy`. The SIMURGH configs have no `strategy:` block, hence `++` (add or override). The full story, including FSDP and DeepSpeed, is in [Distributed training](distributed.md).
 
 ## What `goal-train` does, step by step
 
@@ -91,12 +91,11 @@ flowchart TD
 3. **Global performance settings.** `torch.set_float32_matmul_precision` and the cuDNN flags are applied from `training.performance` (see [Performance engineering](performance.md)).
 4. **Resume decision.** `resolve_resume(cfg)` decides between a fresh start, resuming an interrupted run, extending a finished one, and refusing to start because the epoch budget is already spent. This runs *before* any data is loaded, so a SLURM requeue of a finished job exits in seconds. See [Resuming & extending](resuming.md).
 5. **Data.** `GOALDataModule(cfg)` is built, and `prepare_data()` and `setup("fit")` are called straight away so that statistics can be computed from the training split before the model exists. Lightning calls `setup` again later, and that second call is a no-op.
-6. **Dataset-derived model inputs.** For the SIMURGH family (`simurgh_legacy`, `simurgh_legacy_ace_first`, `simurgh_legacy_arace`, `simurgh_legacy_monolithic`, `simurgh_legacy_monolithic_arace`), these values are computed from the training set and injected into the backbone kwargs, overriding the config:
+6. **Dataset-derived model inputs.** These values are computed from the training set and injected into the backbone kwargs (`elements` and `avg_num_neighbors` for SIMURGH, `simurgh_dev` and its `simurgh_dev_abl_*` arms, only), and recorded in the run's `dataset_stats` block for resumes:
     - `elements`: the unique atomic numbers. The dataset always takes precedence over whatever the YAML says.
     - `atomic_energies.values`: a least-squares fit of per-element reference energies when `atomic_energies.mode` is `dataset` (or `compute_from_dataset: true`) and no values are given.
-    - `scale`: the ScaleShift gain, computed for `dataset` and `provided` modes when `scale: null`.
-    - `avg_num_neighbors`: for `simurgh_legacy_arace` (top-level key) and for legacy backbones with a `dressing_kwargs` block, when it is `null`.
-    - `pair_counts`: when an artisan block enables `rare_artisan`. These counts are also written back into the config, so `config.yaml` (and therefore every checkpoint) carries the routing they imply.
+    - `scale`: the ScaleShift gain, computed for `dataset` and `provided` modes when `scale: null`; SIMURGH's `scale: force_rms` is the RMS of the training force components.
+    - `avg_num_neighbors`: when it is `null`.
 7. **Model.** The backbone class comes from `BACKBONE_REGISTRY`. The head comes from `HEAD_REGISTRY`, unless the backbone is monolithic, in which case `model.head` must be `null`. A mismatch in either direction raises a `ValueError` at this point rather than failing deep inside the loop. The loss is built from `training.losses` (see [Loss functions](losses.md)), and everything is wrapped in `GOALModule`.
 8. **Callbacks and loggers.** `LearningRateMonitor` and `RichLoggingCallback` are always added. Everything under `callbacks:` and `logger:` is instantiated through Hydra, and the top-level `checkpoint_manager:` block becomes a `GOALCheckpointManager`. On a resume, `LRScheduleRetarget` is also added. Having a Lightning `ModelCheckpoint` and `GOALCheckpointManager` active at the same time is an error (see [Callbacks & logging](callbacks-logging.md)).
 9. **Trainer.** `trainer:` is instantiated with the strategy from `build_strategy(cfg)`. If `training.slurm_mode: true`, a `SLURMEnvironment(auto_requeue=True)` plugin is added.
@@ -126,36 +125,36 @@ The cosine horizon is taken from `trainer.max_epochs`. An old top-level `trainin
 Every run is named by the `run_name` key:
 
 ```yaml
-run_name_suffix: "_fragment_duplication"
+run_name_suffix: ""
 run_name: ${now:%Y-%m-%d_%H-%M-%S}_${data.dataset_type}_${model.backbone.name}${run_name_suffix}
 ```
 
-which gives, for example, `2026-10-16_14-30-45_trajectory_simurgh_arace_fragment_duplication`. The same string is used as the leaf of the output directory and as the W&B run name (`logger.wandb.name: ${run_name}`), so the two always match. Override either part:
+which gives, for example, `2026-10-16_14-30-45_gmd_simurgh_dev`. The same string is used as the leaf of the output directory and as the W&B run name (`logger.wandb.name: ${run_name}`), so the two always match. Override either part:
 
 ```bash
 pixi run -e cuda goal-train run_name_suffix=_lr5e-3                  # keep the timestamp, change the tag
-pixi run -e cuda goal-train run_name=arace_gmd26_baseline            # a fixed name, no timestamp
+pixi run -e cuda goal-train run_name=gmd26_FD_baseline              # a fixed name, no timestamp
 ```
 
 > [!WARNING]
-> Because `run_name` contains a timestamp, **every launch gets a new output directory**. Automatic resume looks for `last.ckpt` in *this* run's directory, so re-running the same command after a crash starts a fresh run in a new folder. To pick up an interrupted run, pass `resume.from=<old run dir>` or launch with a fixed `run_name`. This matters most for SLURM requeue (see [below](#slurm)).
+> Because `run_name` contains a timestamp, **every launch gets a new output directory**. Automatic resume looks for `last.ckpt` in *this* run's directory, so re-running the same command after a crash starts a fresh run in a new folder. To pick up an interrupted run, pass `++resume.from=<old run dir>` or launch with a fixed `run_name`. This matters most for SLURM requeue (see [below](#slurm)).
 
 The directory is `${paths.log_dir}/${task_name}/runs/${run_name}`. `paths.root_dir` is `$PROJECT_ROOT` if set, otherwise the directory you launched from, so `logs/` appears wherever you run the command. Set `PROJECT_ROOT=/path/to/GOAL` (or `paths.log_dir=/scratch/...`) to pin it.
 
 A finished run looks like this:
 
 ```text
-logs/simurgh_legacy_gmd26/runs/2026-10-16_14-30-45_trajectory_simurgh_arace_fragment_duplication/
+logs/simurgh_dev_gmd26_FD/runs/2026-10-16_14-30-45_gmd_simurgh_dev/
 ├── .hydra/
 │   ├── config.yaml              # composed config (before stats injection)
 │   ├── hydra.yaml
 │   └── overrides.yaml           # exactly what you typed on the command line
-├── simurgh_legacy_gmd26.log            # Python logging output for the run
+├── simurgh_dev_gmd26_FD.log     # Python logging output for the run
 ├── csv_logs/version_0/metrics.csv
 ├── wandb/                       # W&B local files (if the W&B logger is on)
 └── checkpoints/                 # training.checkpoint_dir == checkpoint_manager.dirpath
     ├── frozen_source/           # every goal .py file the model imports, frozen at train start
-    ├── config.yaml              # fully resolved config, incl. injected elements / pair_counts
+    ├── config.yaml              # fully resolved config, incl. the injected dataset statistics
     ├── metadata.json            # version, git commit, elements, scale, extension records…
     ├── checkpoint_state.json    # pool membership, used on resume
     ├── best_val_forces_forces_mae=0.0241_epoch=0398.ckpt   # top-k pool
@@ -212,7 +211,7 @@ pixi run -e cuda goal-train trainer.max_epochs=30 \
     logger.wandb.offline=true
 ```
 
-Check that `train/total` and `val/total` both decrease, that `val_forces/forces_cosine_similarity` is climbing towards 1, and (for ARACE) that every `val_energy/energy_round_{L}` stays non-zero. Then launch the full run.
+Check that `train/total` and `val/total` both decrease, that `val_forces/forces_cosine_similarity` is climbing towards 1, and that `BlowupMonitor` (in the SIMURGH configs) reports no blow-up. Then launch the full run.
 
 ### 3. The full run
 
@@ -220,7 +219,7 @@ Check that `train/total` and `val/total` both decrease, that `val_forces/forces_
 pixi run -e cuda goal-train \
     training.performance.float32_matmul_precision=high \
     training.performance.cudnn_benchmark=true \
-    run_name=arace_gmd26_seed42 seed=42
+    run_name=gmd26_FD_seed42 seed=42
 ```
 
 A fixed `run_name` makes the run restartable in place. If the process dies, re-running the identical command resumes from `checkpoints/last.ckpt`.
@@ -248,7 +247,7 @@ Jobs run one after another in the same process, each in `${paths.log_dir}/${task
 1. **A stable run directory.** A requeued job re-executes the same command. With the default timestamped `run_name`, it would start in a *new* directory and begin from scratch. Tie the name to the job ID, which SLURM keeps across requeues:
 
     ```bash
-    run_name=arace_gmd26_${SLURM_JOB_ID}
+    run_name=gmd26_FD_${SLURM_JOB_ID}
     ```
 
     On restart, `resolve_resume` finds `checkpoints/last.ckpt` in that directory and passes it explicitly to `trainer.fit`. Lightning's own `hpc_ckpt` is then not used, so you resume from the end of the last validated epoch and any partial epoch is repeated.
@@ -262,7 +261,7 @@ Jobs run one after another in the same process, each in `${paths.log_dir}/${task
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=goal-arace
+#SBATCH --job-name=goal-simurgh
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4          # == trainer.devices
 #SBATCH --gpus-per-node=4
@@ -283,20 +282,20 @@ export PROJECT_ROOT=$PWD             # logs/ and data/ relative to the repo
 mkdir -p logs/slurm
 
 srun pixi run -e cuda python -m goal.ml.cli.train \
-    --config-name simurgh_legacy_gmd26 \
-    run_name=arace_gmd26_${SLURM_JOB_ID} \
-    strategy.name=ddp \
+    --config-name simurgh_dev_gmd26_FD \
+    run_name=gmd26_FD_${SLURM_JOB_ID} \
+    ++strategy.name=ddp \
     trainer.devices=${SLURM_NTASKS_PER_NODE} \
     trainer.num_nodes=${SLURM_NNODES} \
     training.slurm_mode=true \
     training.performance.float32_matmul_precision=high \
-    logger.wandb.id=arace_gmd26_${SLURM_JOB_ID} \
+    logger.wandb.id=gmd26_FD_${SLURM_JOB_ID} \
     +logger.wandb.resume=allow
 ```
 
 The last two lines make a requeued job continue the *same* W&B run instead of opening a new one. Before running multi-GPU jobs, read the multi-GPU checkpointing warning in [Distributed training](distributed.md#checkpointing-with-more-than-one-gpu).
 
-For a single-GPU job, drop `strategy.name=ddp`, and set `--nodes=1`, `--ntasks-per-node=1` and `--gpus-per-node=1`.
+For a single-GPU job, drop `++strategy.name=ddp`, and set `--nodes=1`, `--ntasks-per-node=1` and `--gpus-per-node=1`.
 
 ### Many runs on a cluster
 
@@ -307,7 +306,7 @@ Rather than a shell loop of `goal-train` calls, submit one job per configuration
 LRS=(2e-3 5e-3 1e-2)
 srun python -m goal.ml.cli.train \
     training.optimizer.lr=${LRS[$SLURM_ARRAY_TASK_ID]} \
-    run_name=arace_lr${LRS[$SLURM_ARRAY_TASK_ID]}_${SLURM_ARRAY_JOB_ID}
+    run_name=lr${LRS[$SLURM_ARRAY_TASK_ID]}_${SLURM_ARRAY_JOB_ID}
 ```
 
 ## Where to go next

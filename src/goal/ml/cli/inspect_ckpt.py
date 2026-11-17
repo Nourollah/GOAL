@@ -53,9 +53,6 @@ def format_report(info: dict[str, typing.Any]) -> str:
         lines.append(_row("Model class", meta.get("model_class", "?")))
         if "elements" in meta:
             lines.append(_row("Elements", _element_symbols(meta["elements"])))
-        if "dedicated_pairs" in meta:
-            n_rare = 1 if meta.get("rare_artisan") else 0
-            lines.append(_row("Pairs", f"{len(meta['dedicated_pairs'])} dedicated, {n_rare} rare"))
         if "avg_num_neighbors" in meta:
             lines.append(_row("Avg neighbours", f"{meta['avg_num_neighbors']:.2f}"))
         if "scale" in meta:

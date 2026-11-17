@@ -1,6 +1,6 @@
 ---
 name: goal-simurgh
-description: Configures, trains and extends SIMURGH, GOAL's equivariant ACE-type interatomic potential (development key simurgh_dev). Covers the core switch (ace or ece), body order and product basis, radial basis and regularity prior, pair line, attention gate, PGS readout, multi-scale fragment consistency (MFC), optional electrostatics and D3, one config per benchmark, the staged ablation programme, legacy model keys, and the design rules every change must respect. Use when the user works with SIMURGH configs, code, checkpoints or ablations.
+description: Configures, trains and extends SIMURGH, GOAL's equivariant ACE-type interatomic potential (development key simurgh_dev). Covers the core switch (ace or ece), body order and product basis, radial basis and regularity prior, pair line, attention gate, PGS readout, multi-scale fragment consistency (MFC), optional electrostatics and D3, one config per benchmark, the staged ablation programme and the design rules every change must respect. Use when the user works with SIMURGH configs, code, checkpoints or ablations.
 license: MIT
 ---
 
@@ -75,7 +75,7 @@ Measured on an RTX 6000 Ada with a GMD Duplication batch of 48, float32, `kernel
 9. No DFT or other QM calls from the model, the training loop or inference. MFC calibration data come from offline single points supplied by the maintainer.
 10. Develop in float32. float64 training and the L-BFGS polish run only on A100, H100 or H200 GPUs.
 11. Native code only, and no other model's name anywhere in SIMURGH: cite sources by arXiv ID or DOI and call the external baseline B-REF (`goal-naming-policy`).
-12. Do not change the behaviour of legacy models, and do not split SIMURGH into shared GOAL blocks before release, except the ECE modules.
+12. Do not split SIMURGH into shared GOAL blocks before release, except the ECE modules.
 
 ## Working on it
 

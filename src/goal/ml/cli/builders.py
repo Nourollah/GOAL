@@ -147,8 +147,7 @@ def build_head(cfg: DictConfig, backbone: typing.Any) -> typing.Any:
             f"Backbone '{backbone_name}' is modular (produces "
             f"NodeFeatures) and requires a task head.  Declare a "
             f"'head:' block in the model config, or switch to a "
-            f"monolithic backbone (e.g. 'simurgh_legacy_monolithic', "
-            f"'monolithic_example')."
+            f"monolithic backbone (e.g. 'simurgh_dev', 'monolithic_example')."
         )
 
     head_cls: typing.Any = HEAD_REGISTRY.get(head_cfg.name)

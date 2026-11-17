@@ -26,7 +26,7 @@ Train machine-learning interatomic potentials, then put them to work in molecula
 
 | | Module | What it does |
 |---|---|---|
-| 🧠 | **[`goal.ml`](https://github.com/Nourollah/GOAL/blob/main/docs/ml/index.md)** | Trains and fine-tunes ML interatomic potentials with PyTorch Lightning + Hydra. Ships the native E(3)-equivariant **SIMURGH** force field (ARACE by default, plus NF_SIMURGH and SIMURGH Simplified variants), HyperSpec and invariant baselines, MACE / UMA / UPET fine-tuning, multi-property heads, and distributed training (DDP, FSDP, DeepSpeed). |
+| 🧠 | **[`goal.ml`](https://github.com/Nourollah/GOAL/blob/main/docs/ml/index.md)** | Trains and fine-tunes ML interatomic potentials with PyTorch Lightning + Hydra. Ships the native E(3)-equivariant **SIMURGH** force field (in development under the `simurgh_dev` key), HyperSpec and invariant baselines, MACE / UMA / UPET fine-tuning, multi-property heads, and distributed training (DDP, FSDP, DeepSpeed). |
 | ⚛️ | **[`goal.md`](https://github.com/Nourollah/GOAL/blob/main/docs/md/index.md)** | Runs molecular dynamics with any calculator: trained GOAL models, foundation models (MACE, UPET/PET-MAD, FlashMD, NequIP), GFN-xTB tight binding (tblite) or QM codes (CP2K, Quantum ESPRESSO, VASP, ORCA). tblite and Quantum ESPRESSO (`pw.x`) ship in the `-full` pixi environments. Also supports **multiple-time-step MD** with on-the-fly QM→ML learning (RESPA, i-PI). |
 
 Modules are deliberately decoupled. For example, `goal.md` uses `goal.ml` models only through a narrow bridge, so each module can be installed and used on its own.
@@ -66,13 +66,13 @@ git clone https://github.com/Nourollah/GOAL.git && cd GOAL
 
 ## Quick start
 
-**Train a potential** (SIMURGH on GMD-26, the default experiment). The commands below use a pixi environment from a clone; after a pip or conda install, drop the `pixi run -e cuda` prefix:
+**Train a potential** (SIMURGH on GMD-26 FragmentDuplication, the default experiment). The commands below use a pixi environment from a clone; after a pip or conda install, drop the `pixi run -e cuda` prefix:
 
 ```bash
-pixi run -e cuda goal-train                                     # src/goal/configs/ml/simurgh_legacy_gmd26.yaml
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md17       # pick another experiment
+pixi run -e cuda goal-train                                     # src/goal/configs/ml/simurgh_dev_gmd26_FD.yaml
+pixi run -e cuda goal-train --config-name simurgh_dev_rmd17_aspirin    # pick another experiment
 pixi run -e cuda goal-train trainer.max_epochs=100 data.batch_size=8   # override anything
-pixi run -e cuda goal-eval ckpt_path=logs/simurgh_legacy_gmd26/runs/<run>/checkpoints   # test-set metrics
+pixi run -e cuda goal-eval ckpt_path=logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints   # test-set metrics
 ```
 
 **Run MD with it** (inside `pixi shell -e cuda-full`, or any environment with the MD module):
@@ -92,7 +92,7 @@ dyn.run(1000)
 MD can also be driven config-first from the command line:
 
 ```bash
-pixi run -e cuda-full goal-simulate calculator.checkpoint=logs/simurgh_legacy_gmd26/runs/<run>/checkpoints steps=5000
+pixi run -e cuda-full goal-simulate calculator.checkpoint=logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints steps=5000
 pixi run -e cuda-full goal-simulate-batch --checkpoint <checkpoint> --structures frames.xyz   # many structures; one GPU batch on NVIDIA
 ```
 

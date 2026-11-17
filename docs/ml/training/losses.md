@@ -18,10 +18,6 @@ training:
       fn: mae
       weight: 1.0
       normalize_by_n_atoms: true
-
-    - name: gate_reg
-      fn: mse
-      weight: 1.0e-4
 ```
 
 For each entry, `_build_loss` in [`cli/train.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/cli/train.py) does the following:
@@ -33,7 +29,7 @@ For each entry, `_build_loss` in [`cli/train.py`](https://github.com/Nourollah/G
 All entries are combined in a `CompositeLoss`, which returns a dictionary:
 
 ```python
-{"energy": w_E * L_E, "forces": w_F * L_F, "gate_reg": w_g * L_g, "total": sum_of_the_above}
+{"energy": w_E * L_E, "forces": w_F * L_F, "total": sum_of_the_above}
 ```
 
 `total` is what gets back-propagated. Every other key is logged so you can see which term dominates. Values in the dictionary are **already multiplied by their weights**.
@@ -53,7 +49,6 @@ $\mathcal{L}_\text{aux}$ is a model-supplied regulariser that is not part of `tr
 | `stress` | `StressLoss` | `stress` | Periodic systems with a stress label. Plain reduction. |
 | `dipole` | `DipoleLoss` | `dipole` | Needs a head that predicts `dipole`. |
 | `charge` | `ChargeLoss` | `total_charge` | Reference defaults to 0 if the batch has no `total_charge`. |
-| `gate_reg` | `GateRegLoss` | — | $\sum g^2$ over SIMURGH artisan gate scalars (see [below](#gate_reg-what-it-regularises)). Returns `0` for models without artisans, so the same config works everywhere. `fn` is accepted and ignored (the penalty is always L2). |
 | `newton` | `NewtonLoss` | `forces` (N × 3) | Net force per structure, $\sum_i F_i$, against zero. Autograd forces of an isolated structure already sum to zero, so it only acts on direct-force models. |
 | `scalar_property` | `ScalarPropertyLoss` | any key `property_name` | For HOMO/LUMO, gaps and other scalar targets. Options: `property_name` (required), `per_atom` (divide by atom count). |
 
@@ -234,37 +229,27 @@ training:
   stages:
     - name: "energy_only"
       epochs: 5
-      loss_weights: { energy: 1.0, forces: 0.0, gate_reg: 1.0e-4 }
+      loss_weights: { energy: 1.0, forces: 0.0 }
     - name: "energy_forces"
       epochs: null # open-ended: runs to the end
-      loss_weights: { energy: 1.0, forces: 1.0, gate_reg: 1.0e-4 }
+      loss_weights: { energy: 1.0, forces: 1.0 }
   strict_stage_labels: false # true: unknown labels raise instead of warn
 ```
 
 Stage $i$ covers epochs $[s_i, s_i + \text{epochs}_i)$, where $s_0 = 0$. A stage with `epochs: null` captures everything after it, and once the last finite stage is over, training stays in the last stage. On every train and validation step, `GOALModule` patches `WeightedLoss.weight` for each label in the active stage's `loss_weights`. Labels without an override keep their base weight. Every change is logged as `[stage] epoch=5 → 'energy_forces' active_weights={…}`, and the progress bar shows `[energy_forces 3/∞] Epoch 7/1499`.
 
-Why some configs (the legacy SIMURGH ones) start with energy only: early in training the energy surface is still wrong, so its gradient, the force, is wrong too, and force supervision adds noise that slows down learning the overall energy scale. A few energy-only epochs settle the atomic baselines and the scale. Not every model tolerates it: with the force weight at 0 nothing constrains the energy surface between the labelled geometries, and `simurgh_dev` diverged to NaN within 2–4 GMD epochs. Its warm-up keeps forces on at E:F = 1:1. A three-phase variant (raise the energy weight at the end to tighten energies) is shown, commented out, in the default config.
-
+Why a curriculum might start with energy only: early in training the energy surface is still wrong, so its gradient, the force, is wrong too, and force supervision adds noise that slows down learning the overall energy scale. A few energy-only epochs settle the atomic baselines and the scale. Not every model tolerates it: with the force weight at 0 nothing constrains the energy surface between the labelled geometries, and `simurgh_dev` diverged to NaN within 2–4 GMD epochs. Its warm-up keeps forces on at E:F = 1:1.
 Points to know:
 
 - **Validation uses the stage weights too**, so `val/total` is comparable with `train/total` epoch by epoch. Changing stages therefore shows up as a jump in `val/total`. Compare the weight-independent metrics (`val_forces/forces_mae`, `val_energy/energy_mae_per_atom`) across stage boundaries instead.
 - **Raising a weight abruptly can diverge an Adam-type optimiser.** Its step is the gradient divided by a running gradient scale that averages over about $1/(1-\beta_2)$ steps, so for the first steps after a 100× rise of the dominant weight every update is far larger than normal. Keep the dominant weight constant across stages and lower the others, or ramp increases in with `training.safeguards.weight_ramp_steps` (see [Divergence safeguards](performance.md#divergence-safeguards)). Lowering a weight is safe.
 - **`trainer.test()` ignores stages** and reports every component at its base weight.
-- **Early stopping or top-k on `val/total`** is affected by stage jumps for the same reason. The shipped configs select on `val_forces/forces_mae`.
+- **Early stopping or top-k on `val/total`** is affected by stage jumps for the same reason. The SIMURGH configs select on `val_forces/forces_mae_atomw`.
 - Labels in `loss_weights` that are not in `training.losses` produce a warning, or a `ValueError` with `strict_stage_labels: true`. Enable strict mode to catch typos such as `force` vs `forces`.
-
-### `gate_reg`: what it regularises
-
-Every SIMURGH artisan (one per element pair and round) multiplies its pair energy by a learnable scalar gate $P_{AB}$, initialised to 1. `gate_reg` adds $w_g \sum_{AB} P_{AB}^2$ to the loss, which keeps a single pair channel from absorbing the interaction energy through an ever-growing gate. `GOALModule.forward` collects the gates as `predictions["gate_values"]` from every artisan class — `PotentialArtisan` / `RarePotentialArtisan` (legacy `simurgh_legacy`, `simurgh_legacy_monolithic`) and the ARACE artisans (`simurgh_legacy_arace`, `simurgh_legacy_monolithic_arace`, `simurgh_legacy_nf`) — on the modular and the monolithic path. Models without artisans (HyperSpec, InvariantGNN, SIMURGH Simplified, foundation models) contribute nothing.
-
-With gates at 1.0 the term starts at the number of gates times $w_g$ (12 gates × 1e-4 for a two-round H/C/O ARACE), and its gradient pulls each gate by $2 w_g P_{AB}$.
-
-> [!WARNING]
-> **Before October 2026 `gate_reg` was always 0.** The collector looked for `artisan_bank.experts`, an attribute that the artisan rename turned into `.artisans`, and it only ran for modular backbones. Runs trained before the fix had the regulariser effectively switched off, whatever weight their config gave it. Re-running such a config now applies it. The ablation study configs do not declare `gate_reg` at all, so they are unaffected.
 
 ## Model-supplied auxiliary loss
 
-Some models add their own regulariser to their outputs. Currently this is the ARACE adaptive depth gate's sparsity penalty $\lambda\,\overline{g}$. If the prediction dictionary contains `aux_loss`, `GOALModule` adds it to `total` and logs it as `{split}_gate/aux_loss`. Its weight is set where the term is defined (`model.backbone.adaptive_gate.aux_loss_weight`), **not** in `training.losses`. Do not declare it there.
+Some models add their own regulariser to their outputs. SIMURGH does this for multi-scale fragment consistency (MFC), denoising, Hessian distillation and its pair-line penalties. If the prediction dictionary contains `aux_loss`, `GOALModule` adds it to `total` and logs it as `{split}_gate/aux_loss`; the parts listed in `aux_terms` are logged next to it and not added again. Each weight is set where the term is defined (for example `model.backbone.mfc`), **not** in `training.losses`. Do not declare it there.
 
 ## Metrics logged alongside the loss
 
@@ -284,7 +269,7 @@ Loss values are weighted sums and change when the weights change. `mlip_metrics(
 
 Some notes on reading them:
 
-- Within a batch the force metrics are **flat means over atoms**, as published MLIP numbers are, even when the loss is normalised per structure. Lightning then averages the batch values over the epoch **with one weight per structure**, so the epoch value of `forces_mae` is not the dataset-level number when batches differ in atom count (sets sorted by size): legacy SIMURGH Simplified on GMD Duplication OOD logged 0.050 eV/Å against a dataset-level 0.057 eV/Å. The `_atomw` metrics are exact; the SIMURGH (`simurgh_dev`) configs select checkpoints on `val_forces/forces_mae_atomw`.
+- Within a batch the force metrics are **flat means over atoms**, as published MLIP numbers are, even when the loss is normalised per structure. Lightning then averages the batch values over the epoch **with one weight per structure**, so the epoch value of `forces_mae` is not the dataset-level number when batches differ in atom count (sets sorted by size): an earlier SIMURGH model on GMD Duplication OOD logged 0.050 eV/Å against a dataset-level 0.057 eV/Å. The `_atomw` metrics are exact; the SIMURGH (`simurgh_dev`) configs select checkpoints on `val_forces/forces_mae_atomw`.
 - **Cosine similarity and magnitude MAE separate direction errors from size errors.** A model with a good cosine but poor magnitude has the right shape of the potential energy surface at the wrong stiffness.
 - **Newton violation** must be ≈ 0 for autograd-derived forces on isolated molecules, because translation invariance makes $\sum_i \mathbf{F}_i = 0$ exact. A clearly non-zero value points to a direct (non-conservative) force head. A strongly anisotropic one (for example $z \gg x, y$) points to something direction-dependent: a surface normal, a periodic-boundary setting, or a cell vector.
 - `energy_mae_per_atom`, `forces_cosine_similarity` and `newton_violation` appear on the progress bar (`PROG_BAR_METRICS`). Everything else goes only to the loggers.
@@ -304,4 +289,4 @@ pixi run -e cuda goal-train 'training.losses=[{name: energy, fn: mae, weight: 1.
 pixi run -e cuda goal-train training.stages=null
 ```
 
-If you replace the list and drop `gate_reg`, also remove it from `training.stages` (or set `training.stages=null`) to avoid the unknown-label warning.
+If you replace the list and drop a label, also remove it from `training.stages` (or set `training.stages=null`) to avoid the unknown-label warning.

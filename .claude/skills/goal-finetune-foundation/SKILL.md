@@ -1,19 +1,19 @@
 ---
 name: goal-finetune-foundation
-description: Fine-tunes pre-trained interatomic potentials inside GOAL (in-process foundation-model backbones configured under src/goal/configs/ml/finetune, UPET through goal-finetune-upet, LoRA on a trained SIMURGH checkpoint). Covers choosing head_only, lora or full, element reference energies, matching cutoff and dtype, DDP settings for frozen parameters, separate environments for packages with old e3nn pins, and zero-shot evaluation first. Use when the user wants to adapt a foundation model or a pre-trained GOAL model to new data.
+description: Fine-tunes pre-trained interatomic potentials inside GOAL (in-process foundation-model backbones configured under src/goal/configs/ml/finetune, UPET through goal-finetune-upet). Covers choosing head_only, lora or full, element reference energies, matching cutoff and dtype, DDP settings for frozen parameters, separate environments for packages with old e3nn pins, and zero-shot evaluation first. Use when the user wants to adapt a foundation model to new data.
 license: MIT
 ---
 
 # Fine-tuning pre-trained potentials
 
-Reference: `docs/ml/finetuning/overview.md` (the per-model pages are linked from it) and `docs/integrations/lora_finetune.md`.
+Reference: `docs/ml/finetuning/overview.md` (the per-model pages are linked from it).
 
 ## Workflow
 
-1. Get the data into a GOAL format (`goal-prepare-data`). `finetune/mace` and `finetune/uma` read extxyz from `data/finetune` with a 90/10 split; `finetune/simurgh_legacy_lora` needs `data.train_paths` and `data.val_paths`.
+1. Get the data into a GOAL format (`goal-prepare-data`). `finetune/mace` and `finetune/uma` read extxyz from `data/finetune` with a 90/10 split.
 2. Evaluate candidate models zero-shot as MD calculators on your validation frames (`docs/md/calculators/foundation.md`, `docs/md/calculators/upet.md`). A matching training domain does not guarantee the best starting point.
 3. Start with `model.backbone.strategy: head_only`; move to `lora` or `full` only if it plateaus and the data support it.
-4. Train with `pixi run -e cuda goal-train --config-name finetune/<model>`; list the choices with `ls src/goal/configs/ml/finetune/` (`finetune/mace`, `finetune/uma`, and `finetune/simurgh_legacy_lora` for LoRA on a trained SIMURGH checkpoint, set through `model.backbone.checkpoint_path`).
+4. Train with `pixi run -e cuda goal-train --config-name finetune/<model>`; list the choices with `ls src/goal/configs/ml/finetune/` (`finetune/mace`, `finetune/uma`).
 5. Use the result like any GOAL checkpoint (`goal-evaluate-model`). The base model must still be resolvable at load time.
 
 | `strategy` | What trains | Suggested LR |
@@ -22,7 +22,7 @@ Reference: `docs/ml/finetuning/overview.md` (the per-model pages are linked from
 | `lora` | LoRA adapters on a frozen base (`lora_rank`, `lora_alpha`, `lora_target_modules`) | about 1e-4 |
 | `full` | every parameter; risks forgetting on small datasets | about 1e-5 |
 
-These keys belong to the foundation backbones (`mace_finetune`, `uma_finetune`). The SIMURGH LoRA backbone (`simurgh_lora`, `finetune/simurgh_legacy_lora`) has no `strategy` key and uses `rank`, `alpha`, `dropout`, `target_modules`, `bias` and `head_trainable` instead.
+These keys belong to the foundation backbones (`mace_finetune`, `uma_finetune`).
 
 ## Rules
 
@@ -34,7 +34,7 @@ These keys belong to the foundation backbones (`mace_finetune`, `uma_finetune`).
 - `model.backbone.strategy` (fine-tuning) is not the top-level `strategy:` block (DDP, FSDP, DeepSpeed).
 - `mace-torch` pins e3nn 0.4.4, older than GOAL needs, so it lives in its own virtual environment (`.venv-mace`; "Packages installed separately" in `docs/getting-started/installation.md`). Never install it into a pixi environment.
 - UPET runs metatrain as a subprocess: `uv pip install --python .pixi/envs/cuda/bin/python metatrain upet`, then `goal-finetune-upet ... --dry-run` and read the generated options before the real run.
-- Prefer `goal-train --config-name finetune/<model>`; the overview page documents the older `goal-finetune` entry point and the feature-extraction adapters as legacy.
+- Prefer `goal-train --config-name finetune/<model>`; the overview page documents the older `goal-finetune` entry point (default `finetune/mace`) and the feature-extraction adapters.
 
 ## Done when
 

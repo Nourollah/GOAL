@@ -15,10 +15,6 @@ This page lists the Jupyter notebooks in [`notebooks/`](https://github.com/Nouro
 | `feature_extraction_demo.ipynb` | ML tutorial | MACE venv | `mace-torch` |
 | `mini_trainer_demo.ipynb` | ML tutorial | GOAL (MACE optional) | none; MACE optional |
 | `md_introduction.ipynb` | MD | GOAL + `[md]` deps | none for the EMT parts |
-| `simurgh_gmd_inference.ipynb` | Inference | GOAL | trained run in `logs/`, GMD data |
-| `kronos_gmd_inference.ipynb` | Inference (legacy) | GOAL | old KRONOS run |
-| `nf_simurgh_gmd_inference.ipynb` | Inference | GOAL | NF_SIMURGH run, GMD data |
-| `simurgh_gmd_force_error_gallery.ipynb` | Gallery | GOAL | trained run, GMD data |
 | `mace_foundation_gmd_gallery.ipynb` | Gallery | MACE venv | GMD data, MACE-MP weights |
 | `upet_petmad_gmd_gallery.ipynb` | Gallery | MACE venv + `upet` | GMD data, PET-MAD weights |
 | `dobdc_ligand_properties.ipynb` | Case study: MOF-74 | MACE venv | standalone `xtb` package (outside GOAL); ORCA optional |
@@ -60,22 +56,6 @@ This page lists the Jupyter notebooks in [`notebooks/`](https://github.com/Nouro
 
 ## Model inference and galleries
 
-### `simurgh_gmd_inference.ipynb`: SIMURGH as an ASE calculator
-
-[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/simurgh_gmd_inference.ipynb). This notebook loads a trained SIMURGH checkpoint from a GMD-26 FragmentDuplication run and wraps it in a `GOALCalculator`. It runs a sanity check on energy and forces, compares predictions with DFT on an out-of-distribution test structure, relaxes a perturbed geometry with BFGS, runs a short 300 K Langevin NVT trajectory, and does fast batch inference directly on PyG batches with no ASE overhead. Edit the run path at the top to point at your own run under `logs/`. Companion page: [ASE calculator](../ml/deployment/ase-calculator.md).
-
-### `kronos_gmd_inference.ipynb`: legacy KRONOS version
-
-[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/kronos_gmd_inference.ipynb). This is the same workflow as the SIMURGH inference notebook, written when the model was still called KRONOS (`logs/KRONOS-GMD/...`). It is kept for reference. Use `simurgh_gmd_inference.ipynb` for new work.
-
-### `nf_simurgh_gmd_inference.ipynb`: fragment-aware inference for NF_SIMURGH
-
-[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/nf_simurgh_gmd_inference.ipynb). NF_SIMURGH pools per-atom energies onto fragment virtual nodes, so every graph must carry a `fragment_index`. The stock `GOALCalculator` builds graphs without one, and inference fails with a deliberate error rather than silently degrading to an atom-only model. This notebook defines `NFSimurghCalculator`, a `GOALCalculator` subclass that attaches fragment labels using **the exact fragmentation settings stored in the checkpoint's own config**, so inference can never drift from training. It then repeats the full inference workflow (sanity check, OOD comparison, optimisation, MD, batch inference). Companion page: [NF_SIMURGH](../ml/models/nf-simurgh.md).
-
-### `simurgh_gmd_force_error_gallery.ipynb`: per-frame force-error playback
-
-[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/simurgh_gmd_force_error_gallery.ipynb). This notebook gives an interactive py3Dmol playback of five GMD-26 trajectories (2 in-distribution monocarboxylic acids, 3 out-of-distribution dicarboxylic acids) under a trained SIMURGH ARACE model. Each atom carries two glyphs: an inner sphere for the relative force-magnitude error and an outer shell for the directional error (cosine similarity), with every frame Kabsch-aligned to frame 0. The model is loaded from a checkpoint directory with `checkpoint="best"` through the `frozen_source/` snapshot, so it is rebuilt from the code as it was at training time. The notebook ends with an aggregate metrics table and plain ASE calculator usage. Point `CKPT_DIR` at any run to re-render it.
-
 ### `mace_foundation_gmd_gallery.ipynb`: MACE-MP zero-shot on GMD-26
 
 [Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/mace_foundation_gmd_gallery.ipynb). This is the foundation-model twin of the SIMURGH gallery: the same five trajectories, encoding and metrics, but with MACE-MP-0, which has never seen this chemistry. MACE is loaded through two GOAL routes: `BACKBONE_REGISTRY.get("mace_finetune")` (a batchable GOAL backbone that returns energy and forces) and `CalculatorFactory.create("mace", ...)` (the `goal.md` path). Read it side by side with the SIMURGH gallery to compare a task-specific model with a universal one. Runs in the MACE venv. Companion pages: [MACE fine-tuning](../ml/finetuning/mace.md), [MACE, FlashMD & xTB calculators](../md/calculators/foundation.md).
@@ -104,7 +84,7 @@ The three notebooks below form a series that climbs from a single linker molecul
 
 ### `omol25_explore.ipynb`: browse and search OMol25
 
-[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/omol25_explore.ipynb). This notebook is the entry point to the 3,986,754-structure OMol25 `train_4M` split (80 LMDB shards, about 20 GB) through `ASELMDBReader` (random access to rows or `ase.Atoms`) and `ASELMDBCatalogue` (a compact per-row summary that turns searching 4M rows into numpy operations). It shows what the corpus contains (83 elements, charges −8…+9, spins 1…11, total energies of order 10⁴ eV) and why `src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml` filters it and needs a per-element baseline. It then demonstrates pulling structures by index, formula, SMILES, provenance or any metadata combination and viewing them in 3D. Build the catalogues first with `python scripts/omol25_prepare.py --root data/OMol25/train_4M --workers 8`, or the first cell spends about ten minutes scanning. Companion page: [ASE-LMDB & OMol25](../ml/data/aselmdb-omol25.md).
+[Open on GitHub](https://github.com/Nourollah/GOAL/blob/main/notebooks/omol25_explore.ipynb). This notebook is the entry point to the 3,986,754-structure OMol25 `train_4M` split (80 LMDB shards, about 20 GB) through `ASELMDBReader` (random access to rows or `ase.Atoms`) and `ASELMDBCatalogue` (a compact per-row summary that turns searching 4M rows into numpy operations). It shows what the corpus contains (83 elements, charges −8…+9, spins 1…11, total energies of order 10⁴ eV) and why a training run filters it and needs a per-element baseline. It then demonstrates pulling structures by index, formula, SMILES, provenance or any metadata combination and viewing them in 3D. Build the catalogues first with `python scripts/omol25_prepare.py --root data/OMol25/train_4M --workers 8`, or the first cell spends about ten minutes scanning. Companion page: [ASE-LMDB & OMol25](../ml/data/aselmdb-omol25.md).
 
 ### `gmd_cp2k_pw_recompute.ipynb`: plane-wave PBE recomputation with CP2K
 

@@ -90,10 +90,10 @@ class TestEverySchemeReturnsAValidPartition:
 
     @pytest.mark.parametrize("scheme", FRAGMENT_SCHEMES)
     def test_rotation_and_translation_invariant(self, scheme: str) -> None:
-        from tests.ml.simurgh.conftest import random_so3
+        from scipy.spatial.transform import Rotation
 
         positions, numbers = _butanoic_acid()
-        rotation = random_so3()
+        rotation = torch.tensor(Rotation.random(random_state=0).as_matrix(), dtype=torch.float64)
         shift = torch.tensor([2.5, -1.0, 0.75], dtype=torch.float64)
         assert torch.equal(
             _any_scheme(positions, numbers, scheme),

@@ -1,6 +1,6 @@
 # SIMURGH (development form)
 
-SIMURGH is GOAL's native interatomic potential. While it is under development it is registered as `simurgh_dev` and lives in one monolithic model file, [`models/simurgh/dev/monolithic.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/dev/monolithic.py), organised in one section per work package. The older SIMURGH models are under [`models/simurgh/legacy`](simurgh.md) with `simurgh_legacy*` keys. At release the `_dev` suffix goes and the model takes the `simurgh` key.
+SIMURGH is GOAL's native interatomic potential. While it is under development it is registered as `simurgh_dev` and lives in one monolithic model file, [`models/simurgh/dev/monolithic.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/dev/monolithic.py), organised in one section per work package. Earlier SIMURGH models live in the git history (tag `v0.1.0`). At release the `_dev` suffix goes and the model takes the `simurgh` key.
 
 ## Energy
 
@@ -98,7 +98,6 @@ The ablation programme is in `src/goal/configs/ml/ablations/simurgh_dev/`, one k
 | `benchmark.py` | time and memory per training step |
 | `lbfgs_polish.py` | float64 full-batch L-BFGS polish of a checkpoint (arXiv:2311.16326, App. C): MSE with κ_E = 1, κ_F = 500, L2 5e-5 on the product-basis weights; best validation iterate; refuses RTX GPUs without `--allow-rtx`; writes `lbfgs_polish.ckpt` |
 | `extrapolation_grade.py` | `build` / `score` the per-atom extrapolation grade γ (arXiv:2609.40060) of a checkpoint; needs `diagnostics.calm`-capable code, writes `extrapolation_grade.pt` next to the checkpoint |
-| `migrate_legacy_checkpoints.py` | rewrite pre-legacy registry keys in saved checkpoints |
 
 ## Physical long-range ablation
 

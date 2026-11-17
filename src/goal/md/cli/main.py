@@ -19,7 +19,7 @@ app = typer.Typer(
 @app.command()
 def version() -> None:
     """Show version information."""
-    typer.echo("GOAL MD Module v0.1.0")
+    typer.echo("GOAL MD Module v0.2.0")
     typer.echo("Integrated with goal.ml for machine learning potentials")
 
 

@@ -132,7 +132,7 @@ logger:
     id: null # set to continue an existing W&B run
     log_model: false # true uploads checkpoints to W&B
     group: ""
-    tags: ["simurgh_legacy", "gmd"]
+    tags: ${experiment.tags}
 ```
 
 These are also in the files, commented out:
@@ -158,7 +158,7 @@ pixi run -e cuda goal-train '~logger.wandb'
 pixi run -e cuda goal-train '+logger.tensorboard={_target_: lightning.pytorch.loggers.tensorboard.TensorBoardLogger, save_dir: ${paths.output_dir}/tensorboard, name: tb}'
 
 # Group seeds of one experiment in W&B
-pixi run -e cuda goal-train logger.wandb.group=arace_lr5e-3 seed=1
+pixi run -e cuda goal-train logger.wandb.group=gmd26_FD_lr5e-3 seed=1
 ```
 
 If `logger:` is `null` or empty (as in the `debug` presets), Lightning falls back to its default logger.
@@ -168,7 +168,7 @@ The CSV logger writes `csv_logs/version_0/metrics.csv` in the run directory. It 
 ```python
 import pandas as pd
 
-df = pd.read_csv("logs/simurgh_legacy_gmd26/runs/<run>/csv_logs/version_0/metrics.csv")
+df = pd.read_csv("logs/simurgh_dev_gmd26_FD/runs/<run>/csv_logs/version_0/metrics.csv")
 val = df.dropna(subset=["val_forces/forces_mae"]).set_index("epoch")
 val[["val_forces/forces_mae", "val_energy/energy_mae_per_atom"]].plot(logy=True)
 ```
@@ -180,13 +180,12 @@ W&B and TensorBoard group panels by the text before the first `/`. GOAL chooses 
 | Section | Contents |
 | --- | --- |
 | `{split}/` | `total`, the loss actually optimised, plus any loss component that is neither energy nor forces (`stress`, `dipole`, `scalar_property`, custom losses). |
-| `{split}_energy/` | The energy loss term (and composite sub-terms like `energy_huber`), the energy MAE, MSE and RMSE per atom and per molecule (`energy_{mae,mse,rmse}_per_{atom,molecule}`, exact epoch values: errors accumulate over every structure and rank, and the RMSE is the square root of the dataset MSE), and `energy_round_{L}`: ARACE's per-round energy contribution. A round that collapses to zero has stopped contributing. |
+| `{split}_energy/` | The energy loss term (and composite sub-terms like `energy_huber`), the energy MAE, MSE and RMSE per atom and per molecule (`energy_{mae,mse,rmse}_per_{atom,molecule}`, exact epoch values: errors accumulate over every structure and rank, and the RMSE is the square root of the dataset MSE). |
 | `{split}_forces/` | The forces loss term (and `forces_mae`/`forces_rmse`… sub-terms), `forces_mae`, `forces_rmse`, `forces_cosine_similarity`, `forces_magnitude_mae`, `newton_violation` with its `_x`, `_y`, `_z` components, and the exact epoch-level `forces_mae_atomw`, `forces_rmse_atomw` and `forces_cosine_similarity_atomw`. |
-| `{split}_gate/` | All gate diagnostics, which are numerous and kept off the progress bar: `gate_mean_round_{L}` (ARACE adaptive depth gate), `aux_loss` (its sparsity penalty), `gate_reg`, `artisan/round{L}/{pair}` (per element-pair artisan gates, $K(K+1)/2 \times$ rounds curves), and on the legacy ACE-first backbone only, `artisan_load/{pair}` and `artisan_load_variance` (validation only). |
+| `{split}_gate/` | `aux_loss`, the model's own regularisation term (for SIMURGH: MFC, denoising and its other training-only terms), kept off the progress bar. |
+| `{split}_mfc/` | SIMURGH's multi-scale fragment consistency diagnostics (names starting with `mfc`), kept off the progress bar. |
 
-`{split}` is `train`, `val` or `test`. The reason for this split: per-atom energy errors and force cosines are on different scales and answer different questions, and the gate curves can number in the dozens. Kept apart, they do not bury `val_forces/forces_mae` in a wall of panels.
-
-**Reading the gate curves.** An `artisan/round{L}/{pair}` gate drifting to ~0 means that element pair has been switched off, the artisan equivalent of expert collapse. For `gate_mean_round_{L}`, ~1.0 means the gate is always open (not selective: raise `aux_loss_weight`), ~0.5 means it discriminates between atoms, and a fall towards 0 means whole rounds are being skipped (lower `aux_loss_weight`).
+`{split}` is `train`, `val` or `test`. The reason for this split: per-atom energy errors and force cosines are on different scales and answer different questions. Kept apart, they do not bury `val_forces/forces_mae` in a wall of panels.
 
 ### `_step` and `_epoch` suffixes
 
@@ -206,9 +205,8 @@ GMD-26 ships an in-distribution test set (`TestID`) and an out-of-distribution o
 
 ```yaml
 data:
-  train_dir: ${paths.data_dir}/GMD/FragmentDuplication/Training
-  val_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestID # select on this
-  test_dir: ${paths.data_dir}/GMD/FragmentDuplication/TestOOD # only watch this
+  dataset_type: gmd
+  task: fragment_duplication # train: Training, val: TestID (select on this), test: TestOOD (only watch this)
   monitor_test_during_training: true
 ```
 
@@ -217,8 +215,8 @@ With `monitor_test_during_training: true`, `GOALDataModule.val_dataloader()` ret
 Details:
 
 - The OOD set is evaluated with the same EMA weights and the same active stage weights as `val`, so `test/total` and `val/total` are directly comparable epoch by epoch.
-- The OOD loader stays off the progress bar and skips the diagnostics that would only duplicate `val` (artisan gate values) or that cost an extra forward pass (artisan load balance).
-- The cost is one extra forward pass (no backward) over `test_dir` per validation epoch.
+- The OOD loader stays off the progress bar.
+- The cost is one extra forward pass (no backward) over the test split per validation epoch.
 - If no test split is configured, the flag only triggers a warning at setup, and only `val` is reported.
 - A standalone `trainer.test()` run (for example `goal-eval`) also logs under `test…/` but uses the **base** loss weights, so its loss values are comparable only within the same stage. The metrics (MAE, RMSE, cosine, Newton violation) are weight-independent and always comparable.
 

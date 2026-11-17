@@ -54,7 +54,7 @@ def test_far_copy_extensivity(energy):          # energy(atoms) -> float, wraps 
 
 ## Calibration
 
-The battery must separate good models from broken ones. The legacy NF SIMURGH fails far-copy extensivity by 1.1 eV or more for a C5 copy, because its fragment virtual nodes couple separate molecules (as shipped; the opt-in `virtual_node.envelope_in_softmax: true` restores it). Legacy SIMURGH Simplified passes extensivity, but its energy jumps where a bond crosses its 1.8 Å fragment-perception cutoff (−0.64 eV for acetic acid's O–H in the trained Duplication model, up to 1.4 eV for diatomics), so bond scans must run through 1.8 Å and flag it. Normalisation layers are a common source of steps: during development a plain RMSNorm gave a 0.029 eV energy step at the cutoff (a node's features vanish as its last neighbour leaves), and a smooth variant fixed it. If a test cannot detect these cases, the test is wrong.
+The battery must separate good models from broken ones. Earlier SIMURGH variants (in the git history at `v0.1.0`) failed exactly these checks: fragment virtual nodes that couple separate molecules broke far-copy extensivity by 1.1 eV or more for a C5 copy, and discrete fragment perception made the energy jump where a bond crosses the 1.8 Å perception cutoff (up to 1.4 eV for diatomics), so bond scans must run through 1.8 Å. `tests/ml/simurgh_dev/test_invariant_utils.py` checks that each utility flags a deliberately broken model. Normalisation layers are a common source of steps: during development a plain RMSNorm gave a 0.029 eV energy step at the cutoff (a node's features vanish as its last neighbour leaves), and a smooth variant fixed it. If a test cannot detect these cases, the test is wrong.
 
 ## Scripts rather than unit tests
 

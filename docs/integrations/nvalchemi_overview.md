@@ -18,7 +18,6 @@ The integration pages:
 
 | Page | Feature | Needs NVIDIA? |
 |---|---|---|
-| [LoRA fine-tuning of SIMURGH](lora_finetune.md) | Low-rank adapters on a trained SIMURGH/ARACE checkpoint | No |
 | [nvalchemi model wrapper](nvalchemi_wrapper.md) | A GOAL checkpoint as an nvalchemi `BaseModelMixin` model | Yes |
 | [Neighbour lists](neighbor_list.md) | `torch`, `auto` and batched GPU neighbour-list backends | Fast path only |
 | [Batched simulation](batched_simulation.md) | `goal-simulate-batch`: MD or relaxation of many structures with one model | Fast path only |
@@ -40,7 +39,6 @@ What runs on which hardware:
 
 | Feature | NVIDIA CUDA | AMD ROCm | Apple MPS | CPU |
 |---|---|---|---|---|
-| [LoRA fine-tuning](lora_finetune.md) | Yes (PyTorch + peft) | Yes | Yes | Yes |
 | [Neighbour lists](neighbor_list.md) | nvalchemiops Warp kernel: `auto` uses it for single structures with at least 1000 atoms, and the batched builder always uses it for CUDA tensors | Pure PyTorch, matscipy or ASE | Pure PyTorch, matscipy or ASE | Pure PyTorch, matscipy or ASE |
 | [nvalchemi model wrapper](nvalchemi_wrapper.md) | Yes | No (`RuntimeError`; use `GOALCalculator`) | No | No |
 | [Batched simulation](batched_simulation.md) | nvalchemi: all structures in one GPU batch | ASE + `GOALCalculator`, one structure after another | ASE + `GOALCalculator` | ASE + `GOALCalculator` |
@@ -63,7 +61,7 @@ With pip, use one of the extras:
 | `goal-atomistic[nvalchemiops-cu12]` | `nvalchemi-toolkit-ops[torch-cu12]` (with the CUDA 12 runtime wheels) |
 | `goal-atomistic[nvalchemiops-cu13]` | `nvalchemi-toolkit-ops[torch-cu13]` (with the CUDA 13 runtime wheels) |
 | `goal-atomistic[zarr]` | `zarr>=3` ([Zarr data](zarr_data.md)) |
-| `goal-atomistic[lora]` | `peft>=0.13` ([LoRA fine-tuning](lora_finetune.md)) |
+| `goal-atomistic[lora]` | `peft>=0.13` (`strategy: lora` in [foundation-model fine-tuning](../ml/finetuning/overview.md)) |
 
 `peft` and `zarr` are in every pixi environment. `goal-atomistic[all]` includes `nvalchemiops`, `zarr` and `lora`.
 
@@ -177,7 +175,6 @@ Hardware detection has **no YAML configuration** and no environment variable of 
 | Neighbour lists at inference | `GOALCalculator(...)` | `neighbor_list_backend` | the training config's value, else `"ase"` |
 | nvalchemi wrapper | `SIMURGHNvalchemiWrapper(...)` | `neighbor_backend` | `"auto"` |
 | Batched simulation | `goal-simulate-batch` / `batch.yaml` | `--backend` / `backend` | `auto` |
-| LoRA fine-tuning | training config | `model.backbone.name: simurgh_lora` | — |
 | Zarr datasets | training config | `data.dataset_type: zarr` | — |
 
 To force the portable path on an NVIDIA machine, pass the fallback explicitly (`backend: ase`, `neighbor_backend="torch"`), or hide the GPU with `CUDA_VISIBLE_DEVICES=""`. The latter makes `detect_compute_backend()` return `"cpu"`.

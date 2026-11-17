@@ -11,13 +11,12 @@ Two jobs, both one-off:
    does every shard in parallel and caches the result beside it as
    ``<shard>.goal-catalogue.npz``; training then starts immediately.
 
-2. **Print the numbers a config has to hard-code.**  ``nf_simurgh`` is
-   not one of the backbones ``train.py`` auto-instruments, so
-   ``elements``, ``atomic_energies.values``, ``scale`` and
-   ``avg_num_neighbors`` must be written into the config by hand.  Every
-   one of them depends on the *filtered* subset the run will actually
-   train on, so they are computed here under exactly the filters the
-   config declares, and printed as a paste-ready YAML block.
+2. **Print the numbers a config can pin.**  ``elements``,
+   ``atomic_energies.values``, ``scale`` and ``avg_num_neighbors`` all
+   depend on the *filtered* subset the run will actually train on.
+   Pinned in the config, they are not derived again at start-up, so they
+   are computed here under exactly the filters the config declares, and
+   printed as a paste-ready YAML block.
 
 Reference energies and the energy scale come from the catalogue's
 formulas (no geometry touched — seconds, not hours);
@@ -58,8 +57,7 @@ from goal.ml.data.datasets.aselmdb import (  # noqa: E402
     resolve_aselmdb_files,
 )
 
-#: Default chemistry: the elements a SIMURGH-family artisan bank can
-#: cover without exploding into thousands of pair experts.
+#: Default chemistry: the organic elements H, C, N, O, F, P, S and Cl.
 DEFAULT_ELEMENTS: tuple[int, ...] = (1, 6, 7, 8, 9, 15, 16, 17)
 
 

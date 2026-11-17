@@ -40,9 +40,9 @@ src/goal/
     ├── cli/                        # console-script entry points (see ML → Reference → CLI)
     │   ├── __init__.py             #   CONFIGS_DIR / CONFIGS_ML_DIR, registry population, torch.load patch
     │   ├── builders.py             #   loss / head / callback / logger builders shared by the Hydra CLIs
-    │   ├── train.py                #   goal-train / goal-train-ml (Hydra, default config simurgh_legacy_gmd26)
+    │   ├── train.py                #   goal-train / goal-train-ml (Hydra, default config simurgh_dev_gmd26_FD)
     │   ├── evaluate.py             #   goal-eval (default config eval; model rebuilt from the checkpoint)
-    │   ├── finetune.py             #   goal-finetune (default config finetune/simurgh_legacy_lora)
+    │   ├── finetune.py             #   goal-finetune (default config finetune/mace)
     │   ├── finetune_upet.py        #   goal-finetune-upet (argparse → metatrain `mtt train`)
     │   ├── tune.py                 #   goal-tune (Lightning Tuner / Ray Tune / W&B Sweeps)
     │   ├── inspect_ckpt.py         #   goal-inspect
@@ -66,48 +66,37 @@ src/goal/
     │   ├── collate.py              #   PyG / GPU-tensor / nvalchemi batch construction
     │   ├── zarr_dataset.py         #   "zarr": GOAL Zarr stores (write_zarr, ZarrDataset)
     │   ├── transforms.py           #   graph-construction transforms ("radius_graph")
-    │   ├── fragments.py            #   fragment decomposition (fragment_index for NF_SIMURGH / fragment add-ons)
+    │   ├── fragments.py            #   fragment decomposition (fragment_index on the graph)
     │   ├── keys.py                 #   label key mapping (energy_key, forces_key, …)
-    │   ├── statistics.py           #   dataset-derived buffers: elements, atomic references, scale, avg neighbours, pair counts
+    │   ├── statistics.py           #   dataset-derived buffers: elements, atomic references, scale, avg neighbours
     │   └── export.py               #   AtomicGraph → ASE Atoms / ExtXYZ
     │
     ├── nn/
     │   ├── primitives/             #   thin typed e3nn wrappers: tp.py, linear.py, norm.py, radial.py; neighbor_list.py front end
     │   ├── blocks/                 #   reusable building blocks
-    │   │   ├── artisans.py         #     SIMURGH element-pair bank of potential artisans (+ pair-count routing)
-    │   │   ├── ace_block.py        #     ACE message-passing block (ARACE)
-    │   │   ├── env_dressing.py     #     environment dressing (legacy ACE-first SIMURGH)
-    │   │   ├── symmetric_contraction.py  # MACE-style per-element body-order contraction
-    │   │   ├── adaptive_gate.py    #     optional adaptive depth gate for ARACE rounds
-    │   │   ├── fragment_interaction.py   # optional equivariant fragment interaction for ARACE rounds
+    │   │   ├── ece.py              #     edge-centred (ECE) block used by SIMURGH
     │   │   ├── interaction.py, embedding.py, readout.py
     │   ├── heads/                  #   task heads: energy, energy_forces, direct_forces, dual_forces,
     │   │                           #   stress, dipole, scalar, multi
     │   └── models/
     │       ├── base.py             #     Backbone / Head / MonolithicModel protocols
-    │       ├── simurgh/            #     native SIMURGH family
-    │       │   ├── legacy/               # older SIMURGH models (deprecated keys still resolve)
-    │       │   │   ├── backbone_arace.py     # simurgh_legacy_arace: modular ARACE backbone
-    │       │   │   ├── backbone.py           # simurgh_legacy / simurgh_legacy_ace_first: ACE-first backbone
-    │       │   │   ├── arace.py              # simurgh_legacy_monolithic_arace: self-contained ARACE
-    │       │   │   ├── monolithic.py         # simurgh_legacy_monolithic
-    │       │   │   ├── nf_simurgh.py         # simurgh_legacy_nf: Native Fragment SIMURGH (fragment virtual nodes)
-    │       │   │   ├── simurgh_simplified_layers.py      # shared skeleton of the three-line models
-    │       │   │   ├── simurgh_simplified_routed.py      # simurgh_legacy_simplified_routed
-    │       │   │   └── simurgh_simplified_monolithic.py  # simurgh_legacy_simplified_monolithic
+    │       ├── simurgh/            #     native SIMURGH
+    │       │   ├── dev/                  # simurgh_dev: the model in development
+    │       │   │   ├── monolithic.py         # SimurghDev (registry key simurgh_dev)
+    │       │   │   ├── extrapolation.py      # extrapolation grade
+    │       │   │   └── ablations/            # simurgh_dev_abl_<mechanism>: one mechanism per file
     │       │   └── geometry.py           # differentiable edge-geometry recomputation
-    │       ├── ablations/          #     simurgh_ablation: isolated, frozen ablation-study model
     │       ├── foundation/         #     trainable foundation backbones: mace_finetune, uma_finetune
     │       ├── hyperspec.py        #     hyperspec: equivariant GNN baseline
     │       ├── invariant.py        #     invariant_gnn: scalar message passing
     │       └── monolithic_example.py  #  monolithic_example: minimal self-contained model
     │
     ├── adapters/                   #   frozen foundation-model adapters: mace-small/medium/large, uma-small;
-    │                               #   simurgh_lora.py (LoRA on SIMURGH checkpoints), nvalchemi_wrapper.py
+    │                               #   nvalchemi_wrapper.py
     │
     ├── training/
     │   ├── module.py               #   GOALModule: universal LightningModule for backbone (+ head)
-    │   ├── loss.py                 #   CompositeLoss, WeightedLoss; losses energy/forces/stress/dipole/charge/gate_reg/scalar_property
+    │   ├── loss.py                 #   CompositeLoss, WeightedLoss; losses energy/forces/stress/dipole/charge/scalar_property
     │   ├── metrics.py              #   MLIP diagnostics + logger-section naming
     │   ├── ema.py                  #   exponential moving average of weights
     │   ├── resume.py               #   auto-resume, run extension, LR-schedule retargeting, TRAINING_COMPLETE sentinel
@@ -173,34 +162,21 @@ The configs are part of the package (installed as `goal/configs/`; the absolute 
 ```text
 src/goal/configs/
 ├── ml/                                   # self-contained goal.ml experiment configs (goal-train's config dir)
-│   ├── simurgh_legacy_gmd26.yaml                #   DEFAULT: SIMURGH ARACE on GMD-26 FragmentDuplication
-│   ├── simurgh_legacy_gmd26_hpo.yaml            #   Ray Tune search space over ARACE (composes simurgh_legacy_gmd26)
-│   ├── simurgh_legacy_ace_first_gmd26.yaml      #   legacy ACE-first SIMURGH on GMD-26
-│   ├── simurgh_legacy_monolithic_arace_gmd26.yaml       #   monolithic ARACE on GMD-26
-│   ├── simurgh_legacy_nf_gmd26.yaml             #   NF_SIMURGH on GMD-26 FragmentDuplication
-│   ├── simurgh_legacy_nf_gmd26_typecond.yaml    #   NF_SIMURGH + type-conditioned virtual nodes (FragmentDuplication)
-│   ├── simurgh_legacy_nf_gmd26_FF.yaml          #   same model on the GMD FragmentFusion split
-│   ├── simurgh_legacy_nf_md17.yaml              #   NF_SIMURGH on rMD17 aspirin
-│   ├── simurgh_legacy_nf_md17_benzene.yaml      #   NF_SIMURGH on rMD17 benzene (fragment channel inert)
-│   ├── simurgh_legacy_nf_md22.yaml              #   NF_SIMURGH on MD22 Ac-Ala3-NHMe
-│   ├── simurgh_legacy_nf_qm9.yaml               #   NF_SIMURGH on QM9 U0
-│   ├── simurgh_legacy_nf_omol25.yaml            #   NF_SIMURGH on the OMol25 4M organic subset
-│   ├── simurgh_legacy_simplified_routed_{gmd26,md17}.yaml      # SIMURGH Simplified, Routed
-│   ├── simurgh_legacy_simplified_monolithic_{gmd26,md17}.yaml  # SIMURGH Simplified, Monolithic
-│   ├── simurgh_legacy_md17.yaml                 #   legacy SIMURGH on MD17 aspirin
+│   ├── simurgh_dev_gmd26_FD.yaml         #   DEFAULT: SIMURGH on GMD-26 FragmentDuplication
+│   ├── simurgh_dev_gmd26_{FF,FCE,FCB,FD_plus_alkane}.yaml   # the other GMD-26 tasks
+│   ├── simurgh_dev_rmd17_<molecule>.yaml #   rMD17, one file per molecule
+│   ├── simurgh_dev_md22_<system>.yaml    #   MD22, one file per system
+│   ├── simurgh_dev_3bpa.yaml             #   3BPA
+│   ├── simurgh_dev/                      #   shared bases (_base, _rmd17, _md22), not runs
+│   ├── splits/                           #   GMD split presets (+splits@data=...)
 │   ├── hyperspec_md17.yaml               #   HyperSpec baseline on MD17 aspirin
 │   ├── eval.yaml                         #   goal-eval default (ckpt_path + test-loop settings)
 │   ├── finetune/                         #   fine-tuning (run with goal-train)
-│   │   ├── mace.yaml                     #     mace_finetune
-│   │   ├── uma.yaml                      #     uma_finetune
-│   │   └── simurgh_legacy_lora.yaml      #     simurgh_lora (also goal-finetune's default)
-│   └── ablations/                        #   SIMURGH ablation study (simurgh_ablation model)
-│       ├── README.md                     #     study design, ladder, controls, run order
-│       ├── _ablation_base.yaml           #     shared base (not a run)
-│       ├── 01_…14_*.yaml                 #     phase 1: one switch per rung
-│       ├── 90_…93_*.yaml                 #     controls: seeds, width-matched, 3 rounds
-│       ├── 201_…208_*.yaml               #     phase 2: body_order + one other module
-│       └── make_combo_configs.py         #     generator for the 2xx combination configs
+│   │   ├── mace.yaml                     #     mace_finetune (also goal-finetune's default)
+│   │   └── uma.yaml                      #     uma_finetune
+│   └── ablations/simurgh_dev/            #   SIMURGH ablation programme: one arm per file (sNN_*.yaml)
+│       ├── README.md                     #     protocol: seeds, selection, gates
+│       └── combined_base.yaml            #     base of stages 11 and 12
 ├── md/                                   # goal.md configs (goal-simulate's config tree)
 │   ├── README.md
 │   ├── calculators/                      #   cp2k, cp2k_pw, espresso, vasp, mace, flashmd, upet, tblite, goal_model
@@ -266,8 +242,7 @@ tests/
 │   ├── test_registry.py, test_graph.py, test_data.py, test_aselmdb.py, test_example_datasets.py,
 │   │   test_training.py, test_strategies.py, test_archive.py, test_extraction.py
 │   ├── data/                    # fragment schemes, fragment-index pipeline, key mapping, traj loader
-│   ├── simurgh/                 # ARACE, artisans, pair routing, body order, NF_SIMURGH, SIMURGH Simplified, forces, …
-│   ├── ablations/               # simurgh_ablation model
+│   ├── simurgh_dev/             # SIMURGH: invariants, configs, ablation arms, naming policy, …
 │   ├── foundation/              # mace_finetune / uma_finetune (integration tests need the engines)
 │   └── training/                # checkpoint manager, resume/extend, logger sections
 └── md/                          # factories (incl. tblite), simulation, MTS, CP2K, ESPRESSO, VASP, UPET calculator

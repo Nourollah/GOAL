@@ -1,19 +1,18 @@
 """Hydra-based fine-tuning entry point.
 
 Fine-tunes a pre-trained model on a downstream dataset.  The default
-config, ``finetune/simurgh_legacy_lora``, adapts a trained SIMURGH checkpoint with
-LoRA::
+config, ``finetune/mace``, fine-tunes a MACE-MP foundation model (run it with
+the interpreter that has ``mace-torch``)::
 
-    goal-finetune model.backbone.checkpoint_path=logs/<task>/runs/<run>/checkpoints \
-        data.train_dir=data/dicarboxylic/train
+    goal-finetune data.root=data/my_finetune_set
 
-Any config whose backbone is an adapter works too.  The backbone is built in
-one of three modes:
+Any config whose backbone is in the backbone registry works too.  The backbone
+is built in one of three modes:
 
 1. **Pre-trained hub model**: ``backbone.pretrained=true backbone.variant=large``
 2. **Local fine-tuned checkpoint**: ``backbone.local_checkpoint=/path/to/model.pt``
 3. **Fresh backbone**: default — builds from config params (this is how
-   ``simurgh_lora`` loads its checkpoint)
+   ``mace_finetune`` loads its foundation checkpoint)
 
 Monolithic backbones (``head: null``) are supported.  Optionally freezes
 the backbone for linear probing (``training.freeze_backbone``).
@@ -74,9 +73,7 @@ def _build_backbone(backbone_cfg: DictConfig) -> typing.Any:
     return adapter_cls(**backbone_kwargs)
 
 
-@hydra.main(
-    version_base=None, config_path=CONFIGS_ML_DIR, config_name="finetune/simurgh_legacy_lora"
-)
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="finetune/mace")
 def finetune(cfg: DictConfig) -> None:
     """GOAL fine-tuning entry point.
 

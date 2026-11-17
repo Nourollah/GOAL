@@ -150,36 +150,30 @@ run with `goal-train --config-name <name>`.
 
 | Config | Backbone | Dataset | Notes |
 |---|---|---|---|
-| `simurgh_legacy_md17` | `simurgh_legacy` | rMD17 aspirin | `elements` and `avg_num_neighbors` derived from data automatically |
+| `simurgh_dev_rmd17_<molecule>` | `simurgh_dev` | rMD17, one file per molecule | 950 train / 50 val; `elements`, `avg_num_neighbors` and `scale` derived from the training set |
+| `simurgh_dev_md22_<system>` | `simurgh_dev` | MD22, one file per system | the published training size per system (table below) |
 | `hyperspec_md17` | `hyperspec` | rMD17 aspirin | fixed 120-entry embedding, nothing to sync |
-| `simurgh_legacy_nf_md17` | `simurgh_legacy_nf` | rMD17 aspirin | `custom` fragment cuts → K = 3 (ring + ester O, acetyl, carboxyl) |
-| `simurgh_legacy_nf_md17_benzene` | `simurgh_legacy_nf` | rMD17 benzene | K = 1 under every scheme, so the virtual-node channel is inert: an atom-level baseline |
-| `simurgh_legacy_nf_md22` | `simurgh_legacy_nf` | MD22 Ac-Ala3-NHMe | `custom` cuts → K = 5 (two caps + three alanine residues) |
-| `simurgh_legacy_nf_qm9` | `simurgh_legacy_nf` | QM9 `u0` | energy only, one training stage, selects on an energy metric |
-| `simurgh_legacy_simplified_routed_md17` | `simurgh_legacy_simplified_routed` | rMD17 aspirin | see [SIMURGH Simplified](../models/simurgh-simplified.md) |
-| `simurgh_legacy_simplified_monolithic_md17` | `simurgh_legacy_simplified_monolithic` | rMD17 aspirin | see [SIMURGH Simplified](../models/simurgh-simplified.md) |
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_legacy_md17
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md17       # rMD17 aspirin, energy + forces
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md22       # MD22 Ac-Ala3-NHMe (42 atoms)
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_qm9        # QM9 U0, energy only
+pixi run -e cuda goal-train --config-name simurgh_dev_rmd17_aspirin
+pixi run -e cuda goal-train --config-name simurgh_dev_md22_Ac-Ala3-NHMe   # 42 atoms
 ```
 
-The MD17-family configs that monitor the test split set `test_size: 50`.
-With the default (`null`), test is every frame that train and val did not
-take, about 99,000 for aspirin. Evaluating that every validation epoch would
-dominate the run.
+The rMD17 files leave `test_size: null` and switch off
+`data.monitor_test_during_training`: the test set is every frame that train
+and val did not take (about 99,000 for aspirin), evaluated once at the end of
+the run rather than every validation epoch.
 
 ## Switching molecules
 
-For backbones that derive their element-dependent settings from the training
-set (`simurgh_legacy_md17`, `hyperspec_md17`), changing the molecule is one
-override:
+SIMURGH has one config per molecule (`simurgh_dev_rmd17_ethanol`,
+`simurgh_dev_md22_DHA`, ...), and `goal-train` derives its element-dependent
+settings from the training set, so a different molecule is a different
+`--config-name`. For `hyperspec_md17` it is one override:
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_legacy_md17 data.molecule=ethanol
-pixi run -e cuda goal-train --config-name simurgh_legacy_md17 data.molecule=aspirin data.revised=false   # original MD17
+pixi run -e cuda goal-train --config-name hyperspec_md17 data.molecule=ethanol
+pixi run -e cuda goal-train --config-name hyperspec_md17 data.molecule=aspirin data.revised=false   # original MD17
 ```
 
 rMD17 molecules: `aspirin`, `azobenzene`, `benzene`, `ethanol`,
@@ -187,34 +181,8 @@ rMD17 molecules: `aspirin`, `azobenzene`, `benzene`, `ethanol`,
 `uracil`. Original MD17 has the same list without `azobenzene` and
 `paracetamol`.
 
-For **`nf_simurgh_*` and `simurgh_simplified_*`** that is not enough. These
-backbones are not on `train.py`'s auto-instrumented list, so their configs
-hard-code values that depend on the molecule:
-
-| What | Why it must change | How to get it |
-|---|---|---|
-| `model.backbone.elements` (`simurgh_legacy_nf`) | one artisan per element pair; an edge whose pair has no artisan is zero-masked, so it **contributes zero energy silently** | table below, or `compute_unique_elements` |
-| `model.backbone.avg_num_neighbors` | message normaliser; depends on molecule **and** cutoff | `compute_avg_num_neighbors` |
-| `data.fragment_smarts` / `fragment_keep_groups` (`custom` scheme) | the cuts are written for one molecule's chemistry | inspect, e.g. with the fragment views in the notebooks |
-| `data.batch_size` | memory scales with edges per batch | count edges, not structures |
-
-Elements per molecule:
-
-| Dataset | Molecules | `elements` |
-|---|---|---|
-| rMD17 | aspirin, salicylic_acid, malonaldehyde, ethanol | `[1, 6, 8]` |
-| rMD17 | paracetamol, uracil | `[1, 6, 7, 8]` |
-| rMD17 | azobenzene | `[1, 6, 7]` |
-| rMD17 | benzene, naphthalene, toluene | `[1, 6]` |
-| MD22 | Ac-Ala3-NHMe, AT-AT, AT-AT-CG-CG | `[1, 6, 7, 8]` |
-| MD22 | DHA, stachyose | `[1, 6, 8]` |
-| MD22 | buckyball-catcher, double-walled_nanotube | `[1, 6]` |
-
-Declaring the union `[1, 6, 7, 8]` works for every molecule on one GPU. The
-unused artisans get no gradient, though, and DDP rejects that unless
-`strategy.find_unused_parameters: true` is set.
-
-Measure the two numbers for a new molecule and cutoff:
+To pin the derived values (for `goal-tune`, which does not derive them),
+measure them for the molecule and cutoff:
 
 ```python
 import goal.ml.data.datasets  # registers the benchmark adapters
@@ -224,14 +192,6 @@ from goal.ml.data.statistics import compute_avg_num_neighbors, compute_unique_el
 ds = DATASET_REGISTRY.build("md22", root="data/md22", molecule="AT-AT", cutoff=5.0, split="train")
 print("elements:", compute_unique_elements(ds))
 print("avg_num_neighbors:", round(compute_avg_num_neighbors(ds), 4))
-```
-
-Then:
-
-```bash
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md22 data.molecule=AT-AT \
-    'model.backbone.elements=[1,6,7,8]' model.backbone.avg_num_neighbors=<measured> \
-    data.train_size=3000
 ```
 
 MD22 molecules and their default (sGDML paper) training sizes:
@@ -246,12 +206,13 @@ MD22 molecules and their default (sGDML paper) training sizes:
 | `buckyball-catcher` | 148 | 6,102 | 600 |
 | `double-walled_nanotube` | 370 | 5,032 | 800 |
 
-`simurgh_legacy_nf_md22.yaml` sets `train_size: 6000` explicitly. When you switch
-molecules, override it, or the loader raises because `train_size + val_size`
-exceeds the frame count. The MD22 reader checks the `e_unit`/`r_unit`
-declared in each `.npz` and the expected atom count rather than assuming
-them. Only Ac-Ala3-NHMe and AT-AT are typically pre-downloaded. The others
-download from `quantum-machine.org` on first use.
+Each `simurgh_dev_md22_<system>.yaml` sets its `train_size`. If you change
+`data.molecule` instead of the config, override `train_size` too, or the
+loader raises because `train_size + val_size` exceeds the frame count. The
+MD22 reader checks the `e_unit`/`r_unit` declared in each `.npz` and the
+expected atom count rather than assuming them. Only Ac-Ala3-NHMe and AT-AT
+are typically pre-downloaded. The others download from `quantum-machine.org`
+on first use.
 
 ## Keeping the data and model cutoffs in sync
 
@@ -261,22 +222,15 @@ them together differs:
 
 | Config | Model cutoff | Safe override |
 |---|---|---|
-| `nf_simurgh_*`, `simurgh_simplified_*` | `cutoff: ${data.cutoff}` | `data.cutoff=6.0`, then re-measure `avg_num_neighbors` |
-| `simurgh_legacy_md17` | `model.backbone.dressing_kwargs.cutoff: 5.0` (not interpolated) | `data.cutoff=6.0 model.backbone.dressing_kwargs.cutoff=6.0` |
+| `simurgh_dev_*` | `cutoff: ${data.cutoff}` | `data.cutoff=6.0` (`avg_num_neighbors` is derived again when null) |
 | `hyperspec_md17` | `model.backbone.cutoff: 5.0` (not interpolated) | `data.cutoff=6.0 model.backbone.cutoff=6.0` |
 
 ```bash
-pixi run -e cuda goal-train --config-name simurgh_legacy_md17 data.cutoff=6.0 model.backbone.dressing_kwargs.cutoff=6.0
+pixi run -e cuda goal-train --config-name hyperspec_md17 data.cutoff=6.0 model.backbone.cutoff=6.0
 ```
 
 A new cutoff also means a new processed cache (it is part of the key), and
 more edges per structure, so revisit `batch_size`.
-
-> [!NOTE]
-> `simurgh_legacy_md17` sets `dressing_kwargs.num_elements: 9`, an embedding table
-> covering Z ≤ 8. That is enough for every MD17 molecule, but not for QM9
-> (F, Z = 9). Raise it if you point this config at data with heavier
-> elements.
 
 ## QM9: no forces
 
@@ -290,26 +244,23 @@ it is stored as the graph's `energy` (in eV for the energy-like targets):
 all 19 as separate graph attributes (with `u0` as `energy`) for multi-property
 heads.
 
-A force-trained config cannot simply be pointed at QM9. `simurgh_legacy_nf_qm9`
-shows the changes needed:
+A force-trained config cannot simply be pointed at QM9. The changes needed:
 
 - the `forces` loss is removed and the stage curriculum collapses to one
   stage;
 - checkpoint selection monitors `val_energy/energy_mae_per_atom`. Leaving the
   usual `val_forces/forces_mae` would crash `EarlyStopping` (`strict: true`)
-  because force metrics are never emitted without force labels;
-- `fragment_scheme: rotatable`, because QM9 molecules are single covalent
-  species and `connected` would give one fragment each.
+  because force metrics are never emitted without force labels.
 
 > [!WARNING]
 > `QM9Dataset` (like `ANI1Dataset` and `SPICEDataset`) does not convert a
 > string `data.dtype` into a `torch.dtype`, unlike the MD17 and MD22
 > loaders. Building the QM9 cache from scratch with `dtype: float64` in the
-> config (as `simurgh_legacy_nf_qm9.yaml` has) fails with
+> config fails with
 > `Invalid device string: 'float64'`. An existing cache loads fine. Until the
 > loader is fixed, build the cache once without the key (float64 is the
 > default anyway):
-> `goal-train --config-name simurgh_legacy_nf_qm9 '~data.dtype'`.
+> `goal-train --config-name <your_qm9_config> '~data.dtype'`.
 
 ## ANI-1 / ANI-1x and SPICE
 

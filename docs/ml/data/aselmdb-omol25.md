@@ -3,8 +3,8 @@
 `dataset_type: aselmdb` reads the `.aselmdb` shards that FairChem uses to
 distribute its large corpora (OMol25, OMat24, ODAC23) directly. You need
 neither a conversion step nor `fairchem-core`. This page covers the format,
-OMol25's download layout, the catalogue cache, the subset filters, and the
-worked NF_SIMURGH config and exploration notebook.
+OMol25's download layout, the catalogue cache, the subset filters, a
+SIMURGH config for the subset and the exploration notebook.
 
 ## Why a separate loader
 
@@ -182,22 +182,17 @@ data:
 
 ### Elements: model capacity, not well-posedness
 
-An element filter is a question of what the model can afford. A
-SIMURGH-family backbone builds one artisan per element **pair**, so 83
-elements means 3,486 pairs per round. Two ways to handle that:
-
-- **Restrict the chemistry** with `allowed_elements`, for example CHNOFPSCl
-  `[1, 6, 7, 8, 9, 15, 16, 17]`. This removes the `metal_complexes`
-  sub-corpus entirely (about a fifth of the split).
-- **Keep every element and route rare pairs** into one shared artisan
-  (`model.backbone.artisan.rare_artisan.enabled: true`). The pairs that
-  carry the corpus keep dedicated artisans and the long tail shares one.
-  This is what `simurgh_legacy_nf_omol25.yaml` does now.
+An element filter is a question of what the model can afford. SIMURGH's
+element tables grow with the number of elements and its pair line with the
+number of element pairs, and `goal-train` takes `elements` from the filtered
+training set. Restrict the chemistry with `allowed_elements`, for example
+CHNOFPSCl `[1, 6, 7, 8, 9, 15, 16, 17]`. This removes the `metal_complexes`
+sub-corpus entirely (about a fifth of the split).
 
 > [!WARNING]
-> If you set `allowed_elements`, make `model.backbone.elements` the same
-> list. An edge whose element pair has no artisan is zero-masked, so that
-> pair contributes exactly zero energy and **nothing warns**.
+> SIMURGH raises `ValueError` on a structure with an element outside
+> `model.backbone.elements`, so evaluate and simulate inside the training
+> chemistry.
 
 ### How much data
 
@@ -293,7 +288,7 @@ Unlike the eager `xyz` and `trajectory` readers, every `__getitem__`
 unzips a JSON row, builds an ASE neighbour list and (if enabled) labels
 fragments. The measured rate is about **564 structures/s per process** with
 `fragment_scheme: connected`. Set `num_workers` high enough that loading runs
-ahead of the training step. Eight workers is what the shipped config uses.
+ahead of the training step; eight is a good start.
 
 > [!WARNING]
 > RDKit-based fragment schemes (`rotatable`, `brics`, ...) run inside
@@ -302,41 +297,49 @@ ahead of the training step. Eight workers is what the shipped config uses.
 > 5.3 s. One such structure stalls its worker. If you need those schemes,
 > close the size window as well (for example `max_atoms: 60`).
 
-## Worked example: `simurgh_legacy_nf_omol25.yaml`
+## Training SIMURGH on a subset
 
-[`src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml)
-is a complete, commented NF_SIMURGH run on OMol25:
+No OMol25 config ships. A task file over the SIMURGH base sets the data block
+and nothing else (sketch):
 
-| Choice | Value | Reason |
-|---|---|---|
-| `allowed_elements` | `null` (no element filter) | rare-pair routing (`artisan.rare_artisan.enabled: true`, `min_pair_frequency: 0.02`) keeps the artisan bank tractable; keeps `metal_complexes` |
-| `charges` / `spins` | `[0]` / `[1]` | the model has no charge or spin input |
-| `max_atoms` | `128` | bounds VRAM per batch and the O(K²) fragment-pair enumeration |
-| `max_samples` / `sample_seed` | `4000` / `97` | ~320k structures, random within each shard |
-| `split_ratio` | `[0.96, 0.02, 0.02]` | 2% is already thousands of structures per evaluation set |
-| `cutoff` | `6.0` | at 8 Å the edge count roughly doubles, for interactions the virtual-node channel is meant to carry |
-| `fragment_scheme` | `connected` | about half the subset is multi-species (electrolyte clusters, reacting complexes, solvated ions), so `connected` gives K ≥ 2 on ~50% of structures, with whole molecules and ions as fragments |
-| `model.backbone.elements`, `atomic_energies`, `scale`, `avg_num_neighbors` | hard-coded | `simurgh_legacy_nf` is not auto-instrumented by `train.py`; the values come from `omol25_prepare.py` |
+```yaml
+# src/goal/configs/ml/simurgh_dev_omol25.yaml
+defaults:
+  - simurgh_dev/_base
+  - _self_
 
-After the charge, spin and size filters, the pool contains about 1.9 M
-structures. Run it with:
+task_name: "simurgh_dev_omol25"
 
-```bash
-pixi run -e cuda python scripts/omol25_prepare.py --root data/OMol25/train_4M --workers 8   # once
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_omol25
-# smoke test: ~20k structures
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_omol25 data.max_samples=250
+data:
+  dataset_type: aselmdb
+  root: ${paths.data_dir}/OMol25/train_4M
+  allowed_elements: [1, 6, 7, 8, 9, 15, 16, 17]
+  charges: [0] # the model has no charge or spin input
+  spins: [1]
+  max_atoms: 128 # bounds memory per batch
+  max_samples: 4000 # per shard, after filtering
+  sample_seed: 97
+  split_ratio: [0.96, 0.02, 0.02]
+  monitor_test_during_training: false
+  compute_fragment_index: false
+  fragment_smarts: null
+  num_workers: 8
+
+model:
+  backbone:
+    atomic_energies:
+      mode: dataset # least squares on the training subset
 ```
 
-To restrict the chemistry again:
+Check the composition with `goal-train --config-name simurgh_dev_omol25 --cfg job -p data`
+before a run. `goal-train` derives `elements`, `avg_num_neighbors` and
+`scale` from the subset. To see the numbers first, or to pin them:
 
 ```bash
+pixi run -e cuda python scripts/omol25_prepare.py --root data/OMol25/train_4M --workers 8   # once: catalogues
 pixi run -e cuda python scripts/omol25_prepare.py --root data/OMol25/train_4M --no-index \
-    --elements 1 6 7 8 9 15 16 17 --charges 0 --spins 1 --max-atoms 128 --cutoff 6.0
+    --elements 1 6 7 8 9 15 16 17 --charges 0 --spins 1 --max-atoms 128 --cutoff 5.0
 ```
-
-Then paste the printed block into `model.backbone`, and set
-`data.allowed_elements` to the same element list.
 
 ## Browsing the corpus: `notebooks/omol25_explore.ipynb`
 
@@ -346,15 +349,13 @@ is the way into the corpus. It uses only `ASELMDBReader` and
 
 - an **overview** of sub-corpora, size distribution, charges, spins and
   elements, computed from the catalogue without decoding any geometry;
-- the **training subset**, read straight from `simurgh_legacy_nf_omol25.yaml` so
-  the notebook cannot drift from the config;
+- the **training subset** selected by a set of `aselmdb` filters;
 - **lookup** by reader position, by `(shard, row id)` address, by formula,
   by metadata combinations, by provenance (`data["source"]`), and by
   **SMILES** (a formula prefilter, then RDKit `rdDetermineBonds`
   perception);
 - **py3Dmol views** with DFT force arrows and atoms coloured by the
-  fragment decomposition, which is exactly what NF_SIMURGH pools onto its
-  virtual nodes.
+  fragment decomposition.
 
 The same tools are available in plain Python:
 

@@ -1,10 +1,8 @@
 """Fragment decomposition — how a structure is split into fragments.
 
-A *fragment* is a group of atoms that
-:class:`~goal.ml.nn.blocks.fragment_interaction.EquivariantFragmentInteraction`
-treats as one unit: their features are pooled, the pooled representations
-exchange equivariant messages, and the result is handed back to every
-atom.  What counts as "one unit" is a modelling choice, so five schemes
+A *fragment* is a group of atoms treated as one unit, for example by
+SIMURGH's per-fragment energy decomposition (``fragment_index`` on the
+graph).  What counts as "one unit" is a modelling choice, so six schemes
 are available, selected by ``data.fragment_scheme``:
 
 ==================== ================================================= ===========
@@ -18,20 +16,17 @@ scheme               splits on                                         needs rdk
 ``custom``           your own SMARTS bond patterns (``smarts=``)       yes
 ==================== ================================================= ===========
 
-Which to pick depends on what you want the module to model:
+Which to pick depends on what the fragments should describe:
 
 * ``connected`` (default) gives **physically separate molecules** — the
   cutoff is deliberately far shorter than the MLIP interaction cutoff, so
   two molecules 3 Å apart are two fragments even though every atom pair
-  is inside the model's receptive field.  The fragment channel then
-  models genuine non-bonded interaction.  On a single covalently
-  connected molecule it yields ``K = 1`` and the channel is a no-op.
+  is inside the model's receptive field.  Per-fragment quantities then
+  describe genuine non-bonded interaction.  On a single covalently
+  connected molecule it yields ``K = 1``.
 * ``rotatable`` / ``brics`` / ``recap`` cut a **single molecule** into
-  chemically meaningful groups, turning the channel into a
-  coarse-grained *intramolecular* pathway: pooled groups exchange
-  messages directly instead of atom-by-atom along the chain.  Worth the
-  cost mainly when the fragment cutoff exceeds the atom cutoff, so
-  distant parts of one molecule couple in a single step.
+  chemically meaningful groups, so per-fragment quantities describe
+  coarse-grained *intramolecular* groups.
 * ``rdkit_components`` is ``connected`` computed on the perceived
   molecule.  It normally agrees with ``connected`` exactly; it exists so
   you can confirm that, and so bond perception (rather than a distance

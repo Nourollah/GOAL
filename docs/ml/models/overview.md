@@ -26,20 +26,12 @@ def forward(self, graph):
     if self.head is None:                 # monolithic
         return self.backbone(graph)
     features = self.backbone(graph)       # NodeFeatures
-    predictions = self.head(features, graph)
-    # ...plus duck-typed side channels (see below)
-    return predictions
+    return self.head(features, graph)
 ```
 
-The trainer only sees the resulting dictionary. Loss components in `training.losses` are matched to keys in that dictionary by name, and the metric logger reads the standard keys too: `energy`, `forces`, `num_atoms`, and optional diagnostics such as `layer_energies`.
+The trainer only sees the resulting dictionary. Loss components in `training.losses` are matched to keys in that dictionary by name, and the metric logger reads the standard keys too: `energy`, `forces` and `num_atoms`.
 
-`GOALModule` also reads some optional attributes from the backbone, purely by duck typing. Backbones that do not define them are skipped:
-
-| Backbone attribute | Effect |
-|---|---|
-| `last_aux_loss` (grad-enabled scalar) | copied to `predictions["aux_loss"]` and added to the total training loss (e.g. the ARACE adaptive depth gate) |
-| `last_gate_scores` | stacked into `predictions["gate_scores"]` and logged per round under `*_gate/` |
-| `last_round_energies` / `predictions["layer_energies"]` | logged as `energy_round_{L}` (ARACE per-round energy decomposition) |
+A model may also return its own regularisation term as `aux_loss` (already weighted), with an optional `aux_terms` dictionary breaking it down. `GOALModule` adds `aux_loss` to the total training loss and logs it under `*_gate/`; the parts in `aux_terms` are logged, not added again. SIMURGH uses this for multi-scale fragment consistency, denoising and its other training-only terms.
 
 Validation and test steps wrap the forward pass in `torch.enable_grad()`, so autograd forces still work there.
 
@@ -58,15 +50,14 @@ Some constructor arguments are computed from the training split in step 3. Which
 
 | Injected kwarg | When | Backbones |
 |---|---|---|
-| `elements` (overwrites the config value) | always | `simurgh_legacy`, `simurgh_legacy_ace_first`, `simurgh_legacy_arace`, `simurgh_legacy_monolithic`, `simurgh_legacy_monolithic_arace` **only** |
+| `elements` (overwrites the config value) | always | `simurgh_dev` and its `simurgh_dev_abl_*` arms **only** |
 | `atomic_energies.values` (least-squares $E_0$) | `atomic_energies.mode: dataset` (or `compute_from_dataset: true`) with `values: null` | any backbone with an `atomic_energies` kwarg |
-| `scale` | `atomic_energies.mode` is `dataset` or `provided`, and `scale` is null or missing | any backbone with an `atomic_energies` kwarg |
-| `dressing_kwargs.avg_num_neighbors` | it is null | backbones with a `dressing_kwargs` section (legacy SIMURGH) |
-| `avg_num_neighbors` (top level) | it is null | `simurgh_legacy_arace` **only** |
-| `artisan.pair_counts` / `artisan_config.pair_counts` | `rare_artisan.enabled: true` and counts are null | any backbone with that section |
+| `scale` | `atomic_energies.mode` is `dataset` or `provided`, and `scale` is null or missing; or `scale: force_rms` (RMS of the training forces) | any backbone with an `atomic_energies` kwarg; `force_rms` for `simurgh_dev` |
+| `avg_num_neighbors` | it is null | `simurgh_dev` **only** |
+| `atom_statistics` | the backbone requests descriptor statistics | `simurgh_dev` with `attention.pan_gate` |
 
 > [!WARNING]
-> `simurgh_legacy_nf`, `simurgh_simplified_*` and `simurgh_ablation` are **not** in the `elements` list, and `simurgh_legacy_monolithic_arace` is not in the `avg_num_neighbors` list. For these models, set the values in the config yourself. The shipped configs already do this, with comments explaining why. If `avg_num_neighbors` is left `null` on them, the aggregation is simply not normalised. You get no error.
+> Any other backbone gets `elements` and `avg_num_neighbors` from the config only. Set them yourself, and make a new model raise when `avg_num_neighbors` is missing rather than silently skipping the normalisation.
 
 ## The registry
 
@@ -94,26 +85,19 @@ print(HEAD_REGISTRY.list_available())
 
 ## Model zoo
 
-Status key: **default** = the recommended production model; **legacy** = kept working, no longer the default; **research** = self-contained variant meant for A/B comparison; **experimental** = new research model, under active development; **ablation** = frozen model for the ablation study only; **baseline / reference** = educational or comparison models.
+Status key: **default** = the recommended model; **ablation** = one mechanism added to the default model for the ablation programme; **baseline / reference** = educational or comparison models; **foundation** = fine-tuning of a pre-trained potential.
 
 All files are relative to `src/goal/ml/nn/models/`. All configs are under `src/goal/configs/ml/`.
 
 | Registry name | Kind | Status | Forces | File | Example config |
 |---|---|---|---|---|---|
-| `simurgh_legacy_arace` | modular | **default** | autograd (head) | [`simurgh/legacy/backbone_arace.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/backbone_arace.py) | [`simurgh_legacy_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26.yaml), [`simurgh_legacy_gmd26_hpo.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml) |
-| `simurgh_legacy` (alias `simurgh_legacy_ace_first`) | modular | legacy | autograd / pairwise / hybrid (head) | [`simurgh/legacy/backbone.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/backbone.py) | [`simurgh_legacy_ace_first_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_ace_first_gmd26.yaml), [`simurgh_legacy_md17.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_md17.yaml) |
-| `simurgh_legacy_monolithic` | monolithic | legacy | autograd or pairwise (`forces_mode`) | [`simurgh/legacy/monolithic.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/monolithic.py) | none shipped (same keys as legacy `simurgh_legacy`, plus `forces_mode`, `correction_weight`; `head: null`) |
-| `simurgh_legacy_monolithic_arace` | monolithic | research | autograd | [`simurgh/legacy/arace.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/arace.py) | [`simurgh_legacy_monolithic_arace_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_monolithic_arace_gmd26.yaml) |
-| `simurgh_legacy_nf` | monolithic | experimental | autograd | [`simurgh/legacy/nf_simurgh.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/nf_simurgh.py) | `nf_simurgh_{gmd26,gmd26_typecond,gmd26_FF,md17,md17_benzene,md22,qm9,omol25}.yaml` |
-| `simurgh_legacy_simplified_monolithic` | monolithic | experimental | autograd | [`simurgh/legacy/simurgh_simplified_monolithic.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/simurgh_simplified_monolithic.py) | `simurgh_legacy_simplified_monolithic_{gmd26,md17}.yaml` |
-| `simurgh_legacy_simplified_routed` | monolithic | experimental | autograd | [`simurgh/legacy/simurgh_simplified_routed.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/legacy/simurgh_simplified_routed.py) | `simurgh_legacy_simplified_routed_{gmd26,md17}.yaml` |
-| `simurgh_ablation` | modular | ablation | autograd (head) | [`ablations/backbone.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/ablations/backbone.py) | [`ablations/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/configs/ml/ablations) (numbered rungs) |
+| `simurgh_dev` | monolithic | **default** (in development) | autograd | [`simurgh/dev/monolithic.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/simurgh/dev/monolithic.py) | [`simurgh_dev_gmd26_FD.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_dev_gmd26_FD.yaml) and the other `simurgh_dev_*.yaml` |
+| `simurgh_dev_abl_<mechanism>` | monolithic | ablation | autograd | [`simurgh/dev/ablations/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/ml/nn/models/simurgh/dev/ablations) | [`ablations/simurgh_dev/`](https://github.com/Nourollah/GOAL/tree/main/src/goal/configs/ml/ablations/simurgh_dev) |
 | `hyperspec` | modular | baseline (placeholder) | autograd (head; fixed Oct 2026) or direct | [`hyperspec.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/hyperspec.py) | [`hyperspec_md17.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/hyperspec_md17.yaml) |
 | `invariant_gnn` | modular (invariant) | baseline | autograd (head; fixed Oct 2026) | [`invariant.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/invariant.py) | none shipped |
 | `monolithic_example` | monolithic | reference | autograd | [`monolithic_example.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/monolithic_example.py) | none shipped |
 | `mace_finetune` | monolithic | foundation | autograd | [`foundation/mace.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/foundation/mace.py) | [`finetune/mace.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/mace.yaml) |
 | `uma_finetune` | monolithic | foundation | autograd | [`foundation/uma.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/foundation/uma.py) | [`finetune/uma.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/uma.yaml) |
-| `simurgh_lora` | monolithic | fine-tuning | autograd (base model's) | [`goal/ml/adapters/simurgh_lora.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/adapters/simurgh_lora.py) | [`finetune/simurgh_legacy_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml) ([LoRA fine-tuning](../../integrations/lora_finetune.md)) |
 
 `mace_finetune` and `uma_finetune`, and the lazy entries below, are registered **only** in `BACKBONE_REGISTRY`. "Autograd" means conservative forces $\mathbf F=-\partial E/\partial\mathbf r$; every model in the table predicts forces.
 
@@ -134,26 +118,19 @@ The adapters are plain classes, not `nn.Module`s, so their weights cannot be fin
 
 ### Which model should I use?
 
-- **Production force field on small- to medium-element-count chemistry:** `simurgh_legacy_arace` (start from `goal-train`, which runs `simurgh_legacy_gmd26.yaml` by default).
-- **Same physics in a self-contained model, e.g. for an A/B comparison:** `simurgh_legacy_monolithic_arace`.
-- **Long-range coupling between molecular fragments, or large element sets with rare-pair routing (OMol25):** `simurgh_legacy_nf` (experimental). It needs fragment labels.
-- **A routed vs plain-stack comparison on an identical skeleton:** the two `simurgh_simplified_*` models.
-- **Measuring what each SIMURGH component contributes:** `simurgh_ablation` with the numbered configs.
+- **Native force field:** `simurgh_dev` (start from `goal-train`, which runs `simurgh_dev_gmd26_FD.yaml` by default). See [SIMURGH (development)](simurgh-dev.md).
+- **Measuring what one SIMURGH mechanism contributes:** the `ablations/simurgh_dev/` configs, one key or one `simurgh_dev_abl_*` arm each.
 - **Starting from a pre-trained foundation potential:** `mace_finetune` / `uma_finetune`. See [Fine-tuning](../finetuning/overview.md).
 - **Writing your own architecture:** [Writing a new model](custom-model.md).
 
 ```bash
-pixi run -e cuda goal-train                                                         # simurgh_legacy_arace on GMD-26 (default config)
-pixi run -e cuda goal-train --config-name simurgh_legacy_ace_first_gmd26                   # legacy ACE-first
-pixi run -e cuda goal-train --config-name simurgh_legacy_monolithic_arace_gmd26                    # monolithic ARACE
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_gmd26                          # NF_SIMURGH
-pixi run -e cuda goal-train --config-name simurgh_legacy_simplified_routed_gmd26           # SIMURGH Simplified (routed)
-pixi run -e cuda goal-train-ml --config-dir src/goal/configs/ml --config-name ablations/01_gmd26_base   # ablation base rung
+pixi run -e cuda goal-train                                                     # simurgh_dev on GMD-26 FragmentDuplication (default)
+pixi run -e cuda goal-train --config-name simurgh_dev_rmd17_aspirin             # another task
+pixi run -e cuda goal-train --config-name ablations/simurgh_dev/s05_num_rbf_16  # one ablation arm
 ```
 
 ## Further reading
 
-- [SIMURGH](simurgh.md): ARACE and the legacy ACE-first architecture
-- [NF_SIMURGH](nf-simurgh.md), [SIMURGH Simplified](simurgh-simplified.md), [Ablation study](ablation-study.md)
+- [SIMURGH (development)](simurgh-dev.md)
 - [Other backbones](other-backbones.md): HyperSpec, InvariantGNN, foundation models
 - [Heads](heads.md) and [Writing a new model](custom-model.md)

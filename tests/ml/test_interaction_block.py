@@ -1,12 +1,12 @@
-"""Tests for EquivariantInteractionBlock (CHANGES 1, 2, 5).
+"""Tests for EquivariantInteractionBlock.
 
 Covers:
-* Element conditioning (CHANGE 1) — different element types at the
+* Element conditioning — different element types at the
   destination atom produce different TP weights and thus different output
   features, even when the geometric neighbourhood is identical.
-* Pre-computed spherical harmonics (CHANGE 2) — passing ``edge_sh``
+* Pre-computed spherical harmonics — passing ``edge_sh``
   externally yields exactly the same output as the internal SH computation.
-* Aggregation normalisation exponent (CHANGE 5) — ``agg_norm_scale`` buffer
+* Aggregation normalisation exponent — ``agg_norm_scale`` buffer
   stores the correct value for both ``exponent=1.0`` and ``exponent=0.5``,
   and the forward output magnitudes scale accordingly.
 * Equivariance under SO(3) rotation — after element conditioning the block
@@ -16,14 +16,11 @@ Covers:
 
 from __future__ import annotations
 
-import math
-
 import pytest
 import torch
 from e3nn.o3 import Irreps, spherical_harmonics
 
 from goal.ml.nn.blocks.interaction import EquivariantInteractionBlock
-from tests.ml.simurgh.conftest import requires_gmd
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,7 +69,7 @@ def _dimer_inputs(
 
 
 # ---------------------------------------------------------------------------
-# CHANGE 1: Element conditioning
+# Element conditioning
 # ---------------------------------------------------------------------------
 
 
@@ -149,28 +146,9 @@ class TestElementConditioning:
                 atomic_numbers=None,
             )
 
-    @requires_gmd
-    def test_conditioning_on_gmd_batch(self, gmd_batch) -> None:  # noqa: ANN001
-        """Smoke test: element-conditioned block runs on real GMD frames."""
-        block = _make_block(element_conditioned=True, n_elements=10, avg_num_neighbors=8.0)
-        feats = torch.randn(
-            gmd_batch.num_nodes,
-            block.irreps_node.dim,
-            dtype=torch.float64,
-        )
-        out = block(
-            node_feats=feats,
-            edge_index=gmd_batch.edge_index,
-            edge_vectors=gmd_batch.edge_attr,
-            edge_lengths=gmd_batch.edge_weight,
-            atomic_numbers=gmd_batch.atomic_numbers,
-        )
-        assert out.shape == feats.shape
-        assert torch.isfinite(out).all()
-
 
 # ---------------------------------------------------------------------------
-# CHANGE 2: Pre-computed spherical harmonics
+# Pre-computed spherical harmonics
 # ---------------------------------------------------------------------------
 
 
@@ -211,7 +189,7 @@ class TestPrecomputedSH:
 
 
 # ---------------------------------------------------------------------------
-# CHANGE 5: Aggregation normalisation exponent
+# Aggregation normalisation exponent
 # ---------------------------------------------------------------------------
 
 
@@ -241,45 +219,6 @@ class TestAggNormExponent:
         assert (
             block_1.agg_norm_scale.item() < block_half.agg_norm_scale.item()
         ), "exponent=1.0 should divide by N (smaller scale) vs exponent=0.5 (sqrt N)."
-
-    @requires_gmd
-    def test_exponent_changes_output_magnitude_on_gmd_data(self, gmd_batch) -> None:
-        """Same GMD batch with exponent=1.0 vs 0.5 should give different output norms."""
-        torch.manual_seed(0)
-        node_feats = torch.randn(
-            gmd_batch.num_nodes,
-            Irreps("8x0e+8x1o").dim,
-            dtype=torch.float64,
-        )
-
-        block_1 = _make_block(avg_num_neighbors=8.0, agg_norm_exponent=1.0)
-        block_half = _make_block(avg_num_neighbors=8.0, agg_norm_exponent=0.5)
-
-        # Copy weights so geometry alone drives the difference
-        state = block_1.state_dict()
-        block_half.load_state_dict(state, strict=False)
-        # Override only the norm buffer
-        with torch.no_grad():
-            block_half.agg_norm_scale.fill_(block_half.agg_norm_scale.new_tensor(1.0 / (8.0**0.5)))
-
-        with torch.no_grad():
-            out_1 = block_1(
-                node_feats=node_feats,
-                edge_index=gmd_batch.edge_index,
-                edge_vectors=gmd_batch.edge_attr,
-                edge_lengths=gmd_batch.edge_weight,
-            )
-            out_half = block_half(
-                node_feats=node_feats,
-                edge_index=gmd_batch.edge_index,
-                edge_vectors=gmd_batch.edge_attr,
-                edge_lengths=gmd_batch.edge_weight,
-            )
-
-        # The norms should differ because the agg_norm_scale differs
-        assert not torch.allclose(
-            out_1, out_half
-        ), "Different agg_norm_exponent values produced identical outputs on GMD data."
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +268,6 @@ class TestEquivariance:
 
 def _rotate_node_feats(node_feats: torch.Tensor, R: torch.Tensor, irreps: Irreps) -> torch.Tensor:
     """Apply SO(3) rotation R to equivariant node features."""
-    from e3nn.o3 import Irreps as E3Irreps
 
     rotated = torch.zeros_like(node_feats)
     offset = 0

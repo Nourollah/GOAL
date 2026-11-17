@@ -36,10 +36,8 @@ from goal.ml.data.statistics import (
     compute_atomic_references,
     compute_avg_num_neighbors,
     compute_energy_scale,
-    compute_pair_counts,
     compute_unique_elements,
 )
-from goal.ml.nn.blocks.artisans import encode_pair_counts
 from goal.ml.registry import BACKBONE_REGISTRY
 from goal.ml.training import dataset_stats
 from goal.ml.training.callbacks.checkpoint_manager import GOALCheckpointManager
@@ -115,7 +113,6 @@ _DERIVED_BACKBONE_KEYS: tuple[str, ...] = (
     "atomic_energies",
     "scale",
     "avg_num_neighbors",
-    "dressing_kwargs",
     "atom_statistics",
     "aux",
 )
@@ -203,7 +200,7 @@ def _prepare_resumed_module(
     * Buffer statistics (``scale``, ``atomic_energies``) are restored from the
       checkpoint by Lightning; ``keep_fresh_buffers`` keeps the recomputed
       values instead.
-    * Structural statistics (``elements``, ``pair_counts``) change parameter
+    * Structural statistics (``elements``) change parameter
       shapes; a mismatch is reported here, in plain terms, before Lightning
       fails on it.
     """
@@ -292,22 +289,12 @@ def _run_training(cfg: DictConfig) -> None:
                     f"them from the current data instead."
                 )
 
-    # Auto-extract elements from the training set for SIMURGH-family backbones.
-    # This replaces any manually-specified elements list in the config —
-    # the dataset is always authoritative. Other backbones (hyperspec,
-    # invariant_gnn) use a fixed-size embedding table and ignore this key.
+    # Auto-extract elements from the training set for SIMURGH (and its
+    # simurgh_dev_abl_* arms).  This replaces any manually-specified elements
+    # list in the config — the dataset is always authoritative.  Other
+    # backbones (hyperspec, invariant_gnn) use a fixed-size embedding table.
     backbone_name: str = BACKBONE_REGISTRY.canonical(cfg.model.backbone.name)
-    if (
-        backbone_name
-        in (
-            "simurgh_legacy",
-            "simurgh_legacy_ace_first",
-            "simurgh_legacy_arace",
-            "simurgh_legacy_monolithic",
-            "simurgh_legacy_monolithic_arace",
-        )
-        or backbone_name.startswith("simurgh_dev")  # the model and its simurgh_dev_abl_* arms
-    ) and "elements" not in reused:
+    if backbone_name.startswith("simurgh_dev") and "elements" not in reused:
         elements: list[int] = compute_unique_elements(datamodule.data_train)
         symbol_str: str = " ".join(f"{ATOMIC_SYMBOLS.get(z, '?')}({z})" for z in elements)
         print(f"[stats] elements discovered in training set: {symbol_str}")
@@ -347,26 +334,6 @@ def _run_training(cfg: DictConfig) -> None:
             backbone_kwargs["scale"] = scale_val
             print(f"[stats] scale={scale_val:.6f}")
 
-    # avg_num_neighbors — MACE-style sum-aggregation normaliser.
-    dressing_cfg: typing.Any = backbone_kwargs.get("dressing_kwargs")
-    if isinstance(dressing_cfg, (DictConfig, dict)):
-        dressing_dict: dict[str, typing.Any] = dict(dressing_cfg)
-        if dressing_dict.get("avg_num_neighbors") is None:
-            avg_nn: float = compute_avg_num_neighbors(datamodule.data_train)
-            dressing_dict["avg_num_neighbors"] = avg_nn
-            backbone_kwargs["dressing_kwargs"] = dressing_dict
-            print(f"[stats] avg_num_neighbors={avg_nn:.4f}")
-
-    # avg_num_neighbors for the ARACE backbone — it has no dressing_kwargs
-    # sub-config; the normaliser is a top-level backbone key instead.
-    if (
-        backbone_name == "simurgh_legacy_arace"
-        and backbone_kwargs.get("avg_num_neighbors") is None
-    ):
-        avg_nn_arace: float = compute_avg_num_neighbors(datamodule.data_train)
-        backbone_kwargs["avg_num_neighbors"] = avg_nn_arace
-        print(f"[stats] avg_num_neighbors={avg_nn_arace:.4f}")
-
     # SIMURGH: avg_num_neighbors when null, and scale = RMS of the training
     # force components when the config asks for it (``scale: force_rms``).
     if backbone_name.startswith("simurgh_dev"):  # the model and its simurgh_dev_abl_* arms
@@ -397,39 +364,11 @@ def _run_training(cfg: DictConfig) -> None:
             backbone_kwargs["atom_statistics"] = stats
             print(f"[stats] atom_statistics={stats}")
 
-    # pair_counts — for data-driven expert routing.
-    # Injected when a backbone declares rare_artisan.enabled=true.  The
-    # two model families spell the artisan sub-config differently —
-    # "artisan_config" on the legacy SIMURGH backbones, "artisan" on the
-    # ARACE ones (simurgh_legacy_arace / simurgh_legacy_monolithic_arace / simurgh_legacy_nf) — so both
-    # keys are checked.  The routing layout inside is identical.
-    for artisan_key in ("artisan_config", "artisan"):
-        artisan_cfg_raw: typing.Any = backbone_kwargs.get(artisan_key)
-        if not isinstance(artisan_cfg_raw, (DictConfig, dict)):
-            continue
-        ecfg: dict[str, typing.Any] = dict(artisan_cfg_raw)
-        ge: dict[str, typing.Any] = dict(ecfg.get("rare_artisan") or {})
-        if bool(ge.get("enabled", False)) and ecfg.get("pair_counts") is None:
-            pc: dict[tuple[int, int], int] = compute_pair_counts(datamodule.data_train)
-            total: int = max(1, sum(pc.values()))
-            print(f"[stats] pair_counts computed ({len(pc)} pairs, {total} total directed edges)")
-            # YAML-safe "Zlo_Zhi" keys, and written into BOTH the kwargs
-            # and the config.  Routing decides which artisan modules
-            # exist, so a checkpoint trained with it cannot load into a
-            # model rebuilt from a config that has lost the counts — the
-            # saved config.yaml has to carry them.
-            encoded: dict[str, int] = encode_pair_counts(pc)
-            ecfg["pair_counts"] = encoded
-            backbone_kwargs[artisan_key] = ecfg
-            with open_dict(cfg):
-                cfg.model.backbone[artisan_key]["pair_counts"] = encoded
-
     # Persist every dataset-derived argument in the config the run saves
-    # (hparams + checkpoints/config.yaml), as pair_counts already is.  A
-    # model rebuilt from that config — GOALCalculator on a bare .ckpt,
-    # goal-eval, goal-inspect — otherwise falls back to the defaults
-    # (elements (1, 6, 7, 8), scale 1.0, no atomic references), and
-    # anything sized from them (``artisan.n_elements: auto``) changes shape.
+    # (hparams + checkpoints/config.yaml).  A model rebuilt from that config
+    # — GOALCalculator on a bare .ckpt, goal-eval, goal-inspect — otherwise
+    # falls back to the defaults (elements (1, 6, 7, 8), scale 1.0, no atomic
+    # references), and anything sized from them changes shape.
     _persist_derived_backbone_args(cfg, backbone_kwargs)
 
     # Which data the statistics describe, for the next resume to compare.
@@ -562,13 +501,13 @@ def _run_training(cfg: DictConfig) -> None:
         (checkpoint_dir / SENTINEL_NAME).touch()
 
 
-@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_legacy_gmd26")
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_dev_gmd26_FD")
 def train_ml(cfg: DictConfig) -> None:
     """GOAL training entry point for self-contained src/goal/configs/ml/ experiment files.
 
     Usage:
-        goal-train-ml                                  # loads simurgh_legacy_gmd26.yaml (default)
-        goal-train-ml --config-name simurgh_legacy_md17        # loads simurgh_legacy_md17.yaml
+        goal-train-ml                                  # loads simurgh_dev_gmd26_FD.yaml (default)
+        goal-train-ml --config-name simurgh_dev_gmd26_FF  # loads simurgh_dev_gmd26_FF.yaml
         goal-train-ml --config-name hyperspec_md17     # loads hyperspec_md17.yaml
 
     All parameters live in a single file under src/goal/configs/ml/.
@@ -579,7 +518,7 @@ def train_ml(cfg: DictConfig) -> None:
     Continue a run that already finished by raising the budget and
     pointing at its checkpoints:
         goal-train-ml trainer.max_epochs=2000 \
-            resume.from=logs/simurgh_legacy_gmd26/runs/<old_run>/checkpoints
+            ++resume.from=logs/simurgh_dev_gmd26_FD/runs/<old_run>/checkpoints
     """
     _run_training(cfg)
 

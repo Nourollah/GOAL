@@ -6,9 +6,8 @@ dashboard rather than about the physics:
 1. ``mlip_metrics`` reports the Newton violation as **four** numbers —
    one per Cartesian axis plus their sum — so an anisotropic violation is
    visible instead of averaged away.
-2. Every gate diagnostic is logged under ``{split}_gate/``, never under
-   ``{split}/``.  The gate curves are numerous (one per round, plus one
-   per element pair per round) and they must not bury
+2. The model's own regularisation term (``aux_loss``) is logged under
+   ``{split}_gate/``, never under ``{split}/``, so it cannot bury
    ``val_forces/forces_mae`` in the W&B panel list.
 3. Energy and force curves get a section each — ``{split}_energy/`` and
    ``{split}_forces/`` — loss term included, leaving ``{split}/`` holding
@@ -24,20 +23,37 @@ import warnings
 
 import pytest
 import torch
+from ase.build import molecule
 from omegaconf import OmegaConf
 from torch_geometric.data import Batch
 
+from goal.ml.data.graph import AtomicGraph
 from goal.ml.training.metrics import PROG_BAR_METRICS, metric_section, mlip_metrics
-from tests.ml.simurgh.conftest import _build_graph
-from tests.ml.simurgh.test_adaptive_gate import ADAPTIVE_GATE_CONFIG
-from tests.ml.simurgh.test_fragment_interaction import (
-    ACTIVE_FRAGMENT_CONFIG,
-    HIDDEN_IRREPS,
-    _build_backbone,
-    _labelled_graph,
-    _methane_positions,
-    _water_dimer,
-)
+
+E0 = {1: -13.6, 6: -1028.5, 8: -2041.1}
+SMALL: dict = {
+    "elements": [1, 6, 8],
+    "num_channels": 8,
+    "message_irreps": "8x0e + 8x1o",
+    "embedding_dim": 8,
+    "radial_mlp": [16],
+    "avg_num_neighbors": 6.0,
+    "scale": 0.7,
+    "dtype": "float64",
+    "atomic_energies": {"mode": "provided", "values": E0},
+}
+
+
+def _graph(name: str) -> AtomicGraph:
+    return AtomicGraph.from_ase(molecule(name), cutoff=5.0, dtype=torch.float64)
+
+
+def _model():
+    from goal.ml.nn.models.simurgh.dev import SimurghDev
+
+    torch.manual_seed(0)
+    return SimurghDev(**SMALL)
+
 
 NEWTON_KEYS: list[str] = [
     "newton_violation_x",
@@ -53,16 +69,14 @@ NEWTON_KEYS: list[str] = [
 
 
 def _batch_with_forces(forces: torch.Tensor) -> tuple[dict[str, torch.Tensor], Batch]:
-    """Predictions carrying *forces* plus a matching single-graph batch."""
-    positions, numbers = _methane_positions()
-    graph = _build_graph(positions, numbers, cutoff=5.0)
-    batch = Batch.from_data_list([graph])
+    """Predictions carrying *forces* plus a matching single-graph batch (methane)."""
+    batch = Batch.from_data_list([_graph("CH4")])
     batch.energy = torch.tensor([-17.0], dtype=torch.float64)
     batch.forces = torch.zeros_like(batch.pos)
 
     predictions: dict[str, torch.Tensor] = {
         "energy": torch.tensor([-17.0], dtype=torch.float64),
-        "num_atoms": torch.tensor([float(positions.shape[0])], dtype=torch.float64),
+        "num_atoms": torch.tensor([5.0], dtype=torch.float64),
         "forces": forces,
     }
     return predictions, batch
@@ -127,19 +141,12 @@ class TestNewtonViolationPerComponent:
         assert float(metrics["newton_violation_z"]) == pytest.approx(0.9)
 
     def test_conservative_forces_violate_nothing_on_any_axis(self) -> None:
-        """Autograd forces from a real backbone: every axis at ~0."""
-        from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-
-        graph = _build_graph(*_methane_positions(), cutoff=5.0)
-        batch = Batch.from_data_list([graph])
+        """Autograd forces from a real model: every axis at ~0."""
+        batch = Batch.from_data_list([_graph("CH4")])
         batch.energy = torch.tensor([-17.0], dtype=torch.float64)
         batch.forces = torch.zeros_like(batch.pos)
 
-        backbone = _build_backbone()
-        backbone.eval()
-        head = EnergyForcesHead(irreps_in=HIDDEN_IRREPS, hidden_dim=16).double()
-        head.eval()
-        predictions = head(backbone(batch), batch)
+        predictions = _model().eval()(batch)
 
         metrics = mlip_metrics(predictions, batch)
         for key in NEWTON_KEYS:
@@ -179,24 +186,19 @@ class _LogSpy:
             self.log(name, value, **kwargs)
 
 
-def _module_with_gate(**backbone_kwargs):
-    from goal.ml.nn.heads.energy_forces import EnergyForcesHead
+def _module():
     from goal.ml.training.loss import (
         CompositeLoss,
         EnergyLoss,
         ForcesLoss,
-        GateRegLoss,
         WeightedLoss,
     )
     from goal.ml.training.module import GOALModule
 
-    backbone = _build_backbone(**backbone_kwargs)
-    head = EnergyForcesHead(irreps_in=HIDDEN_IRREPS, hidden_dim=16).double()
     loss = CompositeLoss(
         [
             WeightedLoss(EnergyLoss(), weight=1.0, label="energy"),
             WeightedLoss(ForcesLoss(), weight=1.0, label="forces"),
-            WeightedLoss(GateRegLoss(), weight=1.0e-4, label="gate_reg"),
         ]
     )
     cfg = OmegaConf.create(
@@ -208,12 +210,12 @@ def _module_with_gate(**backbone_kwargs):
             }
         }
     )
-    return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
+    return GOALModule(backbone=_model(), head=None, loss=loss, config=cfg)
 
 
 def _labelled_training_batch() -> Batch:
-    batch = Batch.from_data_list([_labelled_graph(*_water_dimer())])
-    batch.energy = torch.tensor([-152.0], dtype=torch.float64)
+    batch = Batch.from_data_list([_graph("CH3CH2OH")])
+    batch.energy = torch.tensor([-4200.0], dtype=torch.float64)
     # Non-zero reference forces on purpose: ``forces_cosine_similarity``
     # is (correctly) omitted when every label is exactly zero, and this
     # test is about which section the metrics land in, so they all need to
@@ -234,42 +236,18 @@ def _run_step(module, batch, step: str) -> _LogSpy:
 
 
 class TestGateMetricsAreSectioned:
-    def test_train_step_puts_gate_metrics_in_train_gate(self) -> None:
-        module = _module_with_gate(
-            fragment_interaction=ACTIVE_FRAGMENT_CONFIG,
-            adaptive_gate=ADAPTIVE_GATE_CONFIG,
-        )
+    def test_train_step_puts_aux_loss_in_train_gate(self) -> None:
+        module = _module()
         module.train()
         keys = _run_step(module, _labelled_training_batch(), "training").logged
 
-        # Gate diagnostics — in the gate section...
-        assert "train_gate/gate_mean_round_0" in keys
-        assert "train_gate/gate_mean_round_1" in keys
         assert "train_gate/aux_loss" in keys
-        assert "train_gate/gate_reg" in keys
-        # ...and nowhere near the metrics section.
         assert not any(
             k.startswith("train/") and ("gate" in k or "aux_loss" in k) for k in keys
         ), sorted(k for k in keys if k.startswith("train/"))
 
-    def test_artisan_gates_are_logged_on_train_too(self) -> None:
-        """Artisan gates used to be validation-only, which left train_gate/
-        with no artisan curves at all.  They are cheap (parameters), so both
-        splits get them."""
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
-        module.train()
-        keys = _run_step(module, _labelled_training_batch(), "training").logged
-
-        artisan = sorted(k for k in keys if "artisan/" in k)
-        assert artisan, "no artisan gate curves on the train step"
-        assert all(k.startswith("train_gate/artisan/") for k in artisan), artisan
-        # 4 elements → 10 unordered pairs, x 2 rounds.
-        assert len(artisan) == 20, artisan
-        assert "train_gate/artisan/round0/H-C" in keys
-        assert "train_gate/artisan/round1/O-O" in keys
-
     def test_train_step_keeps_physics_metrics_in_train(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.train()
         keys = _run_step(module, _labelled_training_batch(), "training").logged
 
@@ -281,28 +259,21 @@ class TestGateMetricsAreSectioned:
             "train_forces/forces_mae",
             "train_forces/newton_violation",
             "train_forces/newton_violation_x",
-            "train_energy/energy_round_0",
         ):
             assert expected in keys, f"{expected} left its section"
 
-    def test_val_step_sections_gate_and_artisan_gates(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+    def test_val_step_keeps_gate_terms_out_of_val(self) -> None:
+        module = _module()
         module.eval()
         keys = _run_step(module, _labelled_training_batch(), "validation").logged
 
-        assert "val_gate/gate_mean_round_0" in keys
-        assert "val_gate/aux_loss" in keys
-        assert "val_gate/gate_reg" in keys
-        # Per-element-pair artisan gates — nested under the gate section,
-        # not in a third top-level "gates/" section.
-        assert any(k.startswith("val_gate/artisan/round0/") for k in keys)
         assert not any(k.startswith("gates/") for k in keys)
         assert not any(
             k.startswith("val/") and ("gate" in k or "aux_loss" in k) for k in keys
         ), sorted(k for k in keys if k.startswith("val/"))
 
     def test_val_step_keeps_the_metrics_worth_monitoring(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.eval()
         keys = _run_step(module, _labelled_training_batch(), "validation").logged
 
@@ -316,60 +287,23 @@ class TestGateMetricsAreSectioned:
         ):
             assert expected in keys, f"{expected} left its section"
 
-    def test_test_step_sections_gate_terms_too(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+    def test_test_step_keeps_gate_terms_out_of_test(self) -> None:
+        module = _module()
         module.eval()
         keys = _run_step(module, _labelled_training_batch(), "test").logged
 
         assert "test/total" in keys
-        assert "test_gate/gate_reg" in keys
         assert not any(k.startswith("test/") and ("gate" in k or "aux_loss" in k) for k in keys)
 
     def test_gate_curves_stay_off_the_progress_bar(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.train()
         spy = _run_step(module, _labelled_training_batch(), "training")
 
+        assert "train_gate/aux_loss" in spy.logged
         gate_on_bar = {k for k in spy.prog_bar_keys if "_gate/" in k}
         assert not gate_on_bar, f"gate metrics on the progress bar: {sorted(gate_on_bar)}"
         assert "train/total" in spy.prog_bar_keys
-
-    def test_no_gate_section_when_the_gate_is_disabled(self) -> None:
-        """A run with no adaptive gate emits no gate-mean curves at all —
-        only the artisan gate-reg loss and gate snapshots, which still
-        belong in the gate section."""
-        module = _module_with_gate()
-        module.train()
-        keys = _run_step(module, _labelled_training_batch(), "training").logged
-
-        assert not any("gate_mean_round" in k for k in keys)
-        assert "train_gate/aux_loss" not in keys
-        assert "train_gate/gate_reg" in keys
-        # The artisan gates belong to the artisan bank, not the depth gate,
-        # so they are logged whether or not the depth gate is enabled.
-        assert "train_gate/artisan/round0/H-C" in keys
-
-    def test_artisan_loads_land_in_the_gate_section(self) -> None:
-        """The load-balance diagnostic is artisan bookkeeping, so it belongs
-        with the gate curves rather than beside val/forces_mae.  Only the
-        legacy ACE-first backbone exposes it, hence the stub."""
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
-        module.eval()
-
-        def _fake_loads(batch: typing.Any) -> dict[str, torch.Tensor]:
-            return {
-                "H-C": torch.tensor(0.4),
-                "O-O": torch.tensor(0.1),
-                "load_variance": torch.tensor(0.8),
-            }
-
-        module.backbone.compute_artisan_loads = _fake_loads  # type: ignore[attr-defined]
-        keys = _run_step(module, _labelled_training_batch(), "validation").logged
-
-        assert "val_gate/artisan_load/H-C" in keys
-        assert "val_gate/artisan_load/O-O" in keys
-        assert "val_gate/artisan_load_variance" in keys
-        assert not any("artisan_load" in k and k.startswith("val/") for k in keys)
 
     def test_gate_prefix_helper(self) -> None:
         from goal.ml.training.module import GOALModule
@@ -393,7 +327,6 @@ class TestMetricSectionTable:
             ("energy", "energy"),
             ("energy_mae_per_atom", "energy"),
             ("energy_rmse_per_atom", "energy"),
-            ("energy_round_3", "energy"),
             ("forces", "forces"),
             ("forces_mae", "forces"),
             ("forces_rmse", "forces"),
@@ -402,11 +335,7 @@ class TestMetricSectionTable:
             ("newton_violation", "forces"),
             ("newton_violation_y", "forces"),
             ("aux_loss", "gate"),
-            ("gate_reg", "gate"),
-            ("gate_mean_round_1", "gate"),
-            ("artisan/round0/H-C", "gate"),
-            ("artisan_load/H-C", "gate"),
-            ("artisan_load_variance", "gate"),
+            ("mfc", "mfc"),
         ],
     )
     def test_routing(self, name: str, expected: str) -> None:
@@ -420,9 +349,11 @@ class TestMetricSectionTable:
         from goal.ml.training.module import GOALModule
 
         assert GOALModule._key("val/", "forces_mae") == "val_forces/forces_mae"
-        assert GOALModule._key("train/", "energy_round_0") == "train_energy/energy_round_0"
+        assert (
+            GOALModule._key("train/", "energy_mae_per_atom") == "train_energy/energy_mae_per_atom"
+        )
         assert GOALModule._key("test/", "total") == "test/total"
-        assert GOALModule._key("val/", "gate_reg") == "val_gate/gate_reg"
+        assert GOALModule._key("val/", "aux_loss") == "val_gate/aux_loss"
 
 
 class TestEnergyAndForcesAreSeparateSections:
@@ -430,15 +361,16 @@ class TestEnergyAndForcesAreSeparateSections:
     ``{split}_forces/``, and ``{split}/`` left holding the total."""
 
     def test_no_energy_or_force_curve_stays_in_the_plain_section(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.train()
         keys = _run_step(module, _labelled_training_batch(), "training").logged
 
         plain = {k for k in keys if k.startswith("train/")}
-        assert plain == {"train/total"}, sorted(plain)
+        assert "train/total" in plain
+        assert not any(w in k for k in plain for w in ("energy", "forces", "newton")), plain
 
     def test_sections_hold_what_they_advertise(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.eval()
         keys = _run_step(module, _labelled_training_batch(), "validation").logged
 
@@ -458,7 +390,7 @@ class TestEnergyAndForcesAreSeparateSections:
         assert not any(name.startswith("energy") for name in forces), forces
 
     def test_test_step_splits_the_same_way(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.eval()
         keys = _run_step(module, _labelled_training_batch(), "test").logged
 
@@ -468,7 +400,7 @@ class TestEnergyAndForcesAreSeparateSections:
         assert {k for k in keys if k.startswith("test/")} == {"test/total"}
 
     def test_headline_metrics_still_reach_the_progress_bar(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.train()
         spy = _run_step(module, _labelled_training_batch(), "training")
 
@@ -508,14 +440,14 @@ def _run_val_step(module: typing.Any, batch: Batch, dataloader_idx: int) -> _Log
 
 class TestSecondValidationDataloader:
     def test_prefix_comes_from_the_datamodule(self) -> None:
-        module = _module_with_gate()
+        module = _module()
         _attach_fake_trainer(module, ["val", "test"])
 
         assert module._val_prefix(0) == "val/"
         assert module._val_prefix(1) == "test/"
 
     def test_prefix_falls_back_without_a_datamodule(self) -> None:
-        module = _module_with_gate()
+        module = _module()
         _attach_fake_trainer(module, None)
 
         assert module._val_prefix(0) == "val/"
@@ -523,13 +455,13 @@ class TestSecondValidationDataloader:
 
     def test_unnamed_extra_dataloader_gets_its_own_section(self) -> None:
         """Never silently merge an unexpected dataloader into val/."""
-        module = _module_with_gate()
+        module = _module()
         _attach_fake_trainer(module, ["val", "test"])
 
         assert module._val_prefix(2) == "val2/"
 
     def test_ood_metrics_land_in_the_test_sections(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.eval()
         _attach_fake_trainer(module, ["val", "test"])
         keys = _run_val_step(module, _labelled_training_batch(), 1).logged
@@ -537,13 +469,12 @@ class TestSecondValidationDataloader:
         assert "test/total" in keys
         assert "test_energy/energy_mae_per_atom" in keys
         assert "test_forces/forces_mae" in keys
-        assert "test_gate/gate_reg" in keys
         # Nothing from the OOD set may reach the ID sections — mixing the
         # two is the whole thing this guards against.
         assert not any(k.startswith("val") for k in keys), sorted(keys)
 
     def test_id_metrics_are_unchanged_by_the_second_loader(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.eval()
         _attach_fake_trainer(module, ["val", "test"])
         keys = _run_val_step(module, _labelled_training_batch(), 0).logged
@@ -553,42 +484,12 @@ class TestSecondValidationDataloader:
         assert not any(k.startswith("test") for k in keys), sorted(keys)
 
     def test_ood_set_stays_off_the_progress_bar(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
+        module = _module()
         module.eval()
         _attach_fake_trainer(module, ["val", "test"])
         spy = _run_val_step(module, _labelled_training_batch(), 1)
 
         assert not spy.prog_bar_keys, sorted(spy.prog_bar_keys)
-
-    def test_ood_set_skips_the_duplicate_artisan_gate_curves(self) -> None:
-        """The artisan gates are parameters — identical for both sets, so
-        logging them twice would double the noisiest curve family for
-        nothing."""
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
-        module.eval()
-        _attach_fake_trainer(module, ["val", "test"])
-        keys = _run_val_step(module, _labelled_training_batch(), 1).logged
-
-        assert not any("artisan" in k for k in keys), sorted(keys)
-
-    def test_ood_set_skips_the_expensive_load_diagnostic(self) -> None:
-        module = _module_with_gate(adaptive_gate=ADAPTIVE_GATE_CONFIG)
-        module.eval()
-        _attach_fake_trainer(module, ["val", "test"])
-
-        calls: list[int] = []
-
-        def _fake_loads(batch: typing.Any) -> dict[str, torch.Tensor]:
-            calls.append(1)
-            return {"H-C": torch.tensor(0.4), "load_variance": torch.tensor(0.8)}
-
-        module.backbone.compute_artisan_loads = _fake_loads  # type: ignore[attr-defined]
-
-        _run_val_step(module, _labelled_training_batch(), 1)
-        assert calls == [], "extra artisan forward paid for the OOD set"
-
-        _run_val_step(module, _labelled_training_batch(), 0)
-        assert calls == [1], "the ID set should still report load balance"
 
 
 class TestCompositeSubLossLabels:

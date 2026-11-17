@@ -37,15 +37,16 @@ mkdir -p logs/slurm
 
 # Experiment = one self-contained file in src/goal/configs/ml/ (override
 # with EXPERIMENT=<name> sbatch scripts/slurm_train.sh).  Devices and nodes
-# must match the #SBATCH lines above; strategy.name=ddp shards the batches.
-EXPERIMENT="${EXPERIMENT:-simurgh_legacy_gmd26}"
+# must match the #SBATCH lines above; ++strategy.name=ddp shards the batches
+# (++ because the SIMURGH configs have no strategy: block).
+EXPERIMENT="${EXPERIMENT:-simurgh_dev_gmd26_FD}"
 
 srun pixi run -e cuda python -m goal.ml.cli.train \
     --config-name "$EXPERIMENT" \
     trainer.accelerator=gpu \
     trainer.num_nodes="$SLURM_NNODES" \
     trainer.devices="$SLURM_NTASKS_PER_NODE" \
-    strategy.name=ddp \
+    ++strategy.name=ddp \
     training.slurm_mode=true
 
 echo "Finished or preempted at $(date)"

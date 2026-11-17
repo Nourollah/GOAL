@@ -9,6 +9,17 @@ import torch
 import torch.nn as nn
 
 
+def cosine_cutoff(distances: torch.Tensor, cutoff: float) -> torch.Tensor:
+    """Smooth cosine cutoff envelope, ``f(d) = 0.5 (cos(pi d / r_c) + 1)``.
+
+    Zero outside ``cutoff``.  ``distances`` of shape ``(...,)``; output
+    same shape.
+    """
+    mask: torch.Tensor = (distances < cutoff).to(distances.dtype)
+    arg: torch.Tensor = math.pi * (distances / cutoff)
+    return 0.5 * (torch.cos(arg) + 1.0) * mask
+
+
 class BesselBasis(nn.Module):
     """Bessel radial basis functions with polynomial envelope.
 

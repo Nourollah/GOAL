@@ -198,40 +198,32 @@ class TestFragmentOptions:
 
 
 class TestFragmentAwareModelEndToEnd:
-    """An ARACE checkpoint with ``fragment_interaction`` used to die in
-    ``calculate()`` with "graphs carry no 'fragment_index'"."""
+    """A checkpoint trained with ``data.compute_fragment_index`` computes
+    through the calculator, which labels every inference graph."""
 
-    def test_fragment_interaction_checkpoint_computes(self, tmp_path: Path) -> None:
-        from goal.ml.nn.heads.energy_forces import EnergyForcesHead
-        from goal.ml.nn.models.simurgh.legacy.backbone_arace import SimurghAraceBackbone
+    def test_fragment_index_checkpoint_computes(self, tmp_path: Path) -> None:
+        from goal.ml.nn.models.simurgh.dev import SimurghDev
         from goal.ml.training.loss import CompositeLoss
         from goal.ml.training.module import GOALModule
 
         backbone_cfg = {
-            "name": "simurgh_legacy_arace",
+            "name": "simurgh_dev",
             "elements": [1, 6, 8],
-            "num_rounds": 1,
-            "cutoff": 5.0,
+            "num_channels": 8,
+            "message_irreps": "8x0e + 8x1o",
             "embedding_dim": 8,
-            "num_elements": 9,
+            "radial_mlp": [16],
             "avg_num_neighbors": 4.0,
-            "artisan": {
-                "architecture": "equivariant",
-                "hidden_irreps": "4x0e + 4x1o",
-                "num_rbf": 4,
-                "radial_hidden": 8,
-                "n_scalar_out": 4,
-                "final_hidden": 4,
-                "n_elements": "auto",
+            "scale": 0.7,
+            "dtype": "float64",
+            "atomic_energies": {
+                "mode": "provided",
+                "values": {1: -13.6, 6: -1028.5, 8: -2041.1},
             },
-            "fragment_interaction": {"num_rbf": 4, "radial_hidden": 8, "init_zero": False},
         }
         cfg = OmegaConf.create(
             {
-                "model": {
-                    "backbone": backbone_cfg,
-                    "head": {"name": "energy_forces", "irreps_in": "4x0e+4x1o", "hidden_dim": 8},
-                },
+                "model": {"backbone": backbone_cfg, "head": None},
                 "training": {"losses": [], "ema": {"enabled": False}},
                 "data": {
                     "cutoff": 5.0,
@@ -245,12 +237,12 @@ class TestFragmentAwareModelEndToEnd:
         }
         torch.manual_seed(0)
         module = GOALModule(
-            backbone=SimurghAraceBackbone(**kwargs).double(),
-            head=EnergyForcesHead(irreps_in="4x0e+4x1o", hidden_dim=8).double(),
+            backbone=SimurghDev(**kwargs),
+            head=None,
             loss=CompositeLoss([]),
             config=cfg,
         )
-        ckpt = _save_ckpt(tmp_path / "frag_arace.ckpt", module, cfg)
+        ckpt = _save_ckpt(tmp_path / "frag.ckpt", module, cfg)
 
         atoms = molecule("CH3COOH")
         atoms.calc = GOALCalculator(checkpoint_path=str(ckpt))

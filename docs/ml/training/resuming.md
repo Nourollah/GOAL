@@ -8,16 +8,16 @@ The logic lives in [`src/goal/ml/training/resume.py`](https://github.com/Nouroll
 
 ```bash
 # Continue an interrupted run, writing to a new run directory
-pixi run -e cuda goal-train resume.from=logs/simurgh_legacy_gmd26/runs/<old_run>
+pixi run -e cuda goal-train ++resume.from=logs/simurgh_dev_gmd26_FD/runs/<old_run>
 
 # Continue an interrupted run in place (works when the run was launched with a fixed name)
-pixi run -e cuda goal-train run_name=arace_gmd26_seed42          # same command as the original launch
+pixi run -e cuda goal-train run_name=gmd26_FD_seed42            # same command as the original launch
 
 # Extend a finished 1500-epoch run to 3000 epochs
-pixi run -e cuda goal-train trainer.max_epochs=3000 resume.from=logs/simurgh_legacy_gmd26/runs/<old_run>/checkpoints
+pixi run -e cuda goal-train trainer.max_epochs=3000 ++resume.from=logs/simurgh_dev_gmd26_FD/runs/<old_run>/checkpoints
 
 # Same, but with a fresh cosine cycle over the extra 1500 epochs
-pixi run -e cuda goal-train trainer.max_epochs=3000 resume.from=<...>/checkpoints resume.lr_schedule=restart
+pixi run -e cuda goal-train trainer.max_epochs=3000 ++resume.from=<...>/checkpoints resume.lr_schedule=restart
 ```
 
 The relevant config keys:
@@ -63,7 +63,7 @@ The "stop" outcomes print their reason and return without error, which is what k
 ```text
 .../checkpoints/last.ckpt has already completed 1500 epochs and trainer.max_epochs=1500 — nothing left to train.
 To continue this run, raise the budget above 1500, e.g.
-    goal-train --config-name simurgh_legacy_gmd26 trainer.max_epochs=3000 resume.from=.../checkpoints
+    goal-train --config-name simurgh_dev_gmd26_FD trainer.max_epochs=3000 resume.from=.../checkpoints
 ```
 
 `epochs_completed` comes from Lightning's fit-loop progress counters stored in the checkpoint, not from the `epoch` field. GOAL saves `last.ckpt` at the end of validation, before Lightning's epoch counter advances, so the raw `processed` count is one short. `read_epochs_completed` applies the same correction Lightning applies on restore, which means the number printed (`[ckpt/resume] Resuming from … — 412 epochs done`) is the number Lightning compares with `max_epochs`. The checkpoint is opened with `mmap=True`, so under DDP no rank loads the full state dict just to read one integer.
@@ -93,7 +93,7 @@ The continued run writes to **its own** output directory, `training.checkpoint_d
 To extend **in place** instead, so that everything stays in one folder, point both directories at the old run and leave `resume.from` unset:
 
 ```bash
-OLD=logs/simurgh_legacy_gmd26/runs/<old_run>
+OLD=logs/simurgh_dev_gmd26_FD/runs/<old_run>
 pixi run -e cuda goal-train trainer.max_epochs=3000 \
     training.checkpoint_dir=$OLD/checkpoints \
     checkpoint_manager.dirpath=$OLD/checkpoints
@@ -145,8 +145,8 @@ Each change is printed as `[resume/lr] stretch: T_max 1500 -> 3000, lr re-seeded
 - **Stage curriculum.** `training.stages` is indexed by absolute epoch. When the schedule runs out, it stays at its final stage, so extending past the last stage simply continues in it. If your last stage has a finite `epochs`, the extension still trains with that stage's weights.
 - **Early stopping.** `EarlyStopping`'s `wait_count` and `best_score` are restored. If the original run ended *because* early stopping fired, the extension stops again within about one validation epoch unless the metric improves straight away. For a real extension, raise `callbacks.early_stopping.patience` (or remove the callback with `~callbacks.early_stopping`).
 - **EMA.** The shadow weights carry over. If you turn EMA *on* for an extension of a run trained without it, the shadow starts from the restored raw weights. If the number of parameters no longer matches (a different architecture), the stored shadow is discarded with a warning.
-- **Architecture changes.** The checkpoint must load into the model built from the *current* config, with the same backbone, widths and elements. Raising the budget is fine. Changing `num_rounds` is not.
-- **Dataset statistics.** Elements, atomic reference energies, `scale`, `avg_num_neighbors` and pair counts are taken from the checkpoint, not recomputed. See [Dataset statistics](#dataset-statistics) below.
+- **Architecture changes.** The checkpoint must load into the model built from the *current* config, with the same backbone, widths and elements. Raising the budget is fine. Changing `num_interactions` is not.
+- **Dataset statistics.** Elements, atomic reference energies, `scale`, `avg_num_neighbors` and `atom_statistics` are taken from the checkpoint, not recomputed. See [Dataset statistics](#dataset-statistics) below.
 - **Effective batch size.** Changing `trainer.devices` or `data.batch_size` on a resume is allowed, but the restored optimizer moments and LR were tuned for the old batch size.
 
 ## Dataset statistics
@@ -155,11 +155,10 @@ Before building the model, `goal-train` derives several backbone arguments from 
 
 | Statistic | Backbone argument | What it controls |
 | --- | --- | --- |
-| `elements` | `elements` | Which elements the model has parameters for (with `artisan.n_elements: auto`, the size of every per-element table) |
+| `elements` | `elements` | Which elements the model has parameters for (the size of every per-element table) |
 | `atomic_energies` | `atomic_energies.values` (mode `dataset`) | Per-element reference energies (the energy baseline) |
 | `scale` | `scale` | Gain on the learned interaction energy |
-| `avg_num_neighbors` | `avg_num_neighbors` or `dressing_kwargs.avg_num_neighbors` | Normaliser of the neighbour sums |
-| `pair_counts` | `artisan.pair_counts` / `artisan_config.pair_counts` | Which element pairs get a dedicated artisan (rare-pair routing) |
+| `avg_num_neighbors` | `avg_num_neighbors` | Normaliser of the neighbour sums |
 | `atom_statistics` | `atom_statistics` | Training-split mean and s.d. of per-atom descriptors that a backbone requests through its `atom_statistics(config)` method (SIMURGH's PAN gate). Held in checkpoint buffers, so the checkpoint's values are restored on resume |
 
 A checkpoint only means something together with the values it was trained with. So every run records them, with the data they came from, in the `dataset_stats` block of its `checkpoints/config.yaml` (and in every `.ckpt`'s hyper-parameters):
@@ -207,9 +206,9 @@ You decide whether the stored values suit new data. List the statistics to deriv
 
 ```bash
 # Continue a finished run on a bigger dataset, re-deriving the normalisers from it
-pixi run -e cuda goal-train --config-name simurgh_legacy_gmd26 trainer.max_epochs=3000 \
-    resume.from=logs/simurgh_legacy_gmd26/runs/<run> \
-    data.train_dir=/data/GMD/Training_v2 \
+pixi run -e cuda goal-train --config-name simurgh_dev_gmd26_FD trainer.max_epochs=3000 \
+    ++resume.from=logs/simurgh_dev_gmd26_FD/runs/<run> \
+    '~data.task' data.dataset_type=xyz data.root=/data/my_system/more_frames.xyz \
     'dataset_stats.recompute=[scale,avg_num_neighbors]'
 
 # Set a value by hand instead: list it, then pin it under model.backbone
@@ -222,7 +221,7 @@ A listed statistic is resolved as on a fresh run: an explicit value under `model
 | --- | --- |
 | `scale`, `atomic_energies` | Stored as buffers. Lightning would restore the checkpoint's copy, so `goal-train` keeps the recomputed values instead (`[stats] scale: training with the recomputed values …`) |
 | `avg_num_neighbors` | Takes effect directly |
-| `elements`, `pair_counts` | Shape the model. If the recomputed result differs, the checkpoint's weights cannot load, and `goal-train` stops before training with the tensors that no longer fit |
+| `elements` | Shapes the model. If the recomputed result differs, the checkpoint's weights cannot load, and `goal-train` stops before training with the tensors that no longer fit |
 
 `dataset_stats.reuse=false` turns reuse off entirely, which is the old behaviour where every launch recomputed everything.
 
@@ -278,7 +277,7 @@ Together, these pieces make a SLURM job that is preempted, times out, or is requ
 The one thing you must supply is a **stable run directory**. Otherwise the requeued job starts a fresh run in a new timestamped folder:
 
 ```bash
-srun python -m goal.ml.cli.train run_name=arace_gmd26_${SLURM_JOB_ID} training.slurm_mode=true ...
+srun python -m goal.ml.cli.train run_name=gmd26_FD_${SLURM_JOB_ID} training.slurm_mode=true ...
 ```
 
 `SLURM_JOB_ID` survives a requeue, so the restart finds `checkpoints/last.ckpt` and resumes from the end of the last validated epoch. Lightning also writes its own `hpc_ckpt_<n>.ckpt` into the run directory when it receives the signal. Because GOAL passes `last.ckpt` explicitly to `trainer.fit`, that HPC checkpoint is not used, and a partially finished epoch is simply run again. A complete job script is in [Training a model](training.md#slurm).
@@ -287,7 +286,7 @@ srun python -m goal.ml.cli.train run_name=arace_gmd26_${SLURM_JOB_ID} training.s
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Relaunch starts from epoch 0 | New timestamped run directory, so no `last.ckpt` was found | Pass `resume.from=<old run>` or fix `run_name` |
+| Relaunch starts from epoch 0 | New timestamped run directory, so no `last.ckpt` was found | Pass `++resume.from=<old run>` or fix `run_name` |
 | `… has already completed N epochs … nothing left to train` | Budget spent | Raise `trainer.max_epochs` above N |
 | `resume.from=… contains no last.ckpt` | Path points at neither a run dir, a checkpoint dir, nor a `.ckpt` | Point at `<run>/checkpoints` or the file itself |
 | LR jumps up after an extension | `resume.lr_schedule=keep` (or `restart` by design) | Use `stretch` |

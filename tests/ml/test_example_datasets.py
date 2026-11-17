@@ -598,10 +598,9 @@ def _fragment_dataset(root: Path, separation: float = 10.0, **kwargs: typing.Any
 class TestBenchmarkFragmentLabels:
     """``compute_fragment_index`` and friends on the benchmark adapters.
 
-    NF_SIMURGH pools per-atom energies onto fragment virtual nodes and
-    raises without ``fragment_index``, so a benchmark adapter that
-    ignored these options could not train it at all — and the DataModule
-    forwards them to whatever dataset is configured.
+    A benchmark adapter that ignored these options would silently drop
+    the fragment labels a model reads — and the DataModule forwards them
+    to whatever dataset is configured.
     """
 
     def test_off_by_default(self, tmp_path: Path):

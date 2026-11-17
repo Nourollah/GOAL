@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # Distribution name on PyPI / conda-forge ("goal" is taken on PyPI).
 # The import name stays `goal`:  import goal.ml, goal.md
 name = "goal-atomistic"
-version = "0.1.0"
+version = "0.2.0"
 description = "General Open Atomistic Laboratory: train machine-learning interatomic potentials and run molecular dynamics with them"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -281,8 +281,8 @@ pandas = ">=2.3.0,<3"
 upet = ">=0.2.6"
 
 # --- MACE (mace-torch) ---
-# mace-torch hard-pins e3nn==0.4.4, while GOAL's own equivariant blocks (SIMURGH/
-# ARACE etc.) require e3nn>=0.5 (currently 0.6.x). Because of that, `goal[mace]`
+# mace-torch hard-pins e3nn==0.4.4, while GOAL's own equivariant blocks (SIMURGH
+# etc.) require e3nn>=0.5 (currently 0.6.x). Because of that, `goal[mace]`
 # (the [mace] extra) is unsatisfiable by construction — uv/pip must resolve both
 # constraints in one graph and there is no version of e3nn that fits both.
 #

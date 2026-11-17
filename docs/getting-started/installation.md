@@ -105,8 +105,8 @@ pip install "goal-atomistic[all]"       # every extra except mace
 With the environment activated, the console scripts work from any directory; no clone is needed:
 
 ```bash
-goal-train --cfg job -p model.backbone.name              # prints: simurgh_legacy_arace
-goal-train --config-name simurgh_legacy_nf_md17 --cfg job       # bundled experiment configs
+goal-train --cfg job -p model.backbone.name              # prints: simurgh_dev
+goal-train --config-name simurgh_dev_rmd17_aspirin --cfg job       # bundled experiment configs
 python -c 'import goal; print(goal.CONFIGS_DIR)'         # where the bundled configs live
 ```
 
@@ -160,7 +160,7 @@ The extras below come from `[project.optional-dependencies]`. Append them to the
 | `nvalchemiops` | `nvalchemi-toolkit-ops[torch]` | GPU neighbour lists (NVIDIA only) |
 | `nvalchemiops-cu12` / `nvalchemiops-cu13` | `nvalchemi-toolkit-ops[torch-cu12]` / `[torch-cu13]` | The same, with the matching CUDA runtime wheels |
 | `zarr` | `zarr>=3` | Zarr datasets (`dataset_type: zarr`) and `goal-pack-zarr` ([Zarr data](../integrations/zarr_data.md)) |
-| `lora` | `peft>=0.13` | LoRA fine-tuning (SIMURGH `simurgh_lora`, and `strategy: lora` for MACE/UMA) |
+| `lora` | `peft>=0.13` | LoRA fine-tuning (`strategy: lora` for MACE/UMA) |
 | `deepspeed` | `deepspeed>=0.14` | `deepspeed_zero1/2/3` and `deepspeed_zero3_offload` strategies |
 | `tune` | `ray[tune]>=2.55.1`, `optuna>=3.0` | `goal-tune` with `method: ray` (Ray Tune + Optuna) |
 | `torchmetrics` | `torchmetrics>=1.9.0` | torchmetrics-backed loss functions (`fn: torchmetrics.…`) |
@@ -186,7 +186,7 @@ External simulation engines other than Quantum ESPRESSO (ORCA, CP2K, VASP) are s
 
 ## MACE (`mace-torch`) in a standalone venv
 
-`mace-torch` hard-pins `e3nn==0.4.4`, while GOAL's own equivariant blocks (SIMURGH, ARACE, NF_SIMURGH, …) need `e3nn>=0.5` (0.6.x in practice). No version of e3nn satisfies both, so:
+`mace-torch` hard-pins `e3nn==0.4.4`, while GOAL's own equivariant blocks (SIMURGH, HyperSpec, …) need `e3nn>=0.5` (0.6.x in practice). No version of e3nn satisfies both, so:
 
 - `pip install "goal-atomistic[mace]"` is **unsatisfiable by construction**;
 - you **cannot** train SIMURGH and run MACE in the same interpreter.
@@ -222,7 +222,7 @@ This setup has been verified end to end with Python 3.14, torch 2.13+cu126, e3nn
 
 ## Ray Tune and Optuna
 
-`ray[tune]` and `optuna` are needed for `goal-tune` with `method: ray`, which `src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml` uses. Ray publishes Python 3.14 wheels for x86-64 and aarch64, and both packages are already in every ML pixi environment. With pip, use `pip install "goal-atomistic[tune]"`. `method: tuner` (Lightning's LR / batch-size finder) and `method: wandb` (W&B Sweeps) need no extra packages.
+`ray[tune]` and `optuna` are needed for `goal-tune` with `method: ray` (the `ray_tune` preset). Ray publishes Python 3.14 wheels for x86-64 and aarch64, and both packages are already in every ML pixi environment. With pip, use `pip install "goal-atomistic[tune]"`. `method: tuner` (Lightning's LR / batch-size finder) and `method: wandb` (W&B Sweeps) need no extra packages.
 
 See [Hyperparameter tuning](../ml/training/hyperparameter-tuning.md).
 
@@ -244,10 +244,10 @@ print("backbones:", BACKBONE_REGISTRY.list_available())
 print("heads:", HEAD_REGISTRY.list_available())
 ```
 
-The backbone list should include `simurgh_legacy_arace`, `simurgh_legacy_nf`, `simurgh_legacy_monolithic_arace`, `simurgh_legacy_simplified_routed` and friends. Then check that the console scripts are on your `PATH` and that Hydra can compose the default config without training anything:
+The backbone list should include `simurgh_dev`, its `simurgh_dev_abl_*` arms, `hyperspec` and friends. Then check that the console scripts are on your `PATH` and that Hydra can compose the default config without training anything:
 
 ```bash
-pixi run -e cuda goal-train --cfg job -p model.backbone.name   # prints: simurgh_legacy_arace
+pixi run -e cuda goal-train --cfg job -p model.backbone.name   # prints: simurgh_dev
 pixi run -e cuda goal-inspect --help
 pixi run -e cuda test                          # or: pytest -k 'not slow'
 ```

@@ -33,9 +33,7 @@ class BenchmarkDataset(Dataset, ABC):
         - Report dataset statistics (num structures, avg atoms, etc.)
         - Never require manual file downloads from the user
         - Accept the ``fragment_*`` options (see ``__init__``) so models
-          that need fragment labels — NF_SIMURGH pools its per-atom
-          energies onto fragment virtual nodes and raises without them —
-          can train on a benchmark set
+          that read fragment labels can train on a benchmark set
 
     Parameters
     ----------

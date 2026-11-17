@@ -76,7 +76,7 @@ Point the `goal_model` calculator at the `.simurgh` archive (or checkpoint direc
 from goal.md import CalculatorFactory, MoleculeFactory, Simulation
 from ase.optimize import BFGS
 
-CKPT = "logs/simurgh_legacy_gmd26/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh"
+CKPT = "logs/simurgh_dev_gmd26_FD/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_forces_mae_atomw.simurgh"
 
 atoms = MoleculeFactory.create("from_smiles", smiles="CCO")
 atoms.calc = CalculatorFactory.create("goal_model", checkpoint=CKPT, device="cuda")
@@ -142,7 +142,7 @@ with initialize_config_dir(config_dir=str(Path("configs").resolve()), version_ba
     cfg = compose(
         "md_runs/ethanol_goal",
         overrides=[
-            "calculator.checkpoint=logs/my_exp/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh",
+            "calculator.checkpoint=logs/my_exp/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_forces_mae_atomw.simurgh",
             "temperature_K=400",
         ],
     )
@@ -174,7 +174,7 @@ for T in (250, 300, 350, 400):
 
 ```bash
 pixi run -e cuda-full goal-simulate --config-path "$PWD/configs/md_runs" --config-name ethanol_goal \
-    calculator.checkpoint=logs/my_exp/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh \
+    calculator.checkpoint=logs/my_exp/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_forces_mae_atomw.simurgh \
     temperature_K=400 output_dir=outputs/md/ethanol_400K
 ```
 
@@ -228,8 +228,8 @@ E_ref = np.array([f.get_potential_energy() for f in ref_frames])
 F_ref = [f.get_forces() for f in ref_frames]
 
 candidates = {
-    "simurgh_v1": dict(key="goal_model", checkpoint="logs/a/runs/r1/checkpoints/best_val_forces_mae.simurgh", device="cuda"),
-    "simurgh_v2": dict(key="goal_model", checkpoint="logs/a/runs/r2/checkpoints/best_val_forces_mae.simurgh", device="cuda"),
+    "simurgh_v1": dict(key="goal_model", checkpoint="logs/a/runs/r1/checkpoints/best_val_forces_forces_mae_atomw.simurgh", device="cuda"),
+    "simurgh_v2": dict(key="goal_model", checkpoint="logs/a/runs/r2/checkpoints/best_val_forces_forces_mae_atomw.simurgh", device="cuda"),
     "gfn2_xtb":   dict(key="tblite", method="GFN2-xTB"),
 }
 

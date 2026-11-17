@@ -143,7 +143,7 @@ from goal.ml.utils.calculator import GOALCalculator
 from goal.ml.utils.mini_trainer import MiniTrainer, graph_step
 
 # A trained model to adapt (any GOALModule works; see "Checkpoints & archives").
-calc = GOALCalculator(checkpoint_path="models/simurgh_legacy_gmd26.simurgh")
+calc = GOALCalculator(checkpoint_path="models/simurgh_dev_gmd26_FD.simurgh")
 model = calc.module
 
 # Build labelled graphs with the model's own cutoff, dtype and fragment settings.

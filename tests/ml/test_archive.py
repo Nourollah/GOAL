@@ -11,8 +11,9 @@ Covers the full pipeline:
 5. Legacy bare ``.ckpt`` loading (FORMAT C) warns but still works.
 6. Every checkpoint write produces a ``.json`` sidecar; eviction removes it.
 
-A tiny SIMURGH backbone (float64, lmax=1, 8 channels) keeps everything
-fast enough for unit testing.
+A tiny SIMURGH model (``simurgh_dev``, float64, 8 channels) keeps everything
+fast enough for unit testing.  The code-change test breaks a *copy* of the
+live source, never the source tree itself.
 """
 
 from __future__ import annotations
@@ -42,22 +43,16 @@ from goal.ml.training.callbacks.checkpoint_manager import GOALCheckpointManager
 # Tiny SIMURGH module + config
 # ---------------------------------------------------------------------------
 
-_DRESSING = {
-    "num_elements": 120,
+_BACKBONE = {
+    "elements": [1, 6],
+    "num_channels": 8,
+    "message_irreps": "8x0e + 8x1o",
     "embedding_dim": 8,
-    "hidden_channels": 8,
-    "lmax": 1,
-    "num_radial_basis": 4,
-    "cutoff": 5.0,
-    "radial_mlp_hidden": 8,
-    "num_message_passing": 1,
-    "body_order": 1,
-}
-
-_ARTISAN = {
-    "scalar_channels": 4,
-    "hidden_dims": [8],
-    "expert_type": "linear",
+    "radial_mlp": [16],
+    "avg_num_neighbors": 4.0,
+    "scale": 0.7,
+    "dtype": "float64",
+    "atomic_energies": {"mode": "provided", "values": {1: -13.6, 6: -1028.5}},
 }
 
 
@@ -65,23 +60,7 @@ def _tiny_config() -> DictConfig:
     """Config the GOALCalculator can rebuild the model from."""
     return OmegaConf.create(
         {
-            "model": {
-                "backbone": {
-                    "name": "simurgh_legacy",
-                    "elements": [1, 6],
-                    "dressing_kwargs": dict(_DRESSING),
-                    "artisan_config": dict(_ARTISAN),
-                    "cutoff": 5.0,
-                    "atomic_energies": {"mode": "learned"},
-                    "compute_pairwise_forces": True,
-                },
-                "head": {
-                    "name": "dual_forces",
-                    "irreps_in": "8x0e+8x1o",
-                    "hidden_dim": 16,
-                    "mode": "pairwise",
-                },
-            },
+            "model": {"backbone": {"name": "simurgh_dev", **_BACKBONE}, "head": None},
             "training": {
                 "losses": [
                     {"name": "energy", "weight": 1.0, "fn": "mse"},
@@ -96,8 +75,7 @@ def _tiny_config() -> DictConfig:
 
 def _build_module(cfg: DictConfig):
     """Construct a GOALModule exactly as the calculator rebuild would."""
-    from goal.ml.nn.heads.dual_forces import DualForcesHead
-    from goal.ml.nn.models.simurgh.legacy.backbone import SimurghBackbone
+    from goal.ml.nn.models.simurgh.dev import SimurghDev
     from goal.ml.training.loss import (
         CompositeLoss,
         EnergyLoss,
@@ -107,22 +85,14 @@ def _build_module(cfg: DictConfig):
     from goal.ml.training.module import GOALModule
 
     torch.manual_seed(0)
-    backbone = SimurghBackbone(
-        elements=tuple(cfg.model.backbone.elements),
-        dressing_kwargs=dict(_DRESSING),
-        artisan_config={**_ARTISAN, "hidden_dims": tuple(_ARTISAN["hidden_dims"])},
-        cutoff=5.0,
-        atomic_energies={"mode": "learned"},
-        compute_pairwise_forces=True,
-    ).to(torch.float64)
-    head = DualForcesHead(irreps_in="8x0e+8x1o", hidden_dim=16, mode="pairwise").to(torch.float64)
+    backbone = SimurghDev(**_BACKBONE)
     loss = CompositeLoss(
         [
             WeightedLoss(EnergyLoss(loss_fn="mse"), weight=1.0, label="energy"),
             WeightedLoss(ForcesLoss(loss_fn="mse"), weight=1.0, label="forces"),
         ]
     )
-    return GOALModule(backbone=backbone, head=head, loss=loss, config=cfg)
+    return GOALModule(backbone=backbone, head=None, loss=loss, config=cfg)
 
 
 def _methane_batch():
@@ -226,22 +196,23 @@ class TestFreezeAtTrainingStart:
 
         # The model's own source must be in the frozen closure
         frozen = tmp_path / FROZEN_SOURCE_DIRNAME
-        assert (frozen / "goal/ml/nn/models/simurgh/legacy/backbone.py").is_file()
-        assert (frozen / "goal/ml/nn/blocks/env_dressing.py").is_file()
+        assert (frozen / "goal/ml/nn/models/simurgh/dev/monolithic.py").is_file()
+        assert (frozen / "goal/ml/nn/models/simurgh/geometry.py").is_file()
         assert (frozen / "goal/ml/training/module.py").is_file()
         assert (frozen / "goal/__init__.py").is_file()
 
     def test_metadata_contents(self, trained_dir: Path) -> None:
         metadata = json.loads((trained_dir / "metadata.json").read_text())
         assert metadata["source_frozen"] is True
-        assert metadata["model_class"] == "SimurghBackbone"
+        assert metadata["model_class"] == "SimurghDev"
         assert metadata["elements"] == [1, 6]
-        assert "scale" in metadata
+        assert metadata["avg_num_neighbors"] == 4.0
+        assert metadata["scale"] == pytest.approx(0.7)
         assert "timestamp" in metadata
 
     def test_config_is_resolved_yaml(self, trained_dir: Path) -> None:
         cfg = OmegaConf.load(trained_dir / "config.yaml")
-        assert cfg.model.backbone.name == "simurgh_legacy"
+        assert cfg.model.backbone.name == "simurgh_dev"
         assert float(cfg.data.cutoff) == 5.0
 
     def test_resume_keeps_original_snapshot(self, tmp_path: Path) -> None:
@@ -264,24 +235,33 @@ class TestFreezeAtTrainingStart:
 
 
 class TestCodeChangeResilience:
-    def test_loads_from_frozen_source_after_live_code_destroyed(self, trained_dir: Path) -> None:
+    def test_loads_from_frozen_source_after_live_code_destroyed(
+        self, trained_dir: Path, tmp_path: Path, monkeypatch
+    ) -> None:
+        import shutil
+
+        import goal.ml.nn.models.simurgh.dev.monolithic as live_backbone
+        from goal.ml.training import archive
         from goal.ml.utils.calculator import GOALCalculator
 
         calc_before = GOALCalculator(checkpoint_path=str(trained_dir), checkpoint="best")
         energy_before, forces_before = _energy_and_forces(calc_before)
 
-        import goal.ml.nn.models.simurgh.legacy.backbone as live_backbone
-
-        live_path = Path(live_backbone.__file__)
-        original = live_path.read_text()
-        try:
-            live_path.write_text(
-                'raise ImportError("backbone source was modified after checkpointing")\n'
-            )
-            calc_after = GOALCalculator(checkpoint_path=str(trained_dir), checkpoint="best")
-            energy_after, forces_after = _energy_and_forces(calc_after)
-        finally:
-            live_path.write_text(original)
+        # A copy of the live package whose backbone source is broken; the
+        # frozen-source loader falls back to it for modules it did not freeze.
+        live_root = archive._goal_src_root()
+        shutil.copytree(
+            live_root / "goal",
+            tmp_path / "goal",
+            ignore=shutil.ignore_patterns("__pycache__", "configs"),
+        )
+        broken = tmp_path / Path(live_backbone.__file__).relative_to(live_root)
+        broken.write_text(
+            'raise ImportError("backbone source was modified after checkpointing")\n'
+        )
+        monkeypatch.setattr(archive, "_goal_src_root", lambda: tmp_path)
+        calc_after = GOALCalculator(checkpoint_path=str(trained_dir), checkpoint="best")
+        energy_after, forces_after = _energy_and_forces(calc_after)
 
         # Provenance: the loaded class was compiled from frozen_source/, not
         # src/.  (inspect.getfile would resolve through the restored live
@@ -289,7 +269,7 @@ class TestCodeChangeResilience:
         loaded_cls = type(calc_after._module.backbone)
         compiled_from = Path(loaded_cls.__init__.__code__.co_filename)
         assert (trained_dir / FROZEN_SOURCE_DIRNAME) in compiled_from.parents
-        assert loaded_cls is not live_backbone.SimurghBackbone
+        assert loaded_cls is not live_backbone.SimurghDev
 
         assert energy_after == pytest.approx(energy_before, abs=1e-12)
         np.testing.assert_allclose(forces_after, forces_before, atol=1e-12)
@@ -309,7 +289,7 @@ class TestDirectoryLoading:
 
         assert np.isfinite(energy)
         assert forces.shape == (5, 3)
-        # Pairwise-mode SIMURGH forces obey Newton's third law structurally
+        # Autograd forces of a translation-invariant energy sum to zero
         np.testing.assert_allclose(forces.sum(axis=0), np.zeros(3), atol=1e-8)
 
     def test_checkpoint_selectors(self, trained_dir: Path) -> None:
@@ -369,7 +349,7 @@ class TestArchiveRoundTrip:
         info = inspect_checkpoint(archive)
         assert info["format"] == "archive"
         assert info["source_frozen"] is True
-        assert info["metadata"]["model_class"] == "SimurghBackbone"
+        assert info["metadata"]["model_class"] == "SimurghDev"
         assert info["sidecar"]["pool"] == "top_k"
 
 

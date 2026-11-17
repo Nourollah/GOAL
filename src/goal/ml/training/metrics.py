@@ -11,7 +11,7 @@ The entry point is :func:`mlip_metrics(predictions, batch)` which
 returns a flat ``{name: scalar tensor}`` dict.  The training loop
 turns each name into a logger key with :func:`metric_section` (which
 files energy numbers under ``{split}_energy/``, force numbers under
-``{split}_forces/`` and gate diagnostics under ``{split}_gate/``) and
+``{split}_forces/`` and the model's ``aux_loss`` under ``{split}_gate/``) and
 feeds them to Lightning's ``log_dict``.
 
 Metrics emitted
@@ -62,12 +62,12 @@ PROG_BAR_METRICS: frozenset[str] = frozenset(
 #                    component that is neither energy nor forces
 #                    (``stress``, ``dipole``, ...).
 #   {split}_energy/  everything about the energy: its loss term, the
-#                    per-atom MAE/RMSE, the per-round decomposition.
+#                    per-atom and per-molecule MAE/MSE/RMSE.
 #   {split}_forces/  everything about the forces: its loss term, the
 #                    MAE/RMSE/cosine/magnitude split, and the Newton
 #                    violation (a force diagnostic, four numbers).
-#   {split}_gate/    every gate diagnostic — numerous and for
-#                    occasional inspection, never for judging a run.
+#   {split}_gate/    ``aux_loss``, the model's own regularisation term —
+#                    for occasional inspection, never for judging a run.
 #
 # Splitting energy from forces matters because the two live on
 # different scales and are read for different reasons: an energy MAE
@@ -80,7 +80,6 @@ METRIC_SECTIONS: dict[str, str] = {
     "energy": "energy",
     "forces": "forces",
     "aux_loss": "gate",
-    "gate_reg": "gate",
     # Energy diagnostics.
     "energy_mae_per_atom": "energy",
     "energy_rmse_per_atom": "energy",
@@ -92,11 +91,8 @@ METRIC_SECTIONS: dict[str, str] = {
 }
 
 #: Names routed by prefix rather than by exact match, in priority
-#: order.  Two families cannot be enumerated: the per-round /
-#: per-element-pair diagnostics (``energy_round_{L}``,
-#: ``gate_mean_round_{L}``, ``artisan/round{L}/{pair}``,
-#: ``artisan_load/{pair}``) and the composite sub-loss labels, which
-#: ``build_loss`` names ``{property}_{fn}`` — ``forces_mse``,
+#: order: the composite sub-loss labels cannot be enumerated, since
+#: ``build_loss`` names them ``{property}_{fn}`` — ``forces_mse``,
 #: ``energy_huber`` and so on for any registered loss function.  So a
 #: name simply beginning with ``energy`` or ``forces`` follows its
 #: property, which is also what keeps a sub-loss in the same section as
@@ -105,8 +101,6 @@ _SECTION_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("energy", "energy"),
     ("forces", "forces"),
     ("newton_violation", "forces"),
-    ("gate", "gate"),
-    ("artisan", "gate"),
     ("mfc", "mfc"),
 )
 

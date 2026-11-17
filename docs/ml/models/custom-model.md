@@ -145,7 +145,7 @@ Some notes on the choices in this code:
 - **No `node_energies`.** The head's `ScalarReadout` makes per-atom energies from the `0e` channels. If your model computes per-atom energies itself (as SIMURGH does), put them in `NodeFeatures(node_energies=...)`, and `energy`, `energy_forces` and `dual_forces` will use them.
 - **Dtype.** Datasets usually ship float64 positions while parameters are float32. Cast geometry-derived tensors to the dtype of the features, as shown.
 
-Config (copy a self-contained file such as `src/goal/configs/ml/simurgh_legacy_gmd26.yaml` and replace the `model` section):
+Config (copy a self-contained file such as `src/goal/configs/ml/hyperspec_md17.yaml` and replace the `model` section):
 
 ```yaml
 model:
@@ -226,7 +226,7 @@ class TinyPotential(nn.Module):
 The parts that matter:
 
 - **`create_graph=self.training`.** In training, the force loss has to backpropagate through the force computation. In evaluation, building that second-order graph only wastes memory.
-- **`num_atoms`.** Return it so the per-atom energy loss and metrics work. Extra diagnostic keys are allowed (e.g. `layer_energies` `(L, B)`, which is logged as `energy_round_{L}`), and so is `aux_loss` (a 0-d tensor added to the total loss).
+- **`num_atoms`.** Return it so the per-atom energy loss and metrics work. Extra diagnostic keys are allowed, and so is `aux_loss` (a 0-d tensor added to the total loss, logged under `*_gate/`) with an optional `aux_terms` dict of its logged parts.
 - **Reference.** [`monolithic_example.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/nn/models/monolithic_example.py) is the shipped reference for this pattern.
 
 ```yaml
@@ -252,7 +252,6 @@ Dataset-derived arguments are injected only for specific backbone names or confi
 
 - `elements` and a top-level `avg_num_neighbors` are **not** injected. Put them in the config.
 - If your constructor accepts `atomic_energies` (a dict with `mode: learned | dataset | provided` and `values`), `mode: dataset` gets least-squares values from the training set. For `dataset` and `provided`, a `scale` kwarg is also passed, so accept `scale` too.
-- A `dressing_kwargs` dict gets `avg_num_neighbors` filled in, and an `artisan`/`artisan_config` dict with `rare_artisan.enabled: true` gets `pair_counts` filled in.
 
 ## Checklist
 

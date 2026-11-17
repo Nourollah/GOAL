@@ -40,7 +40,7 @@ HookBasedExtractor(model, blocks_attr="interactions", output_index=None, detach=
 | Argument | Meaning |
 | --- | --- |
 | `model` | the module that owns the block list |
-| `blocks_attr` | name of the `nn.ModuleList` attribute whose blocks get hooked: `"rounds"` for SIMURGH ARACE, `"products"` / `"interactions"` for MACE, `"layers"` for NequIP-style models |
+| `blocks_attr` | name of the `nn.ModuleList` attribute whose blocks get hooked: `"layers"` on SIMURGH's `atom_line`, `"products"` / `"interactions"` for MACE, `"layers"` for NequIP-style models |
 | `output_index` | if each block returns a tuple, which element holds the node features (`None` means the block returns a tensor) |
 | `detach` | `True` (default) stores detached tensors. `False` keeps them in the autograd graph, for example to back-propagate a downstream loss into the backbone |
 
@@ -50,12 +50,12 @@ To find the right `blocks_attr`, list the module's children:
 
 ```python
 print([name for name, child in backbone.named_children()])
-# SimurghAraceBackbone -> ['embedding', 'input_linear', 'rounds']
+# SimurghDev -> ['atom_line', 'pair_line']; the interaction layers are atom_line.layers
 ```
 
 ## Recipe: per-layer features of a trained SIMURGH model
 
-Each SIMURGH ARACE round (`backbone.rounds[i]`, an `AraceRound`) returns `(h, e_round, gate_scores, aux_loss)`, so the node features are `output_index=0`. Their irreps equal the backbone's `irreps_out`.
+Each SIMURGH interaction layer (`backbone.atom_line.layers[i]`) returns its node features as a tensor, so `output_index=None`. Every layer but the last carries `model.backbone.message_irreps`; the last keeps only the `num_channels` scalars.
 
 ```python
 import torch
@@ -69,10 +69,10 @@ from goal.ml.utils.extraction import (
 )
 
 # Load from the run's frozen source (archive or checkpoint directory).
-calc = GOALCalculator(checkpoint_path="models/simurgh_legacy_gmd26.simurgh")
+calc = GOALCalculator(checkpoint_path="models/simurgh_dev_gmd26_FD.simurgh")
 module = calc.module
 backbone = module.backbone
-describe_irreps(str(backbone.irreps_out))          # e.g. 16x0e+16x1o+16x2e
+describe_irreps(backbone.config["message_irreps"])  # e.g. 128x0e + 128x1o + 128x2e
 
 # Build graphs exactly as training did (cutoff, dtype, fragment labels if the model uses them).
 data = module.config.data
@@ -85,27 +85,29 @@ graphs = [
 ]
 batch = Batch.from_data_list(graphs).to(calc.device)
 
-with HookBasedExtractor(backbone, blocks_attr="rounds", output_index=0) as ext, torch.no_grad():
+with HookBasedExtractor(backbone.atom_line, blocks_attr="layers", output_index=None) as ext:
     backbone(batch)
-    per_round = dict(ext.captured)                 # {"layer_0": (N, 144), "layer_1": (N, 144)}
+    per_layer = dict(ext.captured)                 # {"layer_0": (N, 1152), "layer_1": (N, 128)}
 
-irreps = str(backbone.irreps_out)
-for name, x in per_round.items():
-    feats = NodeFeatures(node_feats=x, irreps=irreps)
-    scalars = extract_scalars(feats)               # (N, 16)  invariant
-    vectors = extract_irrep_channels(feats, l=1)   # (N, 48)  16 vectors x 3 components
+last = f"layer_{len(per_layer) - 1}"
+for name, x in per_layer.items():
+    irreps = f"{backbone.config['num_channels']}x0e" if name == last else backbone.config["message_irreps"]
+    feats = NodeFeatures(node_feats=x.detach(), irreps=irreps)
+    scalars = extract_scalars(feats)               # (N, 128)  invariant
     per_structure = pool_nodes(
         NodeFeatures(node_feats=scalars, irreps=f"{scalars.shape[-1]}x0e"),
         batch.batch, batch.num_graphs, mode="mean",
-    )                                              # (3, 16)
-    print(name, scalars.shape, vectors.shape, per_structure.shape)
+    )                                              # (3, 128)
+    if name != last:
+        vectors = extract_irrep_channels(feats, l=1)   # (N, 384)  128 vectors x 3 components
+    print(name, scalars.shape, per_structure.shape)
 ```
 
 What to do with them:
 
 - **Invariant descriptors.** `extract_scalars` gives features that do not change under rotation. You can feed them to any standard regressor (ridge, kernel ridge, gradient boosting, an MLP) or to t-SNE/UMAP.
 - **Equivariant channels.** $\ell \ge 1$ channels rotate with the molecule. Keep them only if the downstream model is equivariant (e3nn layers), or turn them into invariants yourself, for example per-channel norms. `extract_irrep_channels(feats, l=1)` returns them flattened as `mul × (2l+1)` columns, multiplicity-major.
-- **Early versus late layers.** Earlier rounds have seen a smaller neighbourhood. Comparing descriptors across layers shows where in the network a chemical distinction (functional group, conformer, protonation state) first becomes separable.
+- **Early versus late layers.** Earlier layers have seen a smaller neighbourhood. Comparing descriptors across layers shows where in the network a chemical distinction (functional group, conformer, protonation state) first becomes separable.
 - **Pooling.** `"sum"` is extensive (it grows with system size) and suits extensive targets. `"mean"` is intensive and better for properties like band gaps or per-atom quantities. For equivariant features, `"sum"` and `"mean"` preserve equivariance and `"max"` does not.
 
 ## Recipe: MACE-MP descriptors

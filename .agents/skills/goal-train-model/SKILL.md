@@ -68,7 +68,7 @@ pixi run -e cuda goal-train --config-name <experiment> trainer.max_epochs=3000 \
 
 ## 6. Several GPUs and clusters
 
-- One node: `++strategy.name=ddp trainer.devices=4` (`++` because the `simurgh_dev` configs have no top-level `strategy:` block; the legacy configs do). In a config that has a `strategy:` block, `trainer.strategy=ddp` is silently ignored.
+- One node: `++strategy.name=ddp trainer.devices=4` (`++` because the `simurgh_dev` configs have no top-level `strategy:` block). In a config that has a `strategy:` block, `trainer.strategy=ddp` is silently ignored.
 - Several nodes: add `trainer.num_nodes=2`. The SLURM job template is in `docs/ml/training/training.md` (`srun pixi run -e cuda python -m goal.ml.cli.train ... training.slurm_mode=true`).
 - Pin a GPU on a shared machine with `CUDA_VISIBLE_DEVICES=1`. Remote machines: `goal-remote-training`.
 

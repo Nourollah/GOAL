@@ -6,19 +6,19 @@
 
 GOAL treats an MLIP as a **backbone** that turns an atomic structure into per-atom features, plus a **head** that turns those features into properties (energy, forces, stress, dipole, …), trained by one universal Lightning module, `GOALModule`. A backbone that already returns properties is a **monolithic model** and runs with `head: null`. Everything is assembled from registries by name, and every run is described by a single self-contained YAML file. Swapping architecture, dataset or loss is therefore a config change, not a code change.
 
-The native model family is **SIMURGH**, an E(3)-equivariant force field built around a bank of *potential artisans* (one small equivariant network per element pair). The default architecture is **ARACE** (`simurgh_legacy_arace`), which alternates artisan layers on edges with ACE message-passing blocks on nodes.
+The native model is **SIMURGH**, an E(3)-equivariant ACE-type force field with conservative forces. It is in development under the registry key `simurgh_dev`; see [SIMURGH (development)](models/simurgh-dev.md).
 
 ## Features
 
 | | Feature | Details |
 |---|---|---|
-| 🔬 | Native SIMURGH force fields | `simurgh_legacy_arace` (default, modular), `simurgh_legacy_monolithic_arace`, `simurgh_legacy_nf` (fragment virtual nodes), `simurgh_legacy_simplified_routed` / `_monolithic`, legacy ACE-first `simurgh_legacy`, plus the isolated `simurgh_ablation` study model |
+| 🔬 | Native SIMURGH force field | `simurgh_dev` (default, monolithic), one config per benchmark task, and one `simurgh_dev_abl_*` arm per ablated mechanism |
 | 🧱 | Modular and monolithic models | Backbone → head pipeline, or self-contained models with `head: null`. Baselines: `hyperspec`, `invariant_gnn`, `monolithic_example`. |
 | 🎯 | Task heads | `energy`, `energy_forces`, `direct_forces`, `dual_forces`, `stress`, `dipole`, `scalar`, `multi` |
 | 🧠 | Foundation-model fine-tuning | `mace_finetune` and `uma_finetune` trained in-process (`head_only` / `full` / `lora`); UPET/PET through metatrain (`goal-finetune-upet`); frozen MACE/UMA adapters for feature extraction |
 | 📂 | Data loading | ExtXYZ, ASE trajectory/db, HDF5, LMDB, FairChem ASE-LMDB (OMol25, OMat24, ODAC23); four loading modes; multi-source merging; automatic splits; label key mapping; fragment decomposition |
-| 📊 | Benchmarks | MD17/rMD17, MD22, QM9, ANI-1/1x, SPICE adapters with ready-made configs |
-| 🧮 | Losses | Per-property `energy`, `forces`, `stress`, `dipole`, `charge`, `gate_reg`, `scalar_property`; `mse` / `mae` / `rmse` / `huber` / `smooth_l1` or any dotted torchmetrics function; composite sub-losses; staged loss schedules |
+| 📊 | Benchmarks | GMD-26 from the Hugging Face Hub; MD17/rMD17, MD22, QM9, ANI-1/1x, SPICE adapters; ready-made configs for GMD-26, rMD17, MD22 and 3BPA |
+| 🧮 | Losses | Per-property `energy`, `forces`, `stress`, `dipole`, `charge`, `scalar_property`; `mse` / `mae` / `rmse` / `huber` / `smooth_l1` or any dotted torchmetrics function; composite sub-losses; staged loss schedules |
 | ⚡ | Distributed training | `ddp`, `fsdp`, `fsdp2`, `deepspeed_zero1/2/3`, `deepspeed_zero3_offload` through one `strategy.name` key |
 | 🚀 | Performance | TF32 on Ampere+, cuDNN autotuning, `torch.compile`, mixed precision, gradient accumulation, EMA |
 | 💾 | Checkpointing | Three-pool `GOALCheckpointManager` (top-k / interval / last), frozen model source, self-contained `.simurgh` archives, auto-resume, run extension with LR-schedule retargeting, SLURM completion sentinel |
@@ -36,9 +36,9 @@ goal.ml
 ├── data              # AtomicGraph, GOALDataModule, datasets, neighbour lists, statistics, fragments
 ├── nn
 │   ├── primitives    # e3nn wrappers: tensor products, linear, norms, radial bases
-│   ├── blocks        # artisans, ACE block, env dressing, symmetric contraction, add-ons
+│   ├── blocks        # interaction, embedding, readout, ECE block
 │   ├── heads         # task heads
-│   └── models        # backbones and monolithic models (simurgh/, ablations/, foundation/, …)
+│   └── models        # backbones and monolithic models (simurgh/, foundation/, …)
 ├── adapters          # frozen foundation-model adapters (MACE, FairChem)
 ├── training          # GOALModule, losses, metrics, EMA, resume, archives, callbacks, strategies, tuning
 └── utils             # GOALCalculator, feature extraction, MiniTrainer, FabricTrainer
@@ -72,14 +72,16 @@ Build a component by registry name, exactly as `goal-train` does:
 import goal.ml.cli  # noqa: F401 (registers everything)
 from goal.ml.registry import BACKBONE_REGISTRY, HEAD_REGISTRY
 
-print(BACKBONE_REGISTRY.list_available())   # ['hyperspec', 'invariant_gnn', ..., 'simurgh_legacy_arace', ...]
+print(BACKBONE_REGISTRY.list_available())   # ['hyperspec', 'invariant_gnn', ..., 'simurgh_dev', ...]
 
-backbone = BACKBONE_REGISTRY.get("simurgh_legacy_arace")(
+model = BACKBONE_REGISTRY.get("simurgh_dev")(   # monolithic: no head
     elements=[1, 6, 8],
     cutoff=5.0,
     avg_num_neighbors=12.0,
+    scale=1.0,
+    atomic_energies={"mode": "provided", "values": {1: -13.6, 6: -1028.5, 8: -2041.1}},
 )
-head = HEAD_REGISTRY.get("energy_forces")(irreps_in="16x0e + 16x1o + 16x2e", hidden_dim=128)
+head = HEAD_REGISTRY.get("energy_forces")(irreps_in="16x0e + 16x1o + 16x2e", hidden_dim=128)  # for a modular backbone
 ```
 
 ## Quick start
@@ -87,7 +89,7 @@ head = HEAD_REGISTRY.get("energy_forces")(irreps_in="16x0e + 16x1o + 16x2e", hid
 Install GOAL first ([Installation](../getting-started/installation.md)). Then, from the repository root:
 
 ```bash
-# 1. Train the default model (SIMURGH ARACE on GMD-26, src/goal/configs/ml/simurgh_legacy_gmd26.yaml)
+# 1. Train the default model (SIMURGH on GMD-26, src/goal/configs/ml/simurgh_dev_gmd26_FD.yaml)
 pixi run -e cuda goal-train
 
 # Equivalent invocations
@@ -96,25 +98,24 @@ pixi run -e cuda python -m goal.ml.cli.train
 pixi run -e cuda train
 ```
 
-The default config expects the GMD-26 FragmentDuplication split under `data/GMD/FragmentDuplication/{Training,TestID,TestOOD}` and a GPU (`trainer.accelerator: gpu`). Point it at your own data and hardware with overrides:
+The default config downloads the GMD-26 FragmentDuplication task from the Hugging Face Hub on first use and expects a GPU. Point it at your own data and hardware with overrides:
 
 ```bash
 # CPU, short run
 pixi run -e cuda goal-train trainer.accelerator=cpu trainer.max_epochs=5
 
-# Your own ExtXYZ data, one directory per split
-pixi run -e cuda goal-train data.dataset_type=xyz \
-    data.train_dir=/data/mysys/train data.val_dir=/data/mysys/val data.test_dir=/data/mysys/test
+# Your own ExtXYZ data, one file split by data.split_ratio
+pixi run -e cuda goal-train data.dataset_type=xyz '~data.task' data.root=/data/mysys/all.xyz
 
 # Another ready-made experiment
-pixi run -e cuda goal-train --config-name simurgh_legacy_nf_md17          # NF_SIMURGH on rMD17 aspirin
-pixi run -e cuda goal-train --config-name simurgh_legacy_monolithic_arace_gmd26   # monolithic ARACE
+pixi run -e cuda goal-train --config-name simurgh_dev_rmd17_aspirin       # rMD17 aspirin
+pixi run -e cuda goal-train --config-name simurgh_dev_gmd26_FF            # GMD-26 FragmentFusion
 
 # Tweak the model and optimiser
-pixi run -e cuda goal-train model.backbone.num_rounds=3 training.optimizer.lr=5e-3 training.ema.decay=0.999
+pixi run -e cuda goal-train model.backbone.num_interactions=3 training.optimizer.lr=5e-3 training.ema.decay=0.999
 
 # Multi-GPU
-pixi run -e cuda goal-train trainer.devices=4 strategy.name=ddp
+pixi run -e cuda goal-train trainer.devices=4 ++strategy.name=ddp
 
 # Sweep three learning rates
 pixi run -e cuda goal-train -m training.optimizer.lr=1e-2,5e-3,1e-3
@@ -130,7 +131,7 @@ from ase.build import molecule
 from goal.ml.utils.calculator import GOALCalculator
 
 calc = GOALCalculator(
-    checkpoint_path="logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/best_val_forces_mae.simurgh",
+    checkpoint_path="logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints/best_val_forces_forces_mae_atomw.simurgh",
     device="cuda",
 )
 atoms = molecule("CH3COOH")
@@ -138,11 +139,10 @@ atoms.calc = calc
 print(atoms.get_potential_energy(), atoms.get_forces().shape)
 ```
 
-> [!WARNING]
-> The shipped `simurgh_legacy_gmd26.yaml` enables the `fragment_interaction` add-on, so the trained model needs a `fragment_index` on every graph. `GOALCalculator` builds graphs with `AtomicGraph.from_ase(...)` **without** fragment labels, and the snippet above then raises `ValueError: model.backbone.fragment_interaction is enabled but the graphs carry no 'fragment_index'`. You have two options. Train with the add-on removed (`goal-train '~model.backbone.fragment_interaction'`) if you want plain `GOALCalculator` inference. Otherwise use a fragment-aware calculator subclass that passes the training-time fragment settings to `from_ase`, as `NFSimurghCalculator` does in [`notebooks/nf_simurgh_gmd_inference.ipynb`](https://github.com/Nourollah/GOAL/blob/main/notebooks/nf_simurgh_gmd_inference.ipynb). The same applies to `simurgh_legacy_nf` models. See [ASE calculator](deployment/ase-calculator.md).
+`GOALCalculator` reads the fragment settings (`data.compute_fragment_index` and friends) from the saved config, so inference graphs carry the same labels as in training. See [ASE calculator](deployment/ase-calculator.md).
 
 ```bash
-pixi run -e cuda goal-inspect logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/     # provenance and metrics, no model build
+pixi run -e cuda goal-inspect logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints/     # provenance and metrics, no model build
 ```
 
 If you prefer to learn in Python rather than YAML, start with the [notebooks](../getting-started/notebooks.md).
@@ -163,10 +163,7 @@ If you prefer to learn in Python rather than YAML, start with the [notebooks](..
 | Train on OMol25 or other FairChem `.aselmdb` data | [ASE-LMDB & OMol25](data/aselmdb-omol25.md) |
 | Use MD17, MD22, QM9, ANI-1, SPICE | [Benchmark datasets](data/benchmarks.md) |
 | Compare the available architectures | [Overview & model zoo](models/overview.md) |
-| Understand SIMURGH / ARACE | [SIMURGH](models/simurgh.md) |
-| Use fragment virtual nodes | [NF_SIMURGH](models/nf-simurgh.md) |
-| Use the three-line routed / monolithic models | [SIMURGH Simplified](models/simurgh-simplified.md) |
-| Reproduce or extend the module ablations | [Ablation study](models/ablation-study.md) |
+| Understand SIMURGH and its ablation programme | [SIMURGH (development)](models/simurgh-dev.md) |
 | Use HyperSpec, InvariantGNN or the monolithic example | [Other backbones](models/other-backbones.md) |
 | Predict stress, dipoles, scalars or several properties | [Heads](models/heads.md) |
 | Add my own architecture | [Writing a new model](models/custom-model.md) |

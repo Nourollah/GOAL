@@ -34,7 +34,7 @@ The archive is unpacked into a temporary directory. That directory lives as long
 
 ```python
 calc = GOALCalculator(
-    checkpoint_path="logs/simurgh_legacy_gmd26/runs/<run>/checkpoints",
+    checkpoint_path="logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints",
     checkpoint="best",        # "best" (default) | "last" | "epoch=N" | "<name>.ckpt"
 )
 ```
@@ -165,10 +165,10 @@ atoms.get_forces()
 
 ### Models that need fragment labels
 
-Models with fragment-level components (SIMURGH ARACE with `fragment_interaction`, NF_SIMURGH, and SIMURGH Simplified's fragment line) need `fragment_index` on every graph. The calculator reads `data.compute_fragment_index` and the `data.fragment_*` options from the checkpoint's own training config and applies them in `build_graph`, so these checkpoints work out of the box:
+Models with fragment-level outputs (SIMURGH trained with `data.compute_fragment_index: true`, as in the GMD configs) read `fragment_index` on every graph. The calculator reads `data.compute_fragment_index` and the `data.fragment_*` options from the checkpoint's own training config and applies them in `build_graph`, so these checkpoints work out of the box:
 
 ```python
-calc = GOALCalculator(checkpoint_path="best_val_forces_mae.simurgh")
+calc = GOALCalculator(checkpoint_path="best_val_forces_forces_mae_atomw.simurgh")
 calc.fragment_options   # {'compute_fragment_index': True, 'fragment_scheme': 'custom', ..., 'fragment_on_failure': 'fallback'}
 ```
 

@@ -5,7 +5,7 @@ decorators on its class (``@MODEL_REGISTRY.register("name")`` and, for
 backbones, also ``@BACKBONE_REGISTRY.register("name")``) and it is
 discovered automatically — no edit to this file required.
 
-The project ships four reference models:
+The project ships these reference models:
 
 * ``invariant_gnn``     — SchNet-style **invariant** backbone
                           (educational baseline).
@@ -13,10 +13,9 @@ The project ships four reference models:
                           e3nn primitives (educational baseline).
 * ``monolithic_example``— Minimal **monolithic** model returning the
                           property dict directly (educational baseline).
-* ``simurgh_legacy*``   — The older **native** SIMURGH models
-                          (equivariant force fields with an element-pair
-                          bank of potential artisans).  See
-                          :mod:`goal.ml.nn.models.simurgh.legacy`.
+* ``simurgh_dev``       — SIMURGH, GOAL's native equivariant interatomic
+                          potential (development key until release).  See
+                          :mod:`goal.ml.nn.models.simurgh.dev`.
 """
 
 from __future__ import annotations

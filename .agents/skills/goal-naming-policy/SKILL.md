@@ -1,6 +1,6 @@
 ---
 name: goal-naming-policy
-description: Enforces GOAL's naming rules. Inside SIMURGH (its package, ablations, configs, tests, scripts, ECE modules, docs and skill) everything is native and names no other model, sources are cited by arXiv ID or DOI, and the external reference baseline is called B-REF. SIMURGH names carry no version numbers, older variants live under the legacy namespace, and the model in development uses the simurgh_dev key until release. Outside SIMURGH there is no naming restriction. Use before creating or renaming SIMURGH files, keys, configs or docs, and when the naming guard fails.
+description: Enforces GOAL's naming rules. Inside SIMURGH (its package, ablations, configs, tests, scripts, ECE modules, docs and skill) everything is native and names no other model, sources are cited by arXiv ID or DOI, and the external reference baseline is called B-REF. SIMURGH names carry no version numbers, and the model in development uses the simurgh_dev key until release. Outside SIMURGH there is no naming restriction. Use before creating or renaming SIMURGH files, keys, configs or docs, and when the naming guard fails.
 license: MIT
 ---
 
@@ -15,7 +15,7 @@ The rules apply inside SIMURGH:
 - `tests/ml/simurgh_dev/` and `scripts/simurgh_dev/`;
 - SIMURGH's docs page (`docs/ml/models/simurgh-dev.md`) and the `goal-simurgh` skill (both copies).
 
-The legacy SIMURGH models and the rest of GOAL are outside the scope. GOAL's foundation-model support keeps the reference package's real name: never rename, move or remove it.
+The rest of GOAL is outside the scope. GOAL's foundation-model support keeps the reference package's real name: never rename, move or remove it.
 
 ## 2. Inside SIMURGH
 
@@ -26,22 +26,9 @@ The legacy SIMURGH models and the rest of GOAL are outside the scope. GOAL's fou
 
 ## 3. Keys and files
 
-- During development the registry key is `simurgh_dev`: package `src/goal/ml/nn/models/simurgh/dev/`, configs `simurgh_dev_<task>.yaml`, tests `tests/ml/simurgh_dev/`, scripts `scripts/simurgh_dev/`. The `_dev` suffix is dropped at release, when the `simurgh` key moves to this model and the deprecated aliases are removed.
+- During development the registry key is `simurgh_dev`: package `src/goal/ml/nn/models/simurgh/dev/`, configs `simurgh_dev_<task>.yaml`, tests `tests/ml/simurgh_dev/`, scripts `scripts/simurgh_dev/`. The `_dev` suffix is dropped at release, when the model takes the `simurgh` key.
 - Ablation files: `src/goal/ml/nn/models/simurgh/dev/ablations/<mechanism>.py`, registered as `simurgh_dev_abl_<mechanism>`.
-- Older models live in `src/goal/ml/nn/models/simurgh/legacy/`; their old keys are deprecated aliases until release:
-
-| Old key | Key |
-|---|---|
-| `simurgh` | `simurgh_legacy` |
-| `simurgh_ace_first` | `simurgh_legacy_ace_first` |
-| `simurgh_arace` | `simurgh_legacy_arace` |
-| `monolithic_arace` | `simurgh_legacy_monolithic_arace` |
-| `simurgh_monolithic` | `simurgh_legacy_monolithic` |
-| `nf_simurgh` | `simurgh_legacy_nf` |
-| `simurgh_simplified_monolithic` | `simurgh_legacy_simplified_monolithic` |
-| `simurgh_simplified_routed` | `simurgh_legacy_simplified_routed` |
-
-Old checkpoints are converted with `scripts/simurgh_dev/migrate_legacy_checkpoints.py` (a dry run unless told otherwise).
+- Earlier SIMURGH models are not in the tree; they live in the git history (tag `v0.1.0`).
 
 ## 4. The guard
 

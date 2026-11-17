@@ -10,7 +10,7 @@ from goal.ml.cli import CONFIGS_ML_DIR
 def test_fd_plus_alkane_adds_octane_to_duplication() -> None:
     with initialize_config_dir(config_dir=CONFIGS_ML_DIR, version_base=None):
         cfg = compose(
-            config_name="simurgh_legacy_simplified_monolithic_gmd26",
+            config_name="simurgh_dev_gmd26_FD",
             overrides=["+splits@data=gmd26_FD_plus_alkane", "paths.root_dir=/root"],
         )
     data = cfg.data

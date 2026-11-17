@@ -74,7 +74,7 @@ Per-split folders use `data.train_dir`, `data.val_dir` and `data.test_dir` (the 
 - One malformed frame aborts the whole load.
 - The named-split lookup checks one extension per reader: `xyz` does not match `train.extxyz`.
 - Very small datasets can produce an empty validation or test split.
-- `data.cutoff` builds the neighbour list. Configs that interpolate `model.backbone.cutoff: ${data.cutoff}` follow it. Configs that hard-code `elements` or `avg_num_neighbors` must be updated by hand when the data change: a structure with an element missing from `elements` raises `ValueError` (SIMURGH and, since November 2026, the legacy SIMURGH models; it used to contribute zero energy silently).
+- `data.cutoff` builds the neighbour list. Configs that interpolate `model.backbone.cutoff: ${data.cutoff}` follow it. Configs that hard-code `elements` or `avg_num_neighbors` must be updated by hand when the data change: a structure with an element missing from `elements` raises `ValueError` in SIMURGH.
 - Element reference energies: prefer isolated-atom energies at the labels' level of theory (`atomic_energies: {mode: provided, values: {...}}`). `mode: dataset` fits them by least squares on the training compositions, which is unidentifiable when compositions are collinear (homologous series such as GMD; see `goal-gmd-benchmark`). For a single-composition dataset it only sets a constant, which is harmless.
 - Frames load as float64 on the CPU; the trainer precision sets the compute dtype.
 

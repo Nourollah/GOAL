@@ -96,7 +96,9 @@ class TestASEBackend:
         ckpt, frames = inputs
         start = read(frames, index=0)
         result = run_batched_simulation(
-            _config(inputs, tmp_path, mode="relax", steps=200, fmax=0.01)
+            _config(
+                inputs, tmp_path, mode="relax", steps=200, fmax=1e-4
+            )  # below the tiny untrained model's forces
         )
         from goal.ml.utils.calculator import GOALCalculator
 

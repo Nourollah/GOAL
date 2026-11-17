@@ -117,10 +117,6 @@ nav:
       - Models:
           - Overview & model zoo: ml/models/overview.md
           - SIMURGH (development): ml/models/simurgh-dev.md
-          - SIMURGH ARACE (legacy): ml/models/simurgh.md
-          - NF_SIMURGH (legacy): ml/models/nf-simurgh.md
-          - SIMURGH Simplified (legacy): ml/models/simurgh-simplified.md
-          - Ablation study: ml/models/ablation-study.md
           - Other backbones: ml/models/other-backbones.md
           - Heads: ml/models/heads.md
           - Writing a new model: ml/models/custom-model.md
@@ -142,7 +138,6 @@ nav:
           - Pixi tasks: ml/reference/pixi-tasks.md
   - Integrations (NVIDIA nvalchemi & more):
       - Overview & hardware fallback: integrations/nvalchemi_overview.md
-      - LoRA fine-tuning of legacy SIMURGH: integrations/lora_finetune.md
       - nvalchemi model wrapper: integrations/nvalchemi_wrapper.md
       - Neighbour lists: integrations/neighbor_list.md
       - Batched simulation: integrations/batched_simulation.md

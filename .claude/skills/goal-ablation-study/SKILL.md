@@ -6,7 +6,7 @@ license: MIT
 
 # Ablation studies in GOAL
 
-Design background: `docs/ml/models/ablation-study.md`. The SIMURGH programme itself: `goal-simurgh`.
+The SIMURGH programme itself: `goal-simurgh`.
 
 ## Design
 

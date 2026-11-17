@@ -21,7 +21,7 @@ All paths end in `goal.ml.utils.calculator.GOALCalculator`, an ASE `Calculator` 
 
 | Path | Format | Notes |
 | --- | --- | --- |
-| `…/checkpoints/best_val_forces_mae.simurgh` | Self-contained `.simurgh` archive | **Recommended.** Bundles weights, config and a frozen copy of the model source, so it keeps loading after the code base changes. |
+| `…/checkpoints/best_val_forces_forces_mae_atomw.simurgh` | Self-contained `.simurgh` archive | **Recommended.** Bundles weights, config and a frozen copy of the model source, so it keeps loading after the code base changes. |
 | `…/checkpoints/` (directory) | Checkpoint directory written by `GOALCheckpointManager` | Must contain `config.yaml`, `metadata.json` and `frozen_source/`. The md wrappers always load the **best** checkpoint from it. |
 | `…/checkpoints/last.ckpt` | Bare Lightning checkpoint (legacy) | Logs a warning. It is rebuilt with the *current* source, so it can break when the model code has changed since training. |
 
@@ -32,12 +32,12 @@ A training run started with `goal-train` writes these under `logs/<experiment>/r
 ```python
 # 1. Through the calculator factory (what configs use)
 from goal.md import CalculatorFactory
-calc = CalculatorFactory.create("goal_model", checkpoint="runs/x/checkpoints/best_val_forces_mae.simurgh",
+calc = CalculatorFactory.create("goal_model", checkpoint="runs/x/checkpoints/best_val_forces_forces_mae_atomw.simurgh",
                                 device="cuda")
 
 # 2. Through the adapter function
 from goal.md.adapters import load_goal_calculator
-calc = load_goal_calculator("runs/x/checkpoints/best_val_forces_mae.simurgh", device="cuda")
+calc = load_goal_calculator("runs/x/checkpoints/best_val_forces_forces_mae_atomw.simurgh", device="cuda")
 
 # 3. Directly from goal.ml (exposes every option)
 from goal.ml.utils.calculator import GOALCalculator
@@ -65,7 +65,7 @@ The same options in a simulation config:
 ```yaml
 calculator:
   type: goal_model
-  checkpoint: logs/my_exp/runs/2026-10-01_12-00-00_my_run/checkpoints/best_val_forces_mae.simurgh
+  checkpoint: logs/my_exp/runs/2026-10-01_12-00-00_my_run/checkpoints/best_val_forces_forces_mae_atomw.simurgh
   device: cuda
   head: null
 ```
@@ -134,8 +134,8 @@ flowchart LR
 ### 1. Train
 
 ```bash
-pixi run -e cuda-full goal-train --config-name simurgh_legacy_gmd26        # see the ML training guide
-# → logs/simurgh_legacy_gmd26/runs/<timestamp>_<name>/checkpoints/best_val_forces_mae.simurgh
+pixi run -e cuda-full goal-train --config-name simurgh_dev_gmd26_FD        # see the ML training guide
+# → logs/simurgh_dev_gmd26_FD/runs/<timestamp>_<name>/checkpoints/best_val_forces_forces_mae_atomw.simurgh
 ```
 
 See [Training a model](../../ml/training/training.md).
@@ -145,7 +145,7 @@ See [Training a model](../../ml/training/training.md).
 ```python
 from goal.md import CalculatorFactory, MoleculeFactory, Simulation
 
-CKPT = "logs/simurgh_legacy_gmd26/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_mae.simurgh"
+CKPT = "logs/simurgh_dev_gmd26_FD/runs/2026-10-01_12-00-00_run/checkpoints/best_val_forces_forces_mae_atomw.simurgh"
 
 atoms = MoleculeFactory.create("from_smiles", smiles="CCO")
 calc = CalculatorFactory.create("goal_model", checkpoint=CKPT, device="cuda")

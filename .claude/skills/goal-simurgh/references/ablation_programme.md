@@ -9,7 +9,7 @@ Configs in `src/goal/configs/ml/ablations/simurgh_dev/`, seeds 42, 43 and 44. Ge
 - Training: Huber loss (MSE since stage 11) after a 5-epoch warm-up at E:F = 1:1 (force weight 100 in every stage), AMSGrad, EMA, trainer safeguards, float32.
 - MFC on in the GMD configs (`[energy, core_force]`, half-space, 2 levels, b = 5 Å).
 
-References: B-REF (trained outside the repository) and L0, legacy SIMURGH Simplified as shipped.
+References: B-REF (trained outside the repository) and L0, the earlier SIMURGH model as shipped in `v0.1.0` (its code lives in the git history).
 
 Two arms still wait for inputs from the maintainer: the calibrated MFC tolerance (an offline calibration file) and Hessian distillation (teacher labels); see `goal-simurgh`.
 
@@ -37,7 +37,7 @@ Arm configs exist for every row except these (planned): the stage-4 cutoff (4.0,
 ## Protocol
 
 1. Screen each arm with seed 42: GMD arms on Duplication and Fusion at 400 epochs; standard-benchmark arms on rMD17 aspirin and ethanol, 3BPA, and MD22 AT-AT and stachyose.
-2. Seeds 43 and 44 only for arms whose seed-42 change exceeds 2× the base s.d. (the legacy model's OOD force s.d. on Duplication is 7.5 meV/Å; re-estimate it for B0 in stage 0).
+2. Seeds 43 and 44 only for arms whose seed-42 change exceeds 2× the base s.d. (L0's OOD force s.d. on Duplication is 7.5 meV/Å; re-estimate it for B0 in stage 0).
 3. The final model and the top three alternatives run on all four GMD tasks plus `gmd26_FD_plus_alkane`, rMD17 (N = 1000 and 50), MD22 and 3BPA.
 4. Gates: cutoff crossing, smoothness, MD stability and tail errors before accuracy counts; the MD22 per-system gate for depth, attention, long-range, ECE and literature long-range arms; the 3BPA 1200 K and dihedral gate (3 seeds) for stages 1–4, 8 and attention.
 

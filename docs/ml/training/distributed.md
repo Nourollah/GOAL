@@ -26,11 +26,11 @@ trainer = L.Trainer(strategy=strategy, devices=4, accelerator="gpu", ...)
 Any other name raises a `ValueError` that lists the valid ones.
 
 > [!IMPORTANT]
-> **Use `strategy.name`, not `trainer.strategy`.** When `cfg.strategy` exists, its result is passed to `Trainer` as a keyword argument and overrides `trainer.strategy`. The shipped configs leave `trainer.strategy: auto` in place, but changing it on the command line does nothing.
+> **Use `strategy.name`, not `trainer.strategy`.** When `cfg.strategy` exists, its result is passed to `Trainer` as a keyword argument and overrides `trainer.strategy`. In a config with a `strategy:` block, changing `trainer.strategy` on the command line does nothing. The SIMURGH configs have no `strategy:` block, so add it with `++strategy.name=...` (add or override), which works for every config.
 >
 > ```bash
 > pixi run -e cuda goal-train trainer.strategy=ddp      # silently ignored
-> pixi run -e cuda goal-train strategy.name=ddp         # what you want
+> pixi run -e cuda goal-train ++strategy.name=ddp         # what you want
 > ```
 
 All strategy options live together in one block, and each builder reads only its own keys:
@@ -88,15 +88,15 @@ Validation metrics are averaged across ranks (`sync_dist=True` throughout `GOALM
 Each GPU holds a full replica of the model. Gradients are averaged with an all-reduce during the backward pass. SIMURGH models are small (well under 10 M parameters for the shipped configs), so DDP is the right choice for practically every GOAL run.
 
 ```bash
-pixi run -e cuda goal-train strategy.name=ddp trainer.devices=4
-pixi run -e cuda goal-train strategy.name=ddp trainer.devices=4 trainer.num_nodes=2   # 8 GPUs over 2 nodes
+pixi run -e cuda goal-train ++strategy.name=ddp trainer.devices=4
+pixi run -e cuda goal-train ++strategy.name=ddp trainer.devices=4 trainer.num_nodes=2   # 8 GPUs over 2 nodes
 ```
 
 Builder: `build_ddp_strategy` in [`strategies/ddp.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/training/strategies/ddp.py).
 
 | Key | Default | When to change it |
 | --- | --- | --- |
-| `find_unused_parameters` | `false` | Set `true` only if some parameters receive no gradient in a step (frozen sub-modules, a conditional branch). DDP then errors with "Expected to have finished reduction…" unless you set it. SIMURGH / ARACE do not need it: the artisan bank uses a static-shape zero-masking schedule, so every parameter takes part in every step. |
+| `find_unused_parameters` | `false` | Set `true` only if some parameters receive no gradient in a step (frozen sub-modules, a conditional branch). DDP then errors with "Expected to have finished reduction…" unless you set it. SIMURGH does not need it: every parameter reaches the loss on every step. |
 | `static_graph` | `false` | `true` lets DDP cache bucket order and skip per-step checks when the autograd graph is identical every step. Try it once the run is stable, because it can conflict with conditional modules. |
 | `gradient_as_bucket_view` | `true` | Gradients share memory with the communication buckets, which saves one copy of the gradients. |
 | `bucket_cap_mb` | `25` | Size of each all-reduce bucket. Smaller buckets overlap better with backward and lower peak memory. Lower it to ~10 if you run out of memory during the gradient sync. |
@@ -109,7 +109,7 @@ Multi-node DDP needs the usual rendezvous variables (`MASTER_ADDR`, `MASTER_PORT
 FSDP shards parameters, gradients and optimizer state across GPUs, and all-gathers each wrapped block just in time for its forward and backward pass. Use it only when a model does **not** fit on one GPU, which no shipped GOAL config comes close to.
 
 ```bash
-pixi run -e cuda goal-train strategy.name=fsdp trainer.devices=4 trainer.precision=bf16-mixed training.gradient_clip=0
+pixi run -e cuda goal-train ++strategy.name=fsdp trainer.devices=4 trainer.precision=bf16-mixed training.gradient_clip=0
 ```
 
 Builder: `build_fsdp_strategy` in [`strategies/fsdp.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/training/strategies/fsdp.py).
@@ -165,7 +165,7 @@ Then run it with the pattern from [Custom training loops](custom-loops.md#level-
 DeepSpeed is already in every pixi environment (with pip: `pip install "goal-atomistic[deepspeed]"`).
 
 ```bash
-pixi run -e cuda goal-train strategy.name=deepspeed_zero2 trainer.devices=4 \
+pixi run -e cuda goal-train ++strategy.name=deepspeed_zero2 trainer.devices=4 \
     training.gradient_clip=0 trainer.gradient_clip_val=10.0
 ```
 
@@ -182,7 +182,7 @@ Builder: `build_deepspeed_strategy` in [`strategies/deepspeed.py`](https://githu
 > If you see a hang after the first validation, disable the manager and use Lightning's checkpointing, which is safe on all ranks. Keep `last.ckpt` in `training.checkpoint_dir` so automatic resume still works:
 >
 > ```bash
-> pixi run -e cuda goal-train strategy.name=ddp trainer.devices=4 checkpoint_manager=null \
+> pixi run -e cuda goal-train ++strategy.name=ddp trainer.devices=4 checkpoint_manager=null \
 >     '+callbacks.model_checkpoint={_target_: lightning.pytorch.callbacks.ModelCheckpoint, dirpath: ${training.checkpoint_dir}, monitor: val_forces/forces_mae, mode: min, save_top_k: 5, save_last: true}'
 > ```
 >

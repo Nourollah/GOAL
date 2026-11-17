@@ -17,22 +17,22 @@ A head turns a modular backbone's `NodeFeatures` into the property dictionary th
 
 Every head except `multi` takes `irreps_in` (the backbone's output irreps, as a string) and `hidden_dim` (the width of its `ScalarReadout` MLP, default 64). `ScalarReadout` keeps only the `0e` channels of `irreps_in` (via an `EquivariantLinear`) and then applies `Linear → SiLU → Linear` to give one scalar per atom.
 
-**`node_energies`.** Backbones that already compute per-atom energies (all SIMURGH backbones and `simurgh_ablation`) put them in `NodeFeatures.node_energies`. `energy`, `energy_forces` and `dual_forces` then **sum those directly**, and their own `ScalarReadout` is unused. `direct_forces` and `stress` always use their own readout, so paired with a SIMURGH backbone they ignore the artisan energies.
+**`node_energies`.** A backbone that already computes per-atom energies puts them in `NodeFeatures.node_energies`. `energy`, `energy_forces` and `dual_forces` then **sum those directly**, and their own `ScalarReadout` is unused. `direct_forces` and `stress` always use their own readout. SIMURGH is monolithic (`head: null`), so heads apply to the modular backbones (`hyperspec`, `invariant_gnn`).
 
-Keep `irreps_in` consistent with the backbone by interpolating it in the YAML. For example, the default config uses:
+Keep `irreps_in` consistent with the backbone's output irreps. For example, `hyperspec_md17.yaml` uses:
 
 ```yaml
 head:
   name: energy_forces
-  irreps_in: ${model.backbone.artisan.hidden_irreps}
-  hidden_dim: 128
+  irreps_in: "128x0e+128x1o+128x2e" # must match the backbone's irreps_out
+  hidden_dim: 64
 ```
 
 ## Conservative vs direct forces
 
 **Conservative** heads (`energy_forces`, and `dual_forces` in `autograd` mode) compute $\mathbf F_i = -\partial E/\partial \mathbf r_i$ with `torch.autograd.grad` (using `create_graph=True` during training, so the force loss can be backpropagated). The forces are then an exact gradient field: energy is conserved in MD, $\sum_i \mathbf F_i = 0$ for a translation-invariant energy, and rotating the structure rotates the forces. The costs are a second backward pass and the extra memory needed to differentiate through the force computation.
 
-For this to work, the backbone must build its edge geometry from `graph.pos` and make sure `graph.pos.requires_grad` is set. The SIMURGH backbones do this through `differentiable_edges`. **If `graph.pos.requires_grad` is false, these heads silently return zero forces.** See the warning on [Other backbones](other-backbones.md) and the template in [Writing a new model](custom-model.md).
+For this to work, the backbone must build its edge geometry from `graph.pos` and make sure `graph.pos.requires_grad` is set. SIMURGH does this through `differentiable_edges`. **If `graph.pos.requires_grad` is false, these heads silently return zero forces.** See the warning on [Other backbones](other-backbones.md) and the template in [Writing a new model](custom-model.md).
 
 **Direct** heads project the backbone's `l = 1` features straight onto a `1x1o` vector per atom. This is cheaper, because no derivative pass is needed, and it is still rotation-equivariant. But the result is not a gradient field: energy is not conserved in NVE MD and $\sum_i \mathbf F_i$ is not exactly zero. It can still fit clean DFT forces well. It requires `1o` channels in `irreps_in`.
 
@@ -52,7 +52,7 @@ The total energy is the per-graph sum of per-atom contributions. Use it for ener
 
 ### `energy_forces`
 
-Energy as above, plus conservative autograd forces. Keys: `irreps_in`, `hidden_dim`, `compute_stress` (default `false`). This is the default head for SIMURGH ARACE.
+Energy as above, plus conservative autograd forces. Keys: `irreps_in`, `hidden_dim`, `compute_stress` (default `false`). This is the head of `hyperspec_md17.yaml`.
 
 > [!WARNING]
 > `compute_stress: true` adds `"stress"` to `output_keys`, but the current `forward` **never computes stress**: the returned dict only holds `energy`, `forces` and `num_atoms`. A `stress` loss configured on top would fail to find its prediction. For stress training, use the `stress` head (inside `multi` if you also need forces).
@@ -67,12 +67,12 @@ Energy as above, plus conservative autograd forces. Keys: `irreps_in`, `hidden_d
 | `correction_weight` | 0.1 | $w$ in `hybrid` mode |
 | `pairwise_correction_weight` | 0.0 | in `pairwise` mode: `0` gives pure pairwise forces; `>0` gives $\mathbf F_\text{autograd} + w\,\mathbf F_\text{pairwise}$ |
 
-`pairwise` takes `features.node_forces` from the backbone. Newton's third law is then exact by construction. Only the legacy `simurgh_legacy` backbone with `compute_pairwise_forces: true` provides `node_forces`. `simurgh_legacy_arace` does not, so `pairwise` raises there. The shipped legacy config `simurgh_legacy_ace_first_gmd26.yaml` uses `mode: hybrid`.
+`pairwise` takes `features.node_forces` from the backbone. Newton's third law is then exact by construction. No shipped backbone provides `node_forces`, so `pairwise` raises with all of them.
 
 ```yaml
 head:
   name: dual_forces
-  irreps_in: ${model.backbone.artisan.hidden_irreps}
+  irreps_in: "128x0e+128x1o+128x2e"
   hidden_dim: 128
   mode: hybrid
   correction_weight: 0.05
@@ -132,26 +132,26 @@ training:
 
 `MultiHead` takes a list of head configs under `heads:` and builds each one from `HEAD_REGISTRY`. Every sub-head receives the same `NodeFeatures` and has its own readout MLP. Their output dicts are merged. Two sub-heads producing the same key raise `ValueError` at construction (only `num_atoms` may be shared). So you cannot, for example, combine `energy_forces` with `stress`, because both output `energy`.
 
-Example: energy, forces, HOMO and LUMO on top of the default ARACE backbone. The `homo`/`lumo` targets must be present on your graphs.
+Example: energy, forces, HOMO and LUMO on top of the HyperSpec backbone. The `homo`/`lumo` targets must be present on your graphs.
 
 ```yaml
 model:
   backbone:
-    name: simurgh_legacy_arace
-    # ... as in src/goal/configs/ml/simurgh_legacy_gmd26.yaml
+    name: hyperspec
+    # ... as in src/goal/configs/ml/hyperspec_md17.yaml
   head:
     name: multi
     heads:
-      - name: energy_forces            # sums the backbone's node_energies
-        irreps_in: ${model.backbone.artisan.hidden_irreps}
+      - name: energy_forces
+        irreps_in: "128x0e+128x1o+128x2e"
         hidden_dim: 128
       - name: scalar
-        irreps_in: ${model.backbone.artisan.hidden_irreps}
+        irreps_in: "128x0e+128x1o+128x2e"
         hidden_dim: 64
         property_name: homo
         reduction: mean
       - name: scalar
-        irreps_in: ${model.backbone.artisan.hidden_irreps}
+        irreps_in: "128x0e+128x1o+128x2e"
         hidden_dim: 64
         property_name: lumo
         reduction: mean
@@ -177,9 +177,9 @@ head:
   name: multi
   heads:
     - name: energy_forces
-      irreps_in: ${model.backbone.artisan.hidden_irreps}
+      irreps_in: "128x0e+128x1o+128x2e"
     - name: dipole
-      irreps_in: ${model.backbone.artisan.hidden_irreps}
+      irreps_in: "128x0e+128x1o+128x2e"
 ```
 
 > [!TIP]

@@ -140,7 +140,9 @@ def test_simurgh_names_carry_no_version_number() -> None:
     name = "SIMURGH"  # the examples are built here so this file passes its own check
     versioned = (f"{name}-2", f"{name} v3", f"{name.lower()}2", f"{name}_V2")
     assert all(VERSIONED.search(s) for s in versioned)
-    assert not any(VERSIONED.search(s) for s in ("simurgh_dev", "SIMURGH (dev)", "simurgh_legacy"))
+    assert not any(
+        VERSIONED.search(s) for s in ("simurgh_dev", "SIMURGH (dev)", "simurgh_dev_abl")
+    )
 
 
 def test_simurgh_imports_no_other_model_package() -> None:

@@ -71,7 +71,7 @@ if __name__ == "__main__":
 ```
 
 ```bash
-pixi run -e cuda python train_custom.py --config-name simurgh_legacy_gmd26 trainer.max_epochs=200
+pixi run -e cuda python train_custom.py --config-name simurgh_dev_gmd26_FD trainer.max_epochs=200
 pixi run -e cuda python train_custom.py --config-dir src/goal/configs +debug=fdr trainer.accelerator=gpu   # quick check
 ```
 
@@ -87,7 +87,7 @@ Logic that only *observes* or adjusts the run from outside (monitoring, schedule
 
 ## Building GOAL components from a config
 
-Levels 2 and 3, and any notebook work, need the datamodule, model and loss without the CLI. The pattern below reproduces what `goal-train` does for a SIMURGH ARACE config, including the dataset-derived `elements` and `avg_num_neighbors`:
+Levels 2 and 3, and any notebook work, need the datamodule, model and loss without the CLI. The pattern below reproduces what `goal-train` does for a SIMURGH config, including the dataset-derived `elements`, `avg_num_neighbors` and `scale: force_rms`:
 
 ```python
 import torch
@@ -95,14 +95,14 @@ import torch.nn as nn
 from hydra import compose, initialize_config_dir
 
 from goal.ml.cli import CONFIGS_ML_DIR  # importing goal.ml.cli also fills the registries
-from goal.ml.cli.train import _build_head, _build_loss
+from goal.ml.cli.train import _build_head, _build_loss, _force_rms
 from goal.ml.data.datamodule import GOALDataModule
 from goal.ml.data.statistics import compute_avg_num_neighbors, compute_unique_elements
 from goal.ml.registry import BACKBONE_REGISTRY
 
 with initialize_config_dir(config_dir=CONFIGS_ML_DIR, version_base=None):
     cfg = compose(
-        config_name="simurgh_legacy_gmd26",
+        config_name="simurgh_dev_gmd26_FD",
         overrides=[
             "paths.output_dir=/tmp/goal_custom",  # ${hydra:runtime.output_dir} is undefined outside an app
             "data.monitor_test_during_training=false",
@@ -116,6 +116,7 @@ dm.setup("fit")
 kwargs = {k: v for k, v in cfg.model.backbone.items() if k != "name"}
 kwargs["elements"] = compute_unique_elements(dm.data_train)
 kwargs["avg_num_neighbors"] = compute_avg_num_neighbors(dm.data_train)
+kwargs["scale"] = _force_rms(dm.data_train)  # the config's scale: force_rms
 backbone = BACKBONE_REGISTRY.get(cfg.model.backbone.name)(**kwargs)
 head = _build_head(cfg, backbone)  # None for monolithic backbones
 loss = _build_loss(cfg)  # CompositeLoss from training.losses
@@ -137,7 +138,7 @@ class Potential(nn.Module):
 model = Potential(backbone, head)
 ```
 
-If your config uses `atomic_energies.mode: dataset`, a `null` `scale`, or `rare_artisan` routing, also replicate those steps from `_run_training` in [`cli/train.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/cli/train.py) (`compute_atomic_references`, `compute_energy_scale`, `compute_pair_counts`). `_build_head` and `_build_loss` are private helpers. They are stable in practice, but not a public API.
+If your config uses `atomic_energies.mode: dataset` or a `null` `scale`, also replicate those steps from `_run_training` in [`cli/train.py`](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/cli/train.py) (`compute_atomic_references`, `compute_energy_scale`). `_build_head`, `_build_loss` and `_force_rms` are private helpers. They are stable in practice, but not a public API.
 
 ## Level 2: `FabricTrainer`
 
@@ -181,7 +182,7 @@ ft = FabricTrainer(
 )
 history = ft.fit(epochs=200, early_stopping_patience=30)
 ft.load_best()  # restore the best-validation weights kept in memory
-ft.save_checkpoint("arace_fabric.ckpt")
+ft.save_checkpoint("simurgh_fabric.ckpt")
 ```
 
 > [!WARNING]

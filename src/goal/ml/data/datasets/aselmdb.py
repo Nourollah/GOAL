@@ -35,7 +35,7 @@ Two layers live in this module:
 
 Because a whole OMol25 split is far larger than any single run needs, the
 filter arguments are the primary interface; see
-``src/goal/configs/ml/simurgh_legacy_nf_omol25.yaml`` for a worked example.
+``docs/ml/data/aselmdb-omol25.md`` for a worked example.
 """
 
 from __future__ import annotations
@@ -1105,10 +1105,10 @@ class ASELMDBDataset(BaseAtomicDataset):
 
     Filtering is the point of this class, not a convenience.  A 4M-row
     OMol25 split spans 83 elements, charges −8…+9 and spins 1…11; a
-    SIMURGH-family backbone builds one artisan per element *pair*, and
-    charge and spin are not inputs to it at all.  Handing it the raw
-    split would mean thousands of pair experts and a target that is not a
-    function of the input.  So: restrict the chemistry with
+    backbone has parameters only for the elements in its ``elements``
+    list, and charge and spin are not inputs to it at all.  Handing it the
+    raw split would mean element tables nobody trains and a target that is
+    not a function of the input.  So: restrict the chemistry with
     ``allowed_elements``, pin ``charges`` / ``spins``, and let the model
     see a well-posed problem.
 
@@ -1142,9 +1142,8 @@ class ASELMDBDataset(BaseAtomicDataset):
         for corpora full of conformers of the same molecule.
     allowed_elements : sequence of int, optional
         Keep a structure only if **every** atom is one of these.  Set it
-        to the backbone's ``elements`` list: an edge whose element pair
-        has no artisan is zero-masked, so an unfiltered element
-        contributes exactly zero energy and nothing warns.
+        to the backbone's ``elements`` list: the model has no parameters
+        for any other element.
     excluded_elements : sequence of int, optional
         Drop a structure if it contains any of these.
     charges, spins : sequence of int, optional

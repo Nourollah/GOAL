@@ -1,6 +1,6 @@
 # Hyperparameter tuning
 
-This page covers the ways to search hyperparameters in GOAL: the ARACE search space shipped in [`src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml), the `goal-tune` entry point and its three back-ends (Lightning Tuner, Ray Tune, W&B Sweeps), and approaches that drive the full `goal-train` pipeline (Hydra multirun and W&B sweeps over `goal-train`). It also states which paths currently work end to end and which have known gaps.
+This page covers the ways to search hyperparameters in GOAL: what to search for SIMURGH, the `goal-tune` entry point and its three back-ends (Lightning Tuner, Ray Tune, W&B Sweeps), and approaches that drive the full `goal-train` pipeline (Hydra multirun and W&B sweeps over `goal-train`). It also states which paths currently work end to end and which have known gaps.
 
 ## Which approach to use
 
@@ -12,25 +12,25 @@ This page covers the ways to search hyperparameters in GOAL: the ARACE search sp
 | [`goal-tune`, method `wandb`](#wb-sweeps-goal-tune-method-wandb) | `wandb` | no (see limitations) | Hyperband | (see limitations) |
 | [`goal-tune`, method `tuner`](#lightning-tuner-goal-tune-method-tuner) | none | no | — | LR range test |
 
-"Full pipeline" means the dataset-derived quantities (elements, atomic reference energies, ScaleShift scale, `avg_num_neighbors`, pair counts), the `trainer:` block from your config (including `inference_mode: false`), stage curricula, checkpointing and loggers. `goal-tune` builds its models with a simplified path that skips most of this. The details are under each method.
+"Full pipeline" means the dataset-derived quantities (elements, atomic reference energies, scale, `avg_num_neighbors`), the `trainer:` block from your config (including `inference_mode: false`), stage curricula, checkpointing and loggers. `goal-tune` builds its models with a simplified path that skips most of this. The details are under each method.
 
 > [!IMPORTANT]
-> Whatever tool you use, **optimise a validation metric, never a `test…/` one.** With `data.monitor_test_during_training: true`, the OOD set is logged every epoch. Tuning against it turns it into a second validation set. Use `val_forces/forces_mae`, `val_energy/energy_mae_per_atom` or a combination of the two.
+> Whatever tool you use, **optimise a validation metric, never a `test…/` one.** With `data.monitor_test_during_training: true`, the OOD set is logged every epoch. Tuning against it turns it into a second validation set. Use `val_forces/forces_mae_atomw` (what the SIMURGH configs select on), `val_energy/energy_mae_per_atom` or a combination of the two.
 
 ## What to search
 
-For SIMURGH ARACE, the shipped HPO config searches the dimensions that matter most (all keys exist in [`simurgh_legacy_gmd26.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_legacy_gmd26.yaml)):
+For SIMURGH, the dimensions that matter most (all keys exist in [`simurgh_dev/_base.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/simurgh_dev/_base.yaml)):
 
-| Key | Range in `simurgh_legacy_gmd26_hpo.yaml` | What it controls |
+| Key | Suggested range | What it controls |
 | --- | --- | --- |
-| `model.backbone.num_rounds` | `{1, 2, 3}` | Number of artisan + ACE rounds, which sets the receptive field (≈ rounds × cutoff) and cost |
-| `model.backbone.artisan.hidden_irreps` | `16x0e+16x1o+16x2e`, `32x0e+32x1o+32x2e`, `32x0e+32x1o` | Equivariant width and maximum angular order. $\ell = 2$ usually matters for forces |
-| `model.backbone.artisan.num_layers` | `{1, 2}` | Tensor product alone, or extra residual equivariant layers |
-| `model.backbone.artisan.radial_hidden` | `{32, 64}` | Width of the radial MLP producing the TP weights |
-| `model.backbone.artisan.n_scalar_out` | `{16, 32}` | Invariant scalars feeding the energy MLP |
-| `model.backbone.share_artisan_weights` | `{true, false}` | One artisan bank for all rounds vs one per round |
+| `model.backbone.num_interactions` | `{1, 2, 3}` | Message-passing layers, which set the receptive field (≈ layers × cutoff) and cost |
+| `model.backbone.correlation` | `{2, 3, 4}` | Body order of the product basis |
+| `model.backbone.num_channels` with `model.backbone.message_irreps` | 64 or 128 channels | Equivariant width; the `message_irreps` multiplicity must equal `num_channels` |
+| `model.backbone.num_rbf` | `{8, 16, 32}` | Radial basis size |
 | `training.optimizer.lr` | log-uniform 1e-4 … 1e-2 | The most important single knob |
-| `training.optimizer.weight_decay` | log-uniform 1e-8 … 1e-4 | Applies to non-equivariant parameters only |
+| `training.optimizer.weight_decay` | log-uniform 1e-8 … 1e-4 | Decoupled; not applied to embeddings or pair-line coefficients |
+
+For one-key comparisons with a fixed protocol, use the ablation arms in `src/goal/configs/ml/ablations/simurgh_dev/` instead of a search.
 
 Some other keys worth considering are the loss weights (`training.losses.1.weight` for forces relative to energy), `data.batch_size`, `training.ema.decay`, `model.backbone.cutoff` (kept in sync with `data.cutoff` through interpolation), and `training.optimizer.warmup_epochs`.
 
@@ -44,7 +44,7 @@ This needs no extra packages and uses the exact production pipeline:
 ```bash
 pixi run -e cuda goal-train -m \
     training.optimizer.lr=2e-3,5e-3,1e-2 \
-    model.backbone.num_rounds=1,2 \
+    model.backbone.num_interactions=1,2 \
     trainer.max_epochs=100 \
     run_name_suffix=_grid
 ```
@@ -55,13 +55,13 @@ Hydra runs the Cartesian product (6 jobs) one after another. Each job gets its o
 
 A W&B sweep agent can launch `goal-train` itself, passing the sampled values as Hydra overrides. Each trial is then an ordinary GOAL run, with dataset statistics, `inference_mode: false`, the stage curriculum, the checkpoint manager and the W&B logger all working, while the W&B controller handles Bayesian search and Hyperband early termination.
 
-`sweep_arace.yaml`:
+`sweep_simurgh.yaml`:
 
 ```yaml
 program: goal-train
 method: bayes
 metric:
-  name: val_forces/forces_mae # validation metric keys have no _epoch suffix
+  name: val_forces/forces_mae_atomw # validation metric keys have no _epoch suffix
   goal: minimize
 early_terminate:
   type: hyperband
@@ -76,12 +76,10 @@ parameters:
     distribution: log_uniform_values
     min: 1.0e-8
     max: 1.0e-4
-  model.backbone.num_rounds:
+  model.backbone.num_interactions:
     values: [1, 2, 3]
-  model.backbone.artisan.hidden_irreps:
-    values: ["16x0e + 16x1o + 16x2e", "32x0e + 32x1o + 32x2e", "32x0e + 32x1o"]
-  model.backbone.share_artisan_weights:
-    values: [true, false]
+  model.backbone.correlation:
+    values: [2, 3, 4]
 command:
   - ${env}
   - goal-train
@@ -92,7 +90,7 @@ command:
 ```
 
 ```bash
-wandb sweep --project goal sweep_arace.yaml        # prints: wandb agent <entity>/goal/<sweep_id>
+wandb sweep --project goal sweep_simurgh.yaml      # prints: wandb agent <entity>/goal/<sweep_id>
 wandb agent <entity>/goal/<sweep_id>               # run on as many GPUs / nodes as you like
 ```
 
@@ -109,19 +107,16 @@ Notes:
 
 ### Invoking it
 
-`goal-tune` reads experiment files from `src/goal/configs/ml/` (like `goal-train`), and its default config is the shipped ARACE + Ray Tune search. The presets in `src/goal/configs/hparams_search/` live one level up, so put that directory on the search path to use them (outside a clone, replace `src/goal/configs` with `"$(python -c 'import goal; print(goal.CONFIGS_DIR)')"`):
+`goal-tune` reads experiment files from `src/goal/configs/ml/` (like `goal-train`), and its default experiment is `simurgh_dev_gmd26_FD`, which has no `hparams_search:` section. The presets in `src/goal/configs/hparams_search/` live one level up, so put that directory on the search path to use them (outside a clone, replace `src/goal/configs` with `"$(python -c 'import goal; print(goal.CONFIGS_DIR)')"`):
 
 ```bash
-# The shipped ARACE + Ray Tune config (composes simurgh_legacy_gmd26 and adds hparams_search)
-pixi run -e cuda goal-tune
-
 # Any experiment file + one of the presets in src/goal/configs/hparams_search/
-pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 '+hparams_search@_global_=basic'
-pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 '+hparams_search@_global_=ray_tune'
-pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 '+hparams_search@_global_=wandb_sweep'
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_dev_gmd26_FD '+hparams_search@_global_=basic'
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_dev_gmd26_FD '+hparams_search@_global_=ray_tune'
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_dev_gmd26_FD '+hparams_search@_global_=wandb_sweep'
 
 # Or inline
-pixi run -e cuda goal-tune --config-name simurgh_legacy_gmd26 'hparams_search={method: tuner, tuner: {lr_find: true}}'
+pixi run -e cuda goal-tune --config-name simurgh_dev_gmd26_FD '+hparams_search={method: tuner, tuner: {lr_find: true}}'
 ```
 
 `@_global_` is needed because the preset files start with a top-level `hparams_search:` key and have no `# @package` header. (Before October 2026 the default config was a non-existent `train.yaml`, so a bare `goal-tune` failed with *Cannot find primary config 'train'*.)
@@ -130,7 +125,7 @@ pixi run -e cuda goal-tune --config-name simurgh_legacy_gmd26 'hparams_search={m
 
 Unlike `goal-train`, each trial is built directly from the config:
 
-- `backbone_cls(**cfg.model.backbone)` with **no dataset-derived injection**. `elements`, `avg_num_neighbors`, `scale`, `atomic_energies` in `dataset` mode and `pair_counts` must all be set in the config. `simurgh_legacy_gmd26_hpo.yaml` pins `elements: [1, 6, 8]` for this reason. If `avg_num_neighbors: null` remains, the backbone's own default is used, which changes the message normalisation compared with a `goal-train` run.
+- `backbone_cls(**cfg.model.backbone)` with **no dataset-derived injection**. `elements`, `avg_num_neighbors`, a numeric `scale` (SIMURGH's `scale: force_rms` is resolved by `goal-train` only) and `atomic_energies` in `dataset` mode must all be set in the config. [Benchmark datasets](../data/benchmarks.md#switching-molecules) shows how to measure them.
 - The head and the losses are built with the same helpers as `goal-train` (`goal.ml.cli.builders`): monolithic backbones (`head: null`) are supported, and each loss receives exactly the keyword arguments it accepts (`normalize_by_n_atoms`, `property_name`, …).
 - No callbacks, loggers or checkpoint manager are attached (except the W&B logger in `wandb` mode).
 
@@ -181,7 +176,7 @@ finder.plot(suggest=True).savefig("lr_find.png")
 
 ```bash
 # ray[tune] + optuna are in every pixi environment (pip: pip install "goal-atomistic[tune]")
-pixi run -e cuda goal-tune --config-name simurgh_legacy_gmd26_hpo
+pixi run -e cuda goal-tune --config-dir src/goal/configs --config-name simurgh_dev_gmd26_FD '+hparams_search@_global_=ray_tune'
 ```
 
 The `hparams_search` schema:
@@ -201,7 +196,7 @@ A search-space entry looks like this:
 ```yaml
 search_space:
   training.optimizer.lr: { type: loguniform, lower: 1.0e-4, upper: 1.0e-2 }
-  model.backbone.num_rounds: { type: choice, values: [1, 2, 3] }
+  model.backbone.num_interactions: { type: choice, values: [1, 2, 3] }
   training.losses.1.weight: { type: uniform, lower: 1.0, upper: 20.0 }
 ```
 
@@ -209,8 +204,8 @@ search_space:
 > Known limitations of the current Ray trial function (`_ray_train_fn`), from reading the code:
 >
 > - Each trial creates its own `L.Trainer(max_epochs=…, accelerator="auto", devices="auto", logger=False, …)` instead of using your `trainer:` block. Lightning's default `inference_mode=True` therefore applies, and validation of autograd-force models (every SIMURGH config) cannot compute forces.
-> - Metrics are reported to Ray **once, after `trainer.fit` ends**, and only keys starting with `val/`. ASHA and PBT therefore have no intermediate results to prune on, and a target such as `val_forces/forces_mae` (the one set in `simurgh_legacy_gmd26_hpo.yaml`) is never reported. Only `val/total` is.
-> - Sampled values are merged into a resolved copy of the config. Interpolations such as `model.head.irreps_in: ${model.backbone.artisan.hidden_irreps}` keep the **base** value (the HPO config notes this).
+> - Metrics are reported to Ray **once, after `trainer.fit` ends**, and only keys starting with `val/`. ASHA and PBT therefore have no intermediate results to prune on, and a target such as `val_forces/forces_mae_atomw` is never reported. Only `val/total` is.
+> - Sampled values are merged into a resolved copy of the config. Interpolations such as `model.backbone.cutoff: ${data.cutoff}` keep the **base** value.
 >
 > Until these are fixed, prefer a W&B sweep over `goal-train`, or Hydra multirun.
 
@@ -240,4 +235,4 @@ hparams_search:
 
 1. Take the best few configurations and train them at **full length** with **3+ seeds** (`seed=1,2,3`). The search used short budgets.
 2. Report the in-distribution validation metric that was tuned on, and the OOD (`test…/`) numbers that were not.
-3. Write the chosen values into a new experiment file in `src/goal/configs/ml/` (for example `simurgh_legacy_gmd26_tuned.yaml`, starting with `defaults: [simurgh_legacy_gmd26, _self_]` as `simurgh_legacy_gmd26_hpo.yaml` does), so the final model is reproducible from a single `--config-name`.
+3. Write the chosen values into a new experiment file in `src/goal/configs/ml/` (for example `simurgh_dev_gmd26_FD_tuned.yaml`, starting with `defaults: [simurgh_dev_gmd26_FD, _self_]`), so the final model is reproducible from a single `--config-name`.

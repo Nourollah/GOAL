@@ -53,10 +53,9 @@ class AtomicGraph(Data):
         # PBC shifts — integer cell-shift vectors per edge (needed by MACE/MLIPs)
         unit_shifts: torch.Tensor | None = None,  # (E, 3) int64
         # Fragment labels — optional.  ``(N,)`` int64 connected-component
-        # labels under a short covalent cutoff, consumed by
-        # the fragment-interaction module.  Deliberately *not* required:
-        # graphs built without it simply carry no attribute, and the ARACE
-        # rounds treat a missing ``fragment_index`` as "channel disabled".
+        # labels under a short covalent cutoff, read by models that report
+        # per-fragment quantities.  Deliberately *not* required: graphs
+        # built without it simply carry no attribute.
         # See ``goal.ml.data.fragments.compute_fragment_index``.
         fragment_index: torch.Tensor | None = None,  # (N,) int64
         # Training targets — optional, None for inference
@@ -158,9 +157,8 @@ class AtomicGraph(Data):
 
         Populated only when the dataset was built with
         ``compute_fragment_index=True`` (config key
-        ``data.compute_fragment_index``).  ``None`` on every other graph
-        — the ARACE rounds read it defensively and only require it when
-        the fragment-interaction module is enabled.
+        ``data.compute_fragment_index``).  ``None`` on every other graph;
+        models read it defensively.
         """
         return self.get("fragment_index", None)
 

@@ -28,7 +28,7 @@ Never fit references by least squares on GMD (`mode: dataset`, or a foundation m
 
 ## Metrics to report
 
-- Report dataset-level numbers from `goal-eval` with `predictions_file=...`. The `forces_mae` logged during training is a batch average weighted by molecules, not atoms: legacy SIMURGH Simplified on Duplication OOD logged 0.050 eV/Å against a dataset-level 0.057 eV/Å (and 0.075 against 0.085 eV/Å for the routed variant). GOAL also logs the exact atom-weighted `forces_mae_atomw`, `forces_rmse_atomw` and `forces_cosine_similarity_atomw`; the SIMURGH configs select checkpoints on `val_forces/forces_mae_atomw`.
+- Report dataset-level numbers from `goal-eval` with `predictions_file=...`. The `forces_mae` logged during training is a batch average weighted by molecules, not atoms: an earlier SIMURGH model on Duplication OOD logged 0.050 eV/Å against a dataset-level 0.057 eV/Å. GOAL also logs the exact atom-weighted `forces_mae_atomw`, `forces_rmse_atomw` and `forces_cosine_similarity_atomw`; the SIMURGH configs select checkpoints on `val_forces/forces_mae_atomw`.
 - Headline: ID and OOD force MAE (meV/Å), with force RMSE, Q95, Q99 and max of the per-atom error norm, cosine similarity, and per-element force MAE (O-resolved errors are the GMD failure signature).
 - Energy per molecule (as in the paper) and per atom. For each OOD molecule m with residuals r_mj = E_pred − E_ref over its frames j:
   - offset δ_m = mean_j r_mj, and **offset MAE** = mean_m |δ_m| (`energy_offset_mae`, and `energy_offset_mae_per_atom`);

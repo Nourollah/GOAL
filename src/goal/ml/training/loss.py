@@ -684,57 +684,6 @@ class ChargeLoss(nn.Module):
         return self.loss_fn(pred["total_charge"], target_charge)
 
 
-@LOSS_REGISTRY.register("gate_reg")
-class GateRegLoss(nn.Module):
-    """L2 regularisation on the artisan gate scalars.
-
-    Penalises large gate magnitudes: ``L = sum(P_AB ** 2)`` over all
-    expert gates in the batch.  The gate values are injected into the
-    predictions dict by the training module under the key
-    ``"gate_values"`` (a 1-D tensor of all expert gate scalars stacked).
-
-    When ``"gate_values"`` is absent from ``pred`` (e.g. for non-SIMURGH
-    models), the loss returns ``0.0`` so the same config works for all
-    model families.
-
-    The ``loss_fn`` kwarg is accepted but ignored — ``gate_reg`` has no
-    configurable loss function (it is always L2).  This keeps it
-    compatible with the generic ``_build_loss`` builder which passes
-    ``loss_fn`` to every registered loss class.
-    """
-
-    def __init__(self, loss_fn: str = "l2", **_kwargs: typing.Any) -> None:
-        super().__init__()
-
-    def forward(
-        self,
-        pred: dict[str, torch.Tensor],
-        target: dict[str, torch.Tensor],
-    ) -> torch.Tensor:
-        """Return ``sum(gate_values ** 2)`` over all gate scalars.
-
-        The sum is not normalised by the number of gates or graphs.
-
-        Parameters
-        ----------
-        pred : dict[str, Tensor]
-            Model outputs; reads ``'gate_values'`` (1-D) if present.
-        target : dict[str, Tensor]
-            Unused; accepted for interface compatibility.
-
-        Returns
-        -------
-        Tensor
-            Scalar penalty, or ``0.0`` on the device of the first
-            prediction when ``'gate_values'`` is missing or empty.
-        """
-        gate_values: torch.Tensor | None = pred.get("gate_values", None)
-        if gate_values is None or gate_values.numel() == 0:
-            device: torch.device = next(iter(pred.values())).device
-            return torch.tensor(0.0, device=device)
-        return (gate_values**2).sum()
-
-
 @LOSS_REGISTRY.register("newton")
 class NewtonLoss(nn.Module):
     """Net-force penalty: ``loss_fn`` of each structure's ``Σ_i F_i`` against zero.

@@ -177,7 +177,7 @@ BONDS = {"C-H": (6, 1), "C-C": (6, 6), "C-O": (6, 8), "O-H": (8, 1)}
 
 @pytest.mark.parametrize("variant", sorted(VARIANTS))
 def test_bond_scans_cross_1_8_angstrom_smoothly(variant: str) -> None:
-    """No step where legacy Simplified's fragment perception flips (up to 1.4 eV there).
+    """No energy step where a bond crosses the 1.8 Å fragment covalent cutoff.
 
     The energy path holds no discrete fragment perception (MFC windows are a
     training loss only).  The straddling pair isolates a step; the grids

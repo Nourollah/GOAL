@@ -148,8 +148,8 @@ class EquivariantInteractionBlock(nn.Module):
             Edge lengths, shape ``(E,)``.
         edge_sh : Tensor, optional
             Pre-computed spherical harmonics, shape ``(E, irreps_edge.dim)``.
-            When provided, skip the internal SH computation (CHANGE 2 —
-            compute once in ``EnvironmentDressing`` and reuse across layers).
+            When provided, skip the internal SH computation (the caller
+            computes them once and reuses them across layers).
             When ``None``, SH are computed from ``edge_vectors`` internally
             (backward-compatible behaviour).
         atomic_numbers : Tensor, optional

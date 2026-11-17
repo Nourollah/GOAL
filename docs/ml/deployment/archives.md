@@ -83,18 +83,17 @@ On resume, an existing `frozen_source/` is kept: the snapshot always matches the
 
 ```json
 {
-  "simurgh_version": "0.1.0",
+  "simurgh_version": "0.2.0",
   "git_commit": "152d8e8342ff9510f6e323fdb20e477711ec6ef8",
   "timestamp": "2026-08-07T09:55:38",
-  "model_class": "SimurghAraceBackbone",
+  "model_class": "SimurghDev",
   "source_frozen": true,
   "elements": [1, 6, 8],
-  "atomic_references": {"1": -13.5953, "6": -1028.4812, "8": -2041.1177},
   "scale": 1.1180739402770996
 }
 ```
 
-Other optional keys are `pair_frequencies`, `dedicated_pairs`, `rare_artisan` and `avg_num_neighbors`. `simurgh_version` is the installed `goal` package version.
+Other optional keys are `atomic_references` (for a model with a per-element energy table) and `avg_num_neighbors`. `simurgh_version` is the installed `goal` package version.
 
 ### Per-checkpoint sidecars
 
@@ -122,7 +121,7 @@ Every `.ckpt` gets a `.json` sidecar with the same stem, deleted together with i
 ### A finished run directory
 
 ```text
-logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/
+logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints/
 ├── frozen_source/goal/...                         model source at t = 0
 ├── config.yaml                                    resolved config
 ├── metadata.json                                  provenance
@@ -156,10 +155,10 @@ Archives are written atomically. With `save_archive: true` the best top-k checkp
 
 ```bash
 pixi run -e cuda goal-pack-archive \
-    --checkpoint-dir logs/simurgh_legacy_gmd26/runs/<run>/checkpoints \
+    --checkpoint-dir logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints \
     --checkpoint best \
-    --output models/simurgh_legacy_gmd26.simurgh
-# Packed best_val_forces_forces_mae=0.0052_epoch=1440.ckpt -> models/simurgh_legacy_gmd26.simurgh
+    --output models/simurgh_dev_gmd26_FD.simurgh
+# Packed best_val_forces_forces_mae=0.0052_epoch=1440.ckpt -> models/simurgh_dev_gmd26_FD.simurgh
 ```
 
 | Flag | Default | Meaning |
@@ -175,18 +174,18 @@ The command exits with status 1 and a one-line `error:` message if the selector 
 `goal-inspect` describes a model **without building it**. It accepts all three formats:
 
 ```bash
-pixi run -e cuda goal-inspect models/simurgh_legacy_gmd26.simurgh          # archive
-pixi run -e cuda goal-inspect logs/simurgh_legacy_gmd26/runs/<run>/checkpoints/   # directory (also lists every .ckpt)
+pixi run -e cuda goal-inspect models/simurgh_dev_gmd26_FD.simurgh          # archive
+pixi run -e cuda goal-inspect logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints/   # directory (also lists every .ckpt)
 pixi run -e cuda goal-inspect logs/.../checkpoints/last.ckpt        # bare checkpoint (+ its sidecar / directory metadata)
 ```
 
 ```text
 Format:           archive
 Source frozen:    yes
-Version:          0.1.0
+Version:          0.2.0
 Git commit:       152d8e83
 Saved:            2026-08-07T09:55:38
-Model class:      SimurghAraceBackbone
+Model class:      SimurghDev
 Elements:         H C O
 Scale:            1.11807
 Epoch:            1124
@@ -219,7 +218,7 @@ To reach the `GOALModule` itself (for evaluation, fine-tuning or feature extract
 ```python
 from goal.ml.utils.calculator import GOALCalculator
 
-calc = GOALCalculator(checkpoint_path="models/simurgh_legacy_gmd26.simurgh", device="cuda")
+calc = GOALCalculator(checkpoint_path="models/simurgh_dev_gmd26_FD.simurgh", device="cuda")
 module = calc.module          # GOALModule (backbone + head), eval mode, on `device`
 print(module.config.model.backbone.name)
 ```
@@ -241,12 +240,12 @@ from goal.ml.training.archive import (
     unpack_simurgh_archive,    # (archive_path, dest_dir) -> Path; rejects path-traversal members
 )
 
-info = inspect_checkpoint("models/simurgh_legacy_gmd26.simurgh")
+info = inspect_checkpoint("models/simurgh_dev_gmd26_FD.simurgh")
 print(info["format"], info["metadata"]["elements"], info["sidecar"]["epoch"])
 
 # Raw access to the weights / EMA shadow of an archive
 with tempfile.TemporaryDirectory() as tmp:
-    root = unpack_simurgh_archive("models/simurgh_legacy_gmd26.simurgh", tmp)
+    root = unpack_simurgh_archive("models/simurgh_dev_gmd26_FD.simurgh", tmp)
     raw = torch.load(root / "weights.pt", map_location="cpu", weights_only=False)
     print(raw.keys())          # state_dict, hyper_parameters, goal_ema (EMA runs, current code), ...
 ```

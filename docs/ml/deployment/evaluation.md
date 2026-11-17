@@ -29,7 +29,7 @@ How to read them:
 - **Cosine similarity and magnitude MAE** split the force error into a direction part and a size part. A model can have a good MAE but a poor cosine on weak forces near equilibrium. That matters for geometry optimisation.
 - **Newton violation** checks translational invariance: the total force on an isolated structure should be zero. Conservative (autograd) force heads give about $10^{-15}$ (floating-point noise). Direct force heads give finite values, and this metric shows how far off they are.
 
-- **Epoch values are averages of batch values, weighted by structures per batch.** For per-atom energies that is the exact mean. For force metrics it is not the mean over all atoms when molecule sizes differ between batches: on the GMD Duplication OOD set (batches of 48, ordered by size) a legacy SIMURGH Simplified checkpoint logged a force MAE of 0.050 eV/Å, while the mean over every force component is 0.057 eV/Å. Use `goal-eval predictions_file=…` (below) for exact dataset-level numbers.
+- **Epoch values are averages of batch values, weighted by structures per batch.** For per-atom energies that is the exact mean. For force metrics it is not the mean over all atoms when molecule sizes differ between batches: on the GMD Duplication OOD set (batches of 48, ordered by size) an earlier SIMURGH checkpoint logged a force MAE of 0.050 eV/Å, while the mean over every force component is 0.057 eV/Å. Use `goal-eval predictions_file=…` (below) for exact dataset-level numbers.
 
 Metrics are only computed when the labels exist. A dataset without forces (for example QM9) gives only the energy rows.
 
@@ -57,7 +57,7 @@ The GMD-26 configs use directory mode with `val_dir: …/TestID` (in-distributio
 
 ### Watching the test set during training
 
-With `data.monitor_test_during_training: true` (the default in `simurgh_legacy_gmd26.yaml`) the test split runs through the **validation** loop as a second dataloader every validation epoch. You get `test/`, `test_energy/` and `test_forces/` curves next to the `val_*` ones without running a separate evaluation. Two rules apply:
+With `data.monitor_test_during_training: true` (the default in `simurgh_dev_gmd26_FD.yaml`) the test split runs through the **validation** loop as a second dataloader every validation epoch. You get `test/`, `test_energy/` and `test_forces/` curves next to the `val_*` ones without running a separate evaluation. Two rules apply:
 
 - Select checkpoints and early-stop on `val_*`, never on `test_*`. If you select on the test set it becomes a second validation set, and its out-of-distribution number no longer means anything.
 - Those curves use the stage-weighted loss (they come from `validation_step`). Again, only the metrics are comparable with a standalone test run.
@@ -73,7 +73,7 @@ from omegaconf import open_dict
 from goal.ml.data.datamodule import GOALDataModule
 from goal.ml.utils.calculator import load_goal_checkpoint
 
-CKPT_DIR = "logs/simurgh_legacy_gmd26/runs/<run>/checkpoints"   # or a .simurgh archive or a .ckpt
+CKPT_DIR = "logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints"   # or a .simurgh archive or a .ckpt
 
 # 1. Rebuild the GOALModule from the frozen source + saved config, with the EMA weights.
 loaded = load_goal_checkpoint(CKPT_DIR, checkpoint="best")   # "best" | "last" | "epoch=N" | "<file>.ckpt"
@@ -109,7 +109,7 @@ Notes and variations:
 - **Accelerator.** Pass `accelerator="gpu"` or `"cpu"` explicitly to override auto-detection. Add `limit_test_batches=…` for a quick smoke test.
 - **Precision.** The module is built in the dtype its weights were saved in. Use `precision="64-true"` for a float64 run if you also want Lightning to cast the batches.
 - **Logging to disk.** Swap `logger=False` for `lightning.pytorch.loggers.CSVLogger("eval_logs")` to get a `metrics.csv`.
-- **Fragment-aware models.** Models that need `fragment_index` (fragment interaction, SIMURGH Simplified's fragment line) work here because `GOALDataModule` attaches fragment labels from the saved `data.compute_fragment_index` settings.
+- **Fragment-aware models.** Models that read `fragment_index` (SIMURGH's fragment energies) get it here because `GOALDataModule` attaches fragment labels from the saved `data.compute_fragment_index` settings.
 
 ### Per-structure errors and parity plots
 
@@ -151,7 +151,7 @@ The calculator uses the same weights as the test loop (EMA when the checkpoint h
 ### Minimal invocation
 
 ```bash
-pixi run -e cuda goal-eval ckpt_path=logs/simurgh_legacy_gmd26/runs/<run>/checkpoints
+pixi run -e cuda goal-eval ckpt_path=logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints
 ```
 
 The default config is [`src/goal/configs/ml/eval.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/eval.yaml):
@@ -170,7 +170,7 @@ The default config is [`src/goal/configs/ml/eval.yaml`](https://github.com/Nouro
 ### More invocations
 
 ```bash
-CKPT_DIR=logs/simurgh_legacy_gmd26/runs/<run>/checkpoints
+CKPT_DIR=logs/simurgh_dev_gmd26_FD/runs/<run>/checkpoints
 
 # last instead of best, on the GPU, metrics to JSON
 pixi run -e cuda goal-eval ckpt_path=$CKPT_DIR checkpoint=last trainer.accelerator=gpu output_file=eval/last.json
@@ -182,7 +182,7 @@ pixi run -e cuda goal-eval ckpt_path=$CKPT_DIR '+data.test_paths=[data/ood_test.
 pixi run -e cuda goal-eval "ckpt_path='$CKPT_DIR/best_val_forces_forces_mae=0.0052_epoch=1440.ckpt'"
 
 # an experiment's whole data/trainer/logger sections instead of eval.yaml
-pixi run -e cuda goal-eval --config-name simurgh_legacy_gmd26 ckpt_path=$CKPT_DIR
+pixi run -e cuda goal-eval --config-name simurgh_dev_gmd26_FD ckpt_path=$CKPT_DIR
 ```
 
 With an experiment config, its `trainer:` block (with `_target_`) and any `logger:` entries are used as they are; the model still comes from the checkpoint, so the experiment config only has to agree on the data. Strategy and devices come from the `trainer` block, so `trainer.devices=4 trainer.strategy=ddp` runs a distributed evaluation, as during training.

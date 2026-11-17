@@ -300,7 +300,7 @@ def build_goal_module(cfg: typing.Any) -> typing.Any:
     import goal.ml.nn.heads  # noqa: F401
     import goal.ml.nn.models  # noqa: F401
 
-    try:  # adapter backbones (e.g. simurgh_lora) register here
+    try:  # adapter backbones (e.g. mace-medium, uma-small) register here
         import goal.ml.adapters  # noqa: F401
     except ImportError:  # an older frozen snapshot without them
         pass

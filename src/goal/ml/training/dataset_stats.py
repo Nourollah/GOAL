@@ -9,12 +9,11 @@ statistic             backbone argument(s)
 ``elements``          ``elements``
 ``atomic_energies``   ``atomic_energies.values`` (and ``mode`` → ``"dataset"``)
 ``scale``             ``scale``
-``avg_num_neighbors`` ``avg_num_neighbors`` or ``dressing_kwargs.avg_num_neighbors``
-``pair_counts``       ``artisan.pair_counts`` or ``artisan_config.pair_counts``
+``avg_num_neighbors`` ``avg_num_neighbors``
 ``atom_statistics``   ``atom_statistics`` (requested by the backbone's ``atom_statistics``)
 ===================== ==============================================================
 
-They shape the model (element tables, artisan routing) and fix its
+They shape the model (element tables) and fix its
 normalisation, so a checkpoint is only meaningful together with the values
 it was trained with.  This module
 
@@ -55,8 +54,7 @@ STAT_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
     "elements": (("elements",),),
     "atomic_energies": (("atomic_energies", "values"), ("atomic_energies", "mode")),
     "scale": (("scale",),),
-    "avg_num_neighbors": (("avg_num_neighbors",), ("dressing_kwargs", "avg_num_neighbors")),
-    "pair_counts": (("artisan", "pair_counts"), ("artisan_config", "pair_counts")),
+    "avg_num_neighbors": (("avg_num_neighbors",),),
     "atom_statistics": (("atom_statistics",),),
 }
 
@@ -158,7 +156,7 @@ def normalise_recompute(raw: typing.Any) -> set[str]:
 def collect(backbone: Mapping[str, typing.Any]) -> dict[str, typing.Any]:
     """Return the dataset statistics present in a backbone config.
 
-    Keys are dotted argument paths (``"dressing_kwargs.avg_num_neighbors"``);
+    Keys are dotted argument paths (``"atomic_energies.values"``);
     only non-null values are returned.  ``atomic_energies.mode`` is included
     only together with its ``values``, since a mode alone is a user setting,
     not a derived statistic.
@@ -356,7 +354,7 @@ BUFFER_STATS: frozenset[str] = frozenset({"scale", "atomic_energies"})
 
 #: Statistics that decide parameter shapes or which modules exist.  A model
 #: rebuilt with different values cannot load the checkpoint's weights.
-STRUCTURAL_STATS: frozenset[str] = frozenset({"elements", "pair_counts"})
+STRUCTURAL_STATS: frozenset[str] = frozenset({"elements"})
 
 
 def uncovered_elements(model_elements: typing.Any, dataset: typing.Any) -> list[int]:

@@ -223,49 +223,6 @@ def compute_unique_elements(
     return sorted(observed)
 
 
-def compute_pair_counts(
-    dataset: typing.Iterable[typing.Any],
-) -> dict[tuple[int, int], int]:
-    """Count directed edges per unordered element pair over the training set.
-
-    For each graph, walks every directed edge ``(i, j)`` and increments the
-    counter for the canonical pair ``(min(Z_i, Z_j), max(Z_i, Z_j))``.
-    Bidirectional edges are counted twice (once as ``i→j`` and once as
-    ``j→i``) which matches the convention used in :class:`SimurghArtisanBank`
-    (each undirected pair contributes exactly two directed edges).
-
-    Used by :class:`SimurghArtisanBank` to decide whether a pair is common enough
-    to warrant a dedicated :class:`PotentialArtisan` or should be routed to
-    the shared :class:`RarePotentialArtisan`.
-
-    Parameters
-    ----------
-    dataset : iterable of AtomicGraph
-        Training set — graphs with ``atomic_numbers`` and ``edge_index``.
-
-    Returns
-    -------
-    dict
-        ``{(Z_lo, Z_hi): edge_count}`` covering every pair observed.
-        Pairs not present in the dataset are absent from the dict
-        (caller should treat missing pairs as count = 0).
-    """
-    counts: dict[tuple[int, int], int] = {}
-    for graph in dataset:
-        edge_index: typing.Any = getattr(graph, "edge_index", None)
-        atomic_numbers: typing.Any = getattr(graph, "atomic_numbers", None)
-        if edge_index is None or atomic_numbers is None:
-            continue
-        z: list[int] = atomic_numbers.to(torch.long).tolist()
-        src_list: list[int] = edge_index[0].tolist()
-        dst_list: list[int] = edge_index[1].tolist()
-        for i, j in zip(src_list, dst_list):
-            lo, hi = (min(z[i], z[j]), max(z[i], z[j]))
-            key: tuple[int, int] = (lo, hi)
-            counts[key] = counts.get(key, 0) + 1
-    return counts
-
-
 def compute_atom_statistics(
     dataset: typing.Iterable[typing.Any],
     descriptors: typing.Mapping[str, typing.Callable[[typing.Any], torch.Tensor]],

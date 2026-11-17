@@ -11,16 +11,16 @@ Supports three modes, selected automatically from the config:
 
 Usage::
 
-    # Default: the shipped ARACE search (src/goal/configs/ml/simurgh_legacy_gmd26_hpo.yaml)
-    goal-tune
-
     # Any experiment + a generic preset, merged at the top level.  The
     # presets live in goal/configs/hparams_search/, one level above the
     # experiment configs, so put goal/configs on the search path (like the
-    # debug presets of goal-train):
-    goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 +hparams_search@_global_=basic
-    goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 +hparams_search@_global_=ray_tune
-    goal-tune --config-dir src/goal/configs --config-name simurgh_legacy_gmd26 +hparams_search@_global_=wandb_sweep
+    # debug presets of goal-train).  The default experiment is
+    # simurgh_dev_gmd26_FD:
+    goal-tune --config-dir src/goal/configs +hparams_search@_global_=basic
+    goal-tune --config-dir src/goal/configs --config-name simurgh_dev_gmd26_FD +hparams_search@_global_=ray_tune
+    goal-tune --config-dir src/goal/configs --config-name simurgh_dev_gmd26_FD +hparams_search@_global_=wandb_sweep
+
+    # An experiment config with its own ``hparams_search`` section runs as is.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def _ray_train_fn(config: dict[str, typing.Any], base_cfg: DictConfig) -> None:
     report(val_metrics)
 
 
-@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_legacy_gmd26_hpo")
+@hydra.main(version_base=None, config_path=CONFIGS_ML_DIR, config_name="simurgh_dev_gmd26_FD")
 def tune(cfg: DictConfig) -> None:
     """GOAL hyperparameter tuning entry point.
 
@@ -106,8 +106,8 @@ def tune(cfg: DictConfig) -> None:
     hp_cfg: DictConfig | None = cfg.get("hparams_search")
     if hp_cfg is None:
         raise ValueError(
-            "No hparams_search section in this config. Either run the shipped "
-            "search (`goal-tune`, config simurgh_legacy_gmd26_hpo) or attach a preset:\n"
+            "No hparams_search section in this config. Add one to the experiment "
+            "config or attach a preset:\n"
             "  goal-tune --config-dir src/goal/configs --config-name <experiment> "
             "+hparams_search@_global_=basic      # Lightning Tuner\n"
             "  goal-tune --config-dir src/goal/configs --config-name <experiment> "

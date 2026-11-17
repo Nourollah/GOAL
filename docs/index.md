@@ -9,9 +9,9 @@
 | 🧠 | **`goal.ml`**: training & fine-tuning potentials | [goal.ml overview](ml/index.md) | *How do I train SIMURGH on my data? Which model should I use? How do I fine-tune MACE? How do I scale to 8 GPUs?* |
 | ⚛️ | **`goal.md`**: molecular dynamics | [goal.md overview](md/index.md) | *How do I run Langevin MD with my trained model? How do I drive CP2K or VASP? What is multiple-time-step MD with online learning?* |
 
-| 🚀 | **Integrations**: GPU fast paths & tooling | [Integrations overview](integrations/nvalchemi_overview.md) | *Can I run batched MD on an NVIDIA GPU? How do I LoRA-fine-tune a SIMURGH checkpoint? How do I store data in Zarr? What happens on AMD or Apple hardware?* |
+| 🚀 | **Integrations**: GPU fast paths & tooling | [Integrations overview](integrations/nvalchemi_overview.md) | *Can I run batched MD on an NVIDIA GPU? How do I store data in Zarr? What happens on AMD or Apple hardware?* |
 
-The integrations are: [LoRA fine-tuning of SIMURGH](integrations/lora_finetune.md), the [nvalchemi model wrapper](integrations/nvalchemi_wrapper.md), [neighbour-list backends](integrations/neighbor_list.md), [batched simulation](integrations/batched_simulation.md), [Zarr data](integrations/zarr_data.md) and the [roadmap stubs](integrations/roadmap_stubs.md). Every NVIDIA-specific path falls back to a portable one on AMD, Apple and CPU.
+The integrations are: the [nvalchemi model wrapper](integrations/nvalchemi_wrapper.md), [neighbour-list backends](integrations/neighbor_list.md), [batched simulation](integrations/batched_simulation.md), [Zarr data](integrations/zarr_data.md) and the [roadmap stubs](integrations/roadmap_stubs.md). Every NVIDIA-specific path falls back to a portable one on AMD, Apple and CPU.
 
 Modules are deliberately decoupled. For example, `goal.md` never changes `goal.ml`; it loads trained models through a small bridge ([Bridge to goal.ml](md/guide/ml-bridge.md)). Each module can be installed and used on its own.
 
@@ -40,7 +40,7 @@ The tour uses the pixi environments from a clone (`git clone https://github.com/
 # 1. Install the ML + MD modules for an NVIDIA GPU (see Installation for cpu-full / rocm-full)
 pixi install -e cuda-full
 
-# 2. Train the default model: SIMURGH ARACE on GMD-26
+# 2. Train the default model: SIMURGH on GMD-26 FragmentDuplication
 pixi run -e cuda-full goal-train
 
 # 3. Run MD with the trained model (library mode)

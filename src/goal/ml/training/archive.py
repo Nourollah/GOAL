@@ -161,21 +161,8 @@ def gather_model_metadata(model: typing.Any) -> dict[str, typing.Any]:
                 str(int(z)): float(table[int(z)]) for z in elements if int(z) < table.numel()
             }
 
-    pair_freq: typing.Any = getattr(model, "pair_frequencies", None)
-    if pair_freq is not None:
-        with contextlib.suppress(Exception):
-            meta["pair_frequencies"] = {str(k): float(v) for k, v in dict(pair_freq).items()}
-
-    bank: typing.Any = getattr(model, "artisan_bank", None)
-    if bank is not None:
-        dedicated: typing.Any = getattr(bank, "_dedicated_pairs", None)
-        if dedicated is not None:
-            meta["dedicated_pairs"] = [[int(a), int(b)] for a, b in dedicated]
-        meta["rare_artisan"] = getattr(bank, "rare_artisan_module", None) is not None
-
-    dressing: typing.Any = getattr(model, "dressing", None)
-    avg_nn: typing.Any = getattr(dressing, "_avg_num_neighbors", None)
-    if avg_nn is not None:
+    avg_nn: typing.Any = getattr(model, "avg_num_neighbors", None)
+    if isinstance(avg_nn, (int, float)):
         meta["avg_num_neighbors"] = float(avg_nn)
 
     scale: typing.Any = getattr(model, "scale", None)

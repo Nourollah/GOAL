@@ -58,13 +58,13 @@ class TestNormaliseRecompute:
 
 def _backbone() -> dict:
     return {
-        "name": "simurgh_legacy_arace",
+        "name": "simurgh_dev",
         "elements": [1, 6, 8],
         "scale": 0.25,
         "avg_num_neighbors": 17.5,
         "atomic_energies": {"mode": "dataset", "values": {1: -13.6, 6: -1028.5, 8: -2041.1}},
-        "artisan": {"rare_artisan": {"enabled": True}, "pair_counts": {"1_6": 10, "6_8": 3}},
-        "num_rounds": 2,
+        "atom_statistics": {"pan_rho": {"mean": 3.0, "std": 1.5}},
+        "num_interactions": 2,
     }
 
 
@@ -77,16 +77,12 @@ class TestCollectApply:
             "avg_num_neighbors": 17.5,
             "atomic_energies.values": {1: -13.6, 6: -1028.5, 8: -2041.1},
             "atomic_energies.mode": "dataset",
-            "artisan.pair_counts": {"1_6": 10, "6_8": 3},
+            "atom_statistics": {"pan_rho": {"mean": 3.0, "std": 1.5}},
         }
 
     def test_mode_alone_is_a_user_setting_not_a_statistic(self) -> None:
         found = ds.collect({"atomic_energies": {"mode": "learned", "values": None}})
         assert found == {}
-
-    def test_dressing_kwargs_location_is_collected(self) -> None:
-        found = ds.collect({"dressing_kwargs": {"avg_num_neighbors": 9.0, "lmax": 2}})
-        assert found == {"dressing_kwargs.avg_num_neighbors": 9.0}
 
     def test_apply_round_trips_into_a_fresh_backbone(self) -> None:
         fresh = {
@@ -96,7 +92,7 @@ class TestCollectApply:
             "atomic_energies": OmegaConf.create(
                 {"mode": "learned", "values": None, "trainable": True}
             ),
-            "artisan": OmegaConf.create({"rare_artisan": {"enabled": True}, "pair_counts": None}),
+            "atom_statistics": None,
         }
         applied = ds.apply(fresh, ds.collect(_backbone()), skip=set())
         assert set(applied) == {
@@ -104,7 +100,7 @@ class TestCollectApply:
             "scale",
             "avg_num_neighbors",
             "atomic_energies",
-            "pair_counts",
+            "atom_statistics",
         }
         assert fresh["elements"] == [1, 6, 8]
         assert fresh["atomic_energies"] == {
@@ -112,20 +108,18 @@ class TestCollectApply:
             "values": {1: -13.6, 6: -1028.5, 8: -2041.1},
             "trainable": True,  # user settings next to the statistic are kept
         }
-        assert fresh["artisan"]["pair_counts"] == {"1_6": 10, "6_8": 3}
-        assert fresh["artisan"]["rare_artisan"] == {"enabled": True}
+        assert fresh["atom_statistics"] == {"pan_rho": {"mean": 3.0, "std": 1.5}}
 
     def test_apply_honours_skip(self) -> None:
         fresh = {"scale": None, "avg_num_neighbors": None, "elements": None}
-        applied = ds.apply(fresh, ds.collect(_backbone()), skip={"scale", "elements"})
+        skip = {"scale", "elements", "atom_statistics"}
+        applied = ds.apply(fresh, ds.collect(_backbone()), skip=skip)
         assert applied == ["avg_num_neighbors"]
         assert fresh["scale"] is None and fresh["elements"] is None
 
     def test_apply_never_creates_a_missing_sub_config(self) -> None:
-        fresh = {"scale": None}  # no dressing_kwargs / artisan on this backbone
-        ds.apply(
-            fresh, {"dressing_kwargs.avg_num_neighbors": 9.0, "artisan.pair_counts": {}}, set()
-        )
+        fresh = {"scale": None}  # no atomic_energies block on this backbone
+        ds.apply(fresh, {"atomic_energies.values": {1: -13.6}}, set())
         assert fresh == {"scale": None}
 
 
@@ -314,14 +308,16 @@ def _goal_train(run_dir: Path, xyz: Path, *extra: str) -> subprocess.CompletedPr
         "trainer.accelerator=cpu",
         "trainer.devices=1",
         "data.dataset_type=xyz",
-        "data.train_dir=null",
-        "data.val_dir=null",
-        "data.test_dir=null",
+        "~data.task",
         f"data.root={xyz}",
         "data.compute_fragment_index=false",
         "data.batch_size=8",
         "data.monitor_test_during_training=false",
-        "~model.backbone.fragment_interaction",
+        "model.backbone.mfc.enabled=false",
+        "model.backbone.num_channels=8",
+        "model.backbone.message_irreps=8x0e+8x1o+8x2e",
+        "model.backbone.embedding_dim=8",
+        "model.backbone.radial_mlp=[16,16]",
         "model.backbone.atomic_energies.mode=dataset",
         "model.backbone.atomic_energies.values=null",
         "logger=null",
@@ -352,7 +348,7 @@ def test_extension_reuses_the_recorded_statistics(tmp_path: Path) -> None:
     assert {"elements", "scale", "avg_num_neighbors", "atomic_energies.values"} <= set(recorded)
 
     same = _goal_train(
-        tmp_path / "run2", hco, f"resume.from={tmp_path / 'run1'}", "trainer.max_epochs=3"
+        tmp_path / "run2", hco, f"+resume.from={tmp_path / 'run1'}", "trainer.max_epochs=3"
     )
     assert same.returncode == 0, same.stdout[-3000:] + same.stderr[-3000:]
     assert "[stats] reusing elements, atomic_energies, scale, avg_num_neighbors" in same.stdout
@@ -365,7 +361,7 @@ def test_extension_reuses_the_recorded_statistics(tmp_path: Path) -> None:
     changed = _goal_train(
         tmp_path / "run3",
         more,
-        f"resume.from={tmp_path / 'run1'}",
+        f"+resume.from={tmp_path / 'run1'}",
         "trainer.max_epochs=3",
         "dataset_stats.recompute=[scale]",
     )

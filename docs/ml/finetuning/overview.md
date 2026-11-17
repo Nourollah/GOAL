@@ -12,12 +12,11 @@ unchanged.
 | MACE (MACE-MP-0, local `.model` files) | in-process, trainable | `mace_finetune` via `goal-train --config-name finetune/mace` | [`src/goal/configs/ml/finetune/mace.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/mace.yaml) |
 | UMA / FairChem | in-process, **needs a raw-module load path** in your fairchem version | `uma_finetune` via `goal-train --config-name finetune/uma` | [`src/goal/configs/ml/finetune/uma.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/uma.yaml) |
 | UPET / PET | metatrain subprocess (`mtt train`) | `goal-finetune-upet` | command-line flags |
-| **SIMURGH** (your own trained checkpoint) | in-process, LoRA on the artisans | `simurgh_lora` via `goal-train --config-name finetune/simurgh_legacy_lora` (also `goal-finetune`'s default) | [`src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml`](https://github.com/Nourollah/GOAL/blob/main/src/goal/configs/ml/finetune/simurgh_legacy_lora.yaml) |
 
-Per-model pages: [MACE](mace.md), [UMA / FairChem](uma.md), [UPET / PET](upet.md), [SIMURGH LoRA](../../integrations/lora_finetune.md).
+Per-model pages: [MACE](mace.md), [UMA / FairChem](uma.md), [UPET / PET](upet.md). To continue training a SIMURGH checkpoint on new data, resume or extend it with `goal-train` (see [Resuming & extending](../training/resuming.md)).
 
 > [!NOTE]
-> The foundation-model wrappers choose their strategy with `model.backbone.strategy` (`head_only` / `full` / `lora`). SIMURGH LoRA is a backbone of its own, `simurgh_lora`, with LoRA settings (`rank`, `alpha`, `target_modules`, …) under `model.backbone`. Neither uses the top-level `strategy:` key, which is the distributed-training strategy (DDP, FSDP, DeepSpeed).
+> The foundation-model wrappers choose their strategy with `model.backbone.strategy` (`head_only` / `full` / `lora`). This is not the top-level `strategy:` key, which is the distributed-training strategy (DDP, FSDP, DeepSpeed).
 
 ## How the in-process path works
 
@@ -193,9 +192,9 @@ built through `from_pretrained(variant)` / `from_local(path)`. See
 >
 > For anything that trains, use `mace_finetune` / `uma_finetune`.
 
-The legacy `goal-finetune` entry point
+The older `goal-finetune` entry point
 ([cli/finetune.py](https://github.com/Nourollah/GOAL/blob/main/src/goal/ml/cli/finetune.py))
 was built around these adapters (`backbone.pretrained` / `variant` /
-`local_checkpoint`). It looks for `src/goal/configs/train.yaml`, which no
-longer exists, and it requires a `model.head`. Use
-`goal-train --config-name finetune/<model>` instead.
+`local_checkpoint`); its default config is `finetune/mace`. Use
+`goal-train --config-name finetune/<model>` for the full training path
+(checkpoint manager, archives, resume).
