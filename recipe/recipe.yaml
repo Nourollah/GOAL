@@ -66,6 +66,7 @@ outputs:
         - ase >=3.23
         - rdkit >=2026.03.3,<2027
         - python-lmdb
+        - huggingface_hub >=0.30
         - wandb
         - rich >=13
     tests:

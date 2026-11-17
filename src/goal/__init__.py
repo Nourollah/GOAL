@@ -34,6 +34,7 @@ if _sys.version_info >= (3, 14):
     _orig_check_help = _argparse._ActionsContainer._check_help
 
     def _patched_check_help(self, action):  # type: ignore[no-redef]
+        """Run argparse's help check, tolerating lazy (non-str) help objects."""
         try:
             _orig_check_help(self, action)
         except (TypeError, ValueError):
@@ -43,3 +44,9 @@ if _sys.version_info >= (3, 14):
             pass
 
     _argparse._ActionsContainer._check_help = _patched_check_help
+
+    # torch deprecates ``torch.jit.script``/``interface`` on Python 3.14; the calls come from
+    # torch_geometric and e3nn at import time, not from GOAL.  Drop the noise.
+    import warnings as _warnings
+
+    _warnings.filterwarnings("ignore", message=r"`torch\.jit\.", category=FutureWarning)
